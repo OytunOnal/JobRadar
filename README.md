@@ -1,5 +1,7 @@
 # JobRadar
 
+[![CI](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml)
+
 A personal job-discovery and application-tracking tool. JobRadar pulls listings
 from many sources, scores each one against **your** CV with an LLM, and shows the
 best matches on a dashboard — so you stop tab-hopping across a dozen job boards
@@ -76,6 +78,7 @@ Get a free/cheap API key from whichever provider you prefer:
 | `npm run fit:batch` | LLM fit-score the **whole board** in one Anthropic batch (50% cheaper, async). Resume with `npm run fit:batch collect <id>`. |
 | `npm run dev` | Start the dashboard. |
 | `npm run db:studio` | Open Prisma Studio to inspect the DB. |
+| `npm test` | Run the unit tests (scoring + LLM-output parsing). |
 
 On the dashboard: filter by track/status, sort by fit, and per job hit
 **◎ Analyze fit** (instant LLM scoring) or **✍ Draft letter**.

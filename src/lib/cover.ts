@@ -25,7 +25,7 @@ export async function draftCoverLetter(job: JobForCover): Promise<string> {
     "- Output only the letter body, no subject line, no placeholders like [Company].",
   ].join("\n");
 
-  const user = [
+  const userPrompt = [
     `CV CONTEXT:\n${CV_CONTEXT}`,
     `\nJOB POSTING:\nTitle: ${job.title}\nCompany: ${job.company}\nLocation: ${job.location ?? "n/a"}`,
     `Description (truncated):\n${job.description.slice(0, 2500)}`,
@@ -35,7 +35,7 @@ export async function draftCoverLetter(job: JobForCover): Promise<string> {
   const out = await chat(
     [
       { role: "system", content: system },
-      { role: "user", content: user },
+      { role: "user", content: userPrompt },
     ],
     { temperature: 0.6, maxTokens: 700 },
   );

@@ -10,6 +10,7 @@
     "start": "next start",
     "ingest": "tsx --env-file=.env scripts/ingest.ts",
     "fit:batch": "tsx --env-file=.env scripts/fit-batch.ts",
+    "test": "node --import tsx --test tests/score.test.ts tests/fit.test.ts",
     "db:push": "prisma db push",
     "db:studio": "prisma studio"
   },

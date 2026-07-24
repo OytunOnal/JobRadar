@@ -19,9 +19,11 @@ export const jsearch: Source = {
     const seen = new Set<string>();
     for (const q of QUERIES) {
       try {
+        // Note: the current API version serves /search-v2 (the old /search 404s)
+        // and nests results under data.jobs.
         const url =
-          `https://jsearch.p.rapidapi.com/search?query=${encodeURIComponent(q)}` +
-          `&page=1&num_pages=1&date_posted=week`;
+          `https://jsearch.p.rapidapi.com/search-v2?query=${encodeURIComponent(q)}` +
+          `&date_posted=week`;
         const res = await fetch(url, {
           headers: {
             "X-RapidAPI-Key": key,
@@ -30,7 +32,7 @@ export const jsearch: Source = {
         });
         if (!res.ok) continue;
         const data = await res.json();
-        for (const j of data.data ?? []) {
+        for (const j of data.data?.jobs ?? []) {
           const extId = String(j.job_id);
           if (seen.has(extId)) continue;
           seen.add(extId);

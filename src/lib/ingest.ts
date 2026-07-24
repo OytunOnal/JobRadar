@@ -7,6 +7,8 @@ import { remoteok } from "./sources/remoteok";
 import { jobicy } from "./sources/jobicy";
 import { himalayas } from "./sources/himalayas";
 import { weworkremotely } from "./sources/weworkremotely";
+import { adzuna } from "./sources/adzuna";
+import { jsearch } from "./sources/jsearch";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -23,6 +25,8 @@ const aggregators: Source[] = [
   jobicy,
   himalayas,
   weworkremotely,
+  adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
+  jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
 ];
 
 // Company ATS feeds FIRST so that when the same role also shows up on an

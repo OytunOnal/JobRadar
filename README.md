@@ -15,8 +15,10 @@ CV and personal data on your machine (never committed).
 ## What it does
 
 - **Aggregates** jobs from remote boards (Arbeitnow, Remotive, RemoteOK, Jobicy,
-  Himalayas, WeWorkRemotely) **and directly from company ATS boards** (Greenhouse,
-  Lever, Ashby, SmartRecruiters) for a curated list of companies you care about.
+  Himalayas, WeWorkRemotely), **directly from company ATS boards** (Greenhouse,
+  Lever, Ashby, SmartRecruiters) for a curated company list, and — with free API
+  keys — from **Adzuna and JSearch/Google-for-Jobs**, which carry LinkedIn,
+  Indeed, and Glassdoor listings.
 - **Deduplicates** the same role coming in from multiple sources.
 - **Scores** every job two ways:
   1. Fast, free keyword scoring (title-first) that assigns a track and filters noise.
@@ -103,8 +105,6 @@ file returning a normalized job shape.
 
 ## Roadmap
 
-- More job sources (aggregator APIs that index LinkedIn/Indeed/Glassdoor via
-  Google-for-Jobs; game-specific boards).
 - Salary parsing to filter out low bands.
 - Scheduled ingest + digest notifications.
 - Optional Postgres/Supabase + deploy.

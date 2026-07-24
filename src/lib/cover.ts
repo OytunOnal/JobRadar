@@ -1,5 +1,6 @@
 import { chat, llmEnabled } from "./llm";
 import { CV_CONTEXT } from "./cv";
+import { user } from "../../config/user";
 
 export interface JobForCover {
   title: string;
@@ -14,13 +15,13 @@ export async function draftCoverLetter(job: JobForCover): Promise<string> {
   }
 
   const system = [
-    "You write short, grounded cover letters for a software engineer named Oytun Onal.",
+    `You write short, grounded cover letters for a software engineer named ${user.name}.`,
     "Rules:",
     "- Use ONLY facts from the provided CV context. Never invent employers, metrics, or skills.",
     "- Plain, human tone. No buzzwords, no 'I am thrilled', no exaggeration.",
-    "- 180-260 words. Open by connecting a specific point in the job to Oytun's real experience.",
+    "- 180-260 words. Open by connecting a specific point in the job to the candidate's real experience.",
     "- Pick the 2-3 most relevant experiences for THIS job; ignore the rest.",
-    "- End with one plain sentence of interest. Sign off as 'Oytun Onal'.",
+    `- End with one plain sentence of interest. Sign off as '${user.name}'.`,
     "- Output only the letter body, no subject line, no placeholders like [Company].",
   ].join("\n");
 

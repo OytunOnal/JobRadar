@@ -1,5 +1,6 @@
 import { chat, llmEnabled } from "./llm";
 import { CV_CONTEXT } from "./cv";
+import { user } from "../../config/user";
 
 export interface FitResult {
   fitScore: number; // 0-100
@@ -18,7 +19,7 @@ export interface JobForFit {
 // path (batch.ts) so both score jobs identically.
 export function fitSystemPrompt(): string {
   return [
-    "You assess how well a candidate (Oytun Onal) fits a specific job.",
+    `You assess how well a candidate (${user.name}) fits a specific job.`,
     "Use ONLY the CV context and the job description — do not invent qualifications.",
     "Be honest and specific: name the concrete strengths AND the real gaps.",
     "Return STRICT JSON only, no prose around it, in this exact shape:",

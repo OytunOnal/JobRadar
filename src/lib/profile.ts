@@ -16,7 +16,7 @@ export const profile = {
   // Kept as EUR/year for reference; salary parsing is best-effort only.
   salaryFloorEURYear: 30000,
 
-  // Tracks map a job to one of Oytun's CV variants. Scoring is TITLE-FIRST:
+  // Tracks map a job to one of your CV variants / target roles. Scoring is TITLE-FIRST:
   // a track only wins strongly if one of its `titleKeywords` appears in the job
   // title. `bodyKeywords` add supporting weight from the description.
   // Tracks are ordered specific → generic; on a tie the earlier track wins.

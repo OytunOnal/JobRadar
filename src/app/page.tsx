@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { profile } from "@/lib/profile";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -46,7 +47,7 @@ export default async function Page({
       <header className="top">
         <div>
           <h1>JobRadar</h1>
-          <div className="sub">Oytun&apos;s job discovery &amp; application tracker</div>
+          <div className="sub">{profile.name} — job discovery &amp; application tracker</div>
         </div>
         <form action={triggerIngest} className="ingest-bar">
           <button className="btn primary" type="submit">↻ Fetch new jobs</button>

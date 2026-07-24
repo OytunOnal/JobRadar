@@ -17,7 +17,7 @@ export interface Company {
 }
 
 export const companies: Company[] = [
-  // --- Casual / mobile games (Oytun's core niche, incl. Turkish studios) ---
+  // --- Casual / mobile games (example niche: incl. Turkish studios) ---
   { name: "Dream Games", provider: "lever", token: "dreamgames", tags: ["games", "casual", "turkey"] },
   { name: "Peak Games", provider: "greenhouse", token: "peak", tags: ["games", "casual", "turkey"] },
   { name: "Good Job Games", provider: "greenhouse", token: "goodjobgames", tags: ["games", "casual", "turkey"] },

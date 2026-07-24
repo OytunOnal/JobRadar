@@ -10,6 +10,8 @@ and only look at roles that actually fit you.
 It runs locally, uses **your own** API keys (bring-your-own-key), and keeps your
 CV and personal data on your machine (never committed).
 
+![JobRadar dashboard — jobs ranked by LLM fit, with verdict gauges, filters, and per-job cover-letter drafts](docs/screenshot.png)
+
 > Built as a personal tool + portfolio project. Not affiliated with any job board.
 
 ## What it does

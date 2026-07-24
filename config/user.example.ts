@@ -21,4 +21,22 @@ Skills: <comma-separated list of your real skills>.
 
 Voice: <how you want cover letters to sound — e.g. honest and grounded, not boastful>.
 `.trim(),
+
+  // ── Optional: retarget the radar ──────────────────────────────────────────
+  // Uncomment to replace the default tracks (game-dev/AI/full-stack flavored)
+  // with your own target roles. Track keys become the dashboard filter chips.
+  //
+  // tracks: [
+  //   {
+  //     key: "data",
+  //     label: "Data Engineering",
+  //     titleKeywords: ["data engineer", "analytics engineer", "etl"],
+  //     bodyKeywords: ["airflow", "dbt", "spark", "snowflake", "python", "sql"],
+  //   },
+  // ],
+  //
+  // Uncomment to change which locations survive the region filter (a job must
+  // be remote OR match one of these strings in its location).
+  //
+  // acceptRegions: ["remote", "europe", "netherlands", "amsterdam"],
 };

@@ -54,9 +54,9 @@ cp .env.example .env         # then edit: add ANTHROPIC_API_KEY (and/or others)
 # 2. Your profile — name, location, CV. Kept private (gitignored).
 cp config/user.example.ts config/user.ts   # then fill in your details
 
-# 3. (optional) Retarget the search to your field — edit src/lib/profile.ts
-#    (tracks, keywords, accepted regions) and src/lib/sources/companies.ts
-#    (companies to watch via their ATS).
+# 3. (optional) Retarget the search to your field — add `tracks` and
+#    `acceptRegions` overrides in config/user.ts (see the commented examples),
+#    and edit src/lib/sources/companies.ts (companies to watch via their ATS).
 
 # 4. Database (local SQLite)
 npx prisma db push
@@ -85,8 +85,11 @@ On the dashboard: filter by track/status, sort by fit, and per job hit
 
 ## Configuring for your search
 
-- **`src/lib/profile.ts`** — tracks, title/body keywords, accepted regions,
-  and the disqualifier lists. This is where you retarget the radar.
+- **`config/user.ts`** — your identity + CV, and (optionally) your own `tracks`
+  and `acceptRegions` to fully retarget the radar — see the commented examples
+  in `config/user.example.ts`. Track keys become the dashboard filter chips.
+- **`src/lib/profile.ts`** — the default tracks/keywords and the shared
+  disqualifier lists (non-engineering roles, noise filters).
 - **`src/lib/sources/companies.ts`** — the companies to pull directly from their
   ATS. Add a line per company (find its Greenhouse/Lever/Ashby/SmartRecruiters
   board token).

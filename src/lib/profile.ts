@@ -1,16 +1,28 @@
-// Search profile. Everything scoring/filtering keys off this file — edit the
-// tracks/keywords/regions below to retarget the radar to your own job search.
-// Your identity (name/location) + CV live in config/user.ts (gitignored).
+// Search profile. Scoring/filtering keys off this file. The defaults below are
+// game-dev/AI/full-stack flavored; override `tracks` and `acceptRegions` in your
+// gitignored config/user.ts to retarget the radar without touching tracked code.
 import { user } from "../../config/user";
 
-export type Track = "unity" | "playable" | "ai" | "fullstack" | "other";
+export type Track = string;
+
+export interface TrackDef {
+  key: Track;
+  label: string;
+  titleKeywords: string[];
+  bodyKeywords: string[];
+}
+
+// Optional overrides a user may add to config/user.ts.
+const u = user as typeof user & { tracks?: TrackDef[]; acceptRegions?: string[] };
+
+// A job must look remote OR be in one of these regions to survive the filter.
+const defaultRegions = ["remote", "europe", "emea", "türkiye", "turkey", "turkiye", "izmir", "istanbul", "germany", "berlin", "cyprus", "poland", "lithuania"];
 
 export const profile = {
   name: user.name,
   location: user.location,
 
-  // A job must look remote OR be in one of these regions to survive the filter.
-  acceptRegions: ["remote", "europe", "emea", "türkiye", "turkey", "turkiye", "izmir", "istanbul", "germany", "berlin", "cyprus", "poland", "lithuania"],
+  acceptRegions: u.acceptRegions ?? defaultRegions,
 
   // Hard floor. Postings that clearly pay under this (parsed loosely) get demoted.
   // Kept as EUR/year for reference; salary parsing is best-effort only.
@@ -20,8 +32,8 @@ export const profile = {
   // a track only wins strongly if one of its `titleKeywords` appears in the job
   // title. `bodyKeywords` add supporting weight from the description.
   // Tracks are ordered specific → generic; on a tie the earlier track wins.
-  // Tune each track's title keywords independently here.
-  tracks: [
+  // Override the whole list from config/user.ts (`tracks: [...]`) to retarget.
+  tracks: u.tracks ?? ([
     {
       key: "playable" as Track,
       label: "Playable Ads",
@@ -46,7 +58,7 @@ export const profile = {
       titleKeywords: ["full stack", "fullstack", "full-stack", "backend", "back-end", "frontend", "front-end", "software engineer", "web developer", "node.js"],
       bodyKeywords: ["typescript", "node", "react", "next.js", "postgres", "supabase", "api", "serverless", "docker"],
     },
-  ],
+  ] satisfies TrackDef[]),
 
   // Instant disqualifiers — unrelated fields the broad feeds drag in.
   negative: [

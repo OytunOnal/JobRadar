@@ -4,8 +4,11 @@ import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./action
 
 export const dynamic = "force-dynamic";
 
-const TRACKS = ["all", "playable", "unity", "ai", "fullstack"] as const;
+// Track chips come from the user's configured tracks (config/user.ts override
+// or the defaults in profile.ts).
+const TRACKS = ["all", ...profile.tracks.map((t) => t.key)];
 const VERDICTS = ["all", "strong", "possible", "weak"] as const;
+const LOCS = ["all", "remote", "on-site"] as const;
 const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
 const PAGE_SIZE = 30;
 
@@ -23,12 +26,13 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const track = sp.track ?? "all";
   const status = sp.status ?? "active";
   const verdict = sp.verdict ?? "all";
+  const loc = sp.loc ?? "all";
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
@@ -37,6 +41,8 @@ export default async function Page({
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
   else if (status !== "all") where.status = status;
   if (verdict !== "all") where.fitVerdict = verdict;
+  if (loc === "remote") where.remote = true;
+  else if (loc === "on-site") where.remote = false;
   if (q) where.OR = [{ title: { contains: q } }, { company: { contains: q } }];
 
   const [jobs, filteredCount, statusCounts, verdictCounts] = await Promise.all([
@@ -62,12 +68,13 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "q" | "page", string>>) => {
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, q, page: "", ...over };
+    const merged = { track, status, verdict, loc, q, page: "", ...over };
     if (merged.track !== "all") p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
+    if (merged.loc !== "all") p.set("loc", merged.loc);
     if (merged.q) p.set("q", merged.q);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     const s = p.toString();
@@ -88,6 +95,7 @@ export default async function Page({
           {track !== "all" && <input type="hidden" name="track" value={track} />}
           {status !== "active" && <input type="hidden" name="status" value={status} />}
           {verdict !== "all" && <input type="hidden" name="verdict" value={verdict} />}
+          {loc !== "all" && <input type="hidden" name="loc" value={loc} />}
           <input name="q" defaultValue={q} placeholder="Search title or company" aria-label="Search jobs" />
         </form>
         <form action={triggerIngest}>
@@ -114,6 +122,12 @@ export default async function Page({
           <span className="flabel">fit</span>
           {VERDICTS.map((v) => (
             <a key={v} href={href({ verdict: v })} className={`chip ${verdict === v ? "active" : ""}`}>{v}</a>
+          ))}
+        </div>
+        <div className="fgroup">
+          <span className="flabel">where</span>
+          {LOCS.map((l) => (
+            <a key={l} href={href({ loc: l })} className={`chip ${loc === l ? "active" : ""}`}>{l}</a>
           ))}
         </div>
         <div className="fgroup">
@@ -176,7 +190,7 @@ export default async function Page({
                 <form action={setStatus}>
                   <input type="hidden" name="id" value={j.id} />
                   <input type="hidden" name="status" value="applied" />
-                  <button className="btn primary" type="submit">Mark applied</button>
+                  <button className="btn act" type="submit">Mark applied</button>
                 </form>
               )}
               {j.status !== "interested" && (

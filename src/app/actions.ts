@@ -31,7 +31,8 @@ export async function analyzeFitAction(formData: FormData) {
   const id = String(formData.get("id"));
   const job = await prisma.job.findUnique({ where: { id } });
   if (!job) return;
-  const fit = await analyzeFit(job);
+  // Deliberate per-job check from the dashboard — use the strong model.
+  const fit = await analyzeFit(job, "strong");
   if (!fit) return;
   await prisma.job.update({
     where: { id },

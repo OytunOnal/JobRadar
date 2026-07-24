@@ -53,15 +53,20 @@ export function parseFit(raw: string): FitResult {
   }
 }
 
-// Sync path: score one job now (interactive button / small top-N passes).
-export async function analyzeFit(job: JobForFit): Promise<FitResult | null> {
+// Sync path: score one job now. Bulk callers (ingest auto-fit) use the cheap
+// "fast" tier; the dashboard button passes "strong" — clicking it means you're
+// seriously considering the job, which is worth the better model.
+export async function analyzeFit(
+  job: JobForFit,
+  tier: "fast" | "strong" = "fast",
+): Promise<FitResult | null> {
   if (!llmEnabled()) return null;
   const raw = await chat(
     [
       { role: "system", content: fitSystemPrompt() },
       { role: "user", content: fitUserPrompt(job) },
     ],
-    { temperature: 0.3, maxTokens: 400, tier: "fast" },
+    { temperature: 0.3, maxTokens: 400, tier },
   );
   if (!raw) return null;
   return parseFit(raw);

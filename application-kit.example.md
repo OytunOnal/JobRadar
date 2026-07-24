@@ -1,0 +1,29 @@
+# Application Kit (template)
+
+Copy this to `application-kit.md` (gitignored) and fill in your own answers.
+These are the fields ATS forms ask for repeatedly — having them in one place
+makes applying fast and consistent.
+
+## Identity & contact
+- **Full name:** …
+- **Email:** …
+- **Phone:** …
+- **Location:** …
+- **LinkedIn / GitHub / Portfolio:** …
+
+## Work authorization / location
+- **Remote roles:** e.g. "Based in <city> (<timezone>). Available fully remote."
+- **"Authorized to work in <country>?"** → your honest answer (yes / no — needs sponsorship)
+- **Relocation:** open to it? which regions?
+
+## Availability & salary
+- **Notice period / earliest start:** …
+- **Salary expectation (per region):** …
+
+## Short reusable texts
+- **"Tell us about yourself" (2-3 sentences):** …
+- **"Why do you want to work here?" (template — fill per company):** …
+
+## Attachments
+- **CV:** which variant(s) you keep, and where.
+- **Cover letter:** JobRadar drafts these per job — don't upload a generic one.

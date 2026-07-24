@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  // Stable identity across ingests: source + the source's own id, hashed.
+  dedupeKey   String   @unique
+  source      String
+  externalId  String
+  url         String
+  title       String
+  company     String
+  location    String?
+  remote      Boolean  @default(false)
+  salaryText  String?
+  description String
+
+  // Cross-source identity: normalized title+company, used to collapse the same
+  // role coming in from multiple sources.
+  contentKey  String   @default("")
+
+  // Scoring
+  score       Int      @default(0)
+  track       String?  // unity | playable | ai | fullstack | other
+  scoreReason String?
+  scoredBy    String?  // keyword | llm
+
+  // LLM fit analysis (CV vs job description) — filled on demand.
+  fitScore    Int?
+  fitVerdict  String?  // strong | possible | weak
+  fitComment  String?
+
+  // Application pipeline
+  status      String   @default("new") // new | interested | applied | interview | rejected | offer | ignored
+  coverLetter String?
+  notes       String?
+
+  postedAt    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([score])
+  @@index([contentKey])
+}

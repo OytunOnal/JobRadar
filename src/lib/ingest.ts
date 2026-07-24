@@ -1,0 +1,189 @@
+import { createHash } from "node:crypto";
+import { prisma } from "./db";
+import { scoreJob } from "./score";
+import { arbeitnow } from "./sources/arbeitnow";
+import { remotive } from "./sources/remotive";
+import { remoteok } from "./sources/remoteok";
+import { jobicy } from "./sources/jobicy";
+import { himalayas } from "./sources/himalayas";
+import { weworkremotely } from "./sources/weworkremotely";
+import { companySources } from "./sources/companies";
+import { analyzeFit } from "./fit";
+import { llmEnabled, RateLimitError } from "./llm";
+import type { RawJob, Source } from "./sources/types";
+
+// How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
+// Bounded to keep token cost + rate-limit pressure predictable.
+const AUTO_FIT_TOP_N = 25;
+
+const aggregators: Source[] = [
+  arbeitnow,
+  remotive,
+  remoteok,
+  jobicy,
+  himalayas,
+  weworkremotely,
+];
+
+// Company ATS feeds FIRST so that when the same role also shows up on an
+// aggregator, the direct-apply ATS listing is the one we keep.
+const sources: Source[] = [...companySources(), ...aggregators];
+
+// Minimum keyword score to bother storing. Junk (score 0, disqualified) is dropped.
+const STORE_THRESHOLD = 20;
+
+function dedupeKey(job: RawJob): string {
+  return createHash("sha1")
+    .update(`${job.source}:${job.externalId}`)
+    .digest("hex");
+}
+
+// Normalize a title/company so the same role from different sources collapses:
+// drop parentheticals ("(Remote)", "(m/f/d)"), punctuation, and extra spaces.
+function norm(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\(.*?\)/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function contentKey(job: RawJob): string {
+  return createHash("sha1")
+    .update(`${norm(job.title)}|${norm(job.company)}`)
+    .digest("hex");
+}
+
+export interface IngestReport {
+  fetched: number;
+  scored: number;
+  stored: number;
+  updated: number;
+  duplicates: number;
+  fitAnalyzed: number;
+  perSource: Record<string, number>;
+  errors: string[];
+}
+
+export async function runIngest(): Promise<IngestReport> {
+  const report: IngestReport = {
+    fetched: 0,
+    scored: 0,
+    stored: 0,
+    updated: 0,
+    duplicates: 0,
+    fitAnalyzed: 0,
+    perSource: {},
+    errors: [],
+  };
+
+  const all: RawJob[] = [];
+  for (const src of sources) {
+    try {
+      const jobs = await src.fetch();
+      report.perSource[src.name] = jobs.length;
+      all.push(...jobs);
+    } catch (e: any) {
+      report.errors.push(`${src.name}: ${e.message}`);
+      report.perSource[src.name] = 0;
+    }
+  }
+  report.fetched = all.length;
+
+  // Track content keys seen within this run so the same role from two sources
+  // doesn't get stored twice.
+  const seenContent = new Set<string>();
+
+  for (const job of all) {
+    const s = scoreJob(job);
+    if (s.disqualified || s.score < STORE_THRESHOLD) continue;
+    report.scored++;
+
+    const key = dedupeKey(job);
+    const ck = contentKey(job);
+
+    // Same role already handled this run (from an earlier, higher-priority source).
+    if (seenContent.has(ck)) {
+      report.duplicates++;
+      continue;
+    }
+    seenContent.add(ck);
+
+    const data = {
+      dedupeKey: key,
+      contentKey: ck,
+      source: job.source,
+      externalId: job.externalId,
+      url: job.url,
+      title: job.title,
+      company: job.company,
+      location: job.location ?? null,
+      remote: job.remote,
+      salaryText: job.salaryText ?? null,
+      description: job.description.slice(0, 8000),
+      score: s.score,
+      track: s.track,
+      scoreReason: s.reason,
+      scoredBy: s.scoredBy,
+      postedAt: job.postedAt ?? null,
+    };
+
+    // Exact same-source match, or the same role stored under a different source.
+    const existing =
+      (await prisma.job.findUnique({ where: { dedupeKey: key } })) ??
+      (await prisma.job.findFirst({ where: { contentKey: ck } }));
+
+    if (existing) {
+      // Refresh score/text but never clobber the user's pipeline status/notes.
+      await prisma.job.update({
+        where: { id: existing.id },
+        data: {
+          score: data.score,
+          track: data.track,
+          scoreReason: data.scoreReason,
+          scoredBy: data.scoredBy,
+          salaryText: data.salaryText,
+          contentKey: ck,
+        },
+      });
+      report.updated++;
+    } else {
+      await prisma.job.create({ data });
+      report.stored++;
+    }
+  }
+
+  // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so the
+  // dashboard can rank by real fit, not just keyword score. No-ops without a key.
+  if (llmEnabled()) {
+    const toAnalyze = await prisma.job.findMany({
+      where: { fitScore: null, status: { in: ["new", "interested"] } },
+      orderBy: { score: "desc" },
+      take: AUTO_FIT_TOP_N,
+    });
+    for (const j of toAnalyze) {
+      try {
+        const fit = await analyzeFit(j);
+        if (!fit) continue;
+        await prisma.job.update({
+          where: { id: j.id },
+          data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment },
+        });
+        report.fitAnalyzed++;
+        // Throttle to stay under the provider's per-minute token limit.
+        await new Promise((r) => setTimeout(r, 1500));
+      } catch (e: any) {
+        // Out of daily tokens — stop analyzing, keep everything else. Remaining
+        // jobs stay fitScore:null and get picked up on the next ingest.
+        if (e instanceof RateLimitError) {
+          report.errors.push(`fit stopped: daily token budget reached (${report.fitAnalyzed} analyzed)`);
+          break;
+        }
+        report.errors.push(`fit ${j.id}: ${e.message}`);
+      }
+    }
+  }
+
+  return report;
+}

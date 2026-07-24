@@ -42,11 +42,18 @@ const [, , cmd, argId] = process.argv;
 if (cmd === "collect" && argId) {
   await collect(argId);
 } else {
-  // Fit the whole board (skip dismissed jobs).
+  // Fit every not-yet-scored job (skip dismissed ones). Pass --all to re-score
+  // the whole board (e.g. after editing your CV in config/user.ts).
+  const rescoreAll = process.argv.includes("--all");
   const jobs = await prisma.job.findMany({
-    where: { status: { not: "ignored" } },
+    where: { status: { not: "ignored" }, ...(rescoreAll ? {} : { fitScore: null }) },
     select: { id: true, title: true, company: true, location: true, description: true },
   });
+  if (jobs.length === 0) {
+    console.log("Nothing to score — every job already has a fit. (Use --all to re-score.)");
+    await prisma.$disconnect();
+    process.exit(0);
+  }
   const batchJobs: JobForBatch[] = jobs.map((j) => ({
     id: j.id,
     title: j.title,

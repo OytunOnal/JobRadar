@@ -5,141 +5,211 @@ import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./action
 export const dynamic = "force-dynamic";
 
 const TRACKS = ["all", "playable", "unity", "ai", "fullstack"] as const;
-const STATUSES = ["new", "interested", "applied", "interview", "offer", "rejected"] as const;
+const VERDICTS = ["all", "strong", "possible", "weak"] as const;
+const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
+const PAGE_SIZE = 30;
 
-function scoreClass(n: number) {
-  return n >= 70 ? "high" : n >= 40 ? "mid" : "low";
+function RadarMark() {
+  return (
+    <svg className="radar-mark" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" fill="none" stroke="var(--line-strong)" strokeWidth="1" />
+      <circle cx="12" cy="12" r="5.5" fill="none" stroke="var(--line-strong)" strokeWidth="1" />
+      <line className="radar-sweep" x1="12" y1="12" x2="12" y2="2.5" stroke="var(--accent)" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="16" cy="8.5" r="1.6" fill="var(--strong)" />
+    </svg>
+  );
 }
 
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; q?: string; page?: string }>;
 }) {
   const sp = await searchParams;
   const track = sp.track ?? "all";
   const status = sp.status ?? "active";
+  const verdict = sp.verdict ?? "all";
+  const q = (sp.q ?? "").trim();
+  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   const where: any = {};
   if (track !== "all") where.track = track;
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
   else if (status !== "all") where.status = status;
+  if (verdict !== "all") where.fitVerdict = verdict;
+  if (q) where.OR = [{ title: { contains: q } }, { company: { contains: q } }];
 
-  const jobs = await prisma.job.findMany({
-    where,
-    // LLM-analyzed jobs (real fit) rank first; the rest fall back to keyword score.
-    orderBy: [
-      { fitScore: { sort: "desc", nulls: "last" } },
-      { score: "desc" },
-      { createdAt: "desc" },
-    ],
-    take: 100,
-  });
+  const [jobs, filteredCount, statusCounts, verdictCounts] = await Promise.all([
+    prisma.job.findMany({
+      where,
+      // LLM-analyzed jobs (real fit) rank first; the rest fall back to keyword score.
+      orderBy: [
+        { fitScore: { sort: "desc", nulls: "last" } },
+        { score: "desc" },
+        { createdAt: "desc" },
+      ],
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    prisma.job.count({ where }),
+    prisma.job.groupBy({ by: ["status"], _count: true }),
+    prisma.job.groupBy({ by: ["fitVerdict"], _count: true }),
+  ]);
 
-  const counts = await prisma.job.groupBy({ by: ["status"], _count: true });
-  const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count]));
-  const total = counts.reduce((a, c) => a + c._count, 0);
+  const sc = Object.fromEntries(statusCounts.map((c) => [c.status, c._count]));
+  const vc = Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count]));
+  const total = statusCounts.reduce((a, c) => a + c._count, 0);
+  const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
-  const mkHref = (t: string, s: string) => `/?track=${t}&status=${s}`;
+  // Build hrefs that preserve every other filter (page resets on filter change).
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "q" | "page", string>>) => {
+    const p = new URLSearchParams();
+    const merged = { track, status, verdict, q, page: "", ...over };
+    if (merged.track !== "all") p.set("track", merged.track);
+    if (merged.status !== "active") p.set("status", merged.status);
+    if (merged.verdict !== "all") p.set("verdict", merged.verdict);
+    if (merged.q) p.set("q", merged.q);
+    if (merged.page && merged.page !== "1") p.set("page", merged.page);
+    const s = p.toString();
+    return s ? `/?${s}` : "/";
+  };
 
   return (
     <div className="wrap">
       <header className="top">
-        <div>
-          <h1>JobRadar</h1>
-          <div className="sub">{profile.name} — job discovery &amp; application tracker</div>
+        <div className="brand">
+          <RadarMark />
+          <div>
+            <h1>JOBRADAR</h1>
+            <div className="sub">{profile.name} — job discovery &amp; application tracker</div>
+          </div>
         </div>
-        <form action={triggerIngest} className="ingest-bar">
-          <button className="btn primary" type="submit">↻ Fetch new jobs</button>
+        <form className="search" action="/" method="get">
+          {track !== "all" && <input type="hidden" name="track" value={track} />}
+          {status !== "active" && <input type="hidden" name="status" value={status} />}
+          {verdict !== "all" && <input type="hidden" name="verdict" value={verdict} />}
+          <input name="q" defaultValue={q} placeholder="Search title or company" aria-label="Search jobs" />
+        </form>
+        <form action={triggerIngest}>
+          <button className="btn primary" type="submit">Scan for new jobs</button>
         </form>
       </header>
 
-      <div className="stats">
-        <div className="stat"><div className="n">{total}</div><div className="l">tracked</div></div>
-        <div className="stat"><div className="n">{countMap["new"] ?? 0}</div><div className="l">new</div></div>
-        <div className="stat"><div className="n">{countMap["applied"] ?? 0}</div><div className="l">applied</div></div>
-        <div className="stat"><div className="n">{countMap["interview"] ?? 0}</div><div className="l">interview</div></div>
+      <div className="statstrip">
+        <span><b>{total}</b> tracked</span>
+        <span className="s-strong"><b>{vc["strong"] ?? 0}</b> strong</span>
+        <span className="s-possible"><b>{vc["possible"] ?? 0}</b> possible</span>
+        <span><b>{sc["applied"] ?? 0}</b> applied</span>
+        <span><b>{sc["interview"] ?? 0}</b> interview</span>
       </div>
 
-      <div className="filters">
-        {TRACKS.map((t) => (
-          <a key={t} href={mkHref(t, status)} className={`chip ${track === t ? "active" : ""}`}>
-            {t}
-          </a>
-        ))}
-      </div>
-      <div className="filters">
-        {["active", "all", ...STATUSES].map((s) => (
-          <a key={s} href={mkHref(track, s)} className={`chip ${status === s ? "active" : ""}`}>
-            {s}
-          </a>
-        ))}
+      <div className="filterbar">
+        <div className="fgroup">
+          <span className="flabel">track</span>
+          {TRACKS.map((t) => (
+            <a key={t} href={href({ track: t })} className={`chip ${track === t ? "active" : ""}`}>{t}</a>
+          ))}
+        </div>
+        <div className="fgroup">
+          <span className="flabel">fit</span>
+          {VERDICTS.map((v) => (
+            <a key={v} href={href({ verdict: v })} className={`chip ${verdict === v ? "active" : ""}`}>{v}</a>
+          ))}
+        </div>
+        <div className="fgroup">
+          <span className="flabel">status</span>
+          {STATUSES.map((s) => (
+            <a key={s} href={href({ status: s })} className={`chip ${status === s ? "active" : ""}`}>{s}</a>
+          ))}
+        </div>
       </div>
 
       {jobs.length === 0 ? (
-        <div className="empty">No jobs match this filter. Try &quot;Fetch new jobs&quot; or widen the filters.</div>
+        <div className="empty">
+          No jobs match these filters.
+          <div className="hint">Clear a filter, or run a scan to pull fresh listings.</div>
+        </div>
       ) : (
         jobs.map((j) => (
-          <div className="job" key={j.id}>
-            <div className={`score ${scoreClass(j.score)}`}>{j.score}</div>
-            <div>
+          <article className="job" key={j.id}>
+            <div className="fitcell">
+              {j.fitScore != null ? (
+                <>
+                  <div className={`fitnum v-${j.fitVerdict}`}>{j.fitScore}</div>
+                  <div className="gauge"><span className={`v-${j.fitVerdict}`} style={{ width: `${j.fitScore}%` }} /></div>
+                  <div className={`vlabel v-${j.fitVerdict}`}>{j.fitVerdict}</div>
+                </>
+              ) : (
+                <>
+                  <div className="fitnum unscored">{j.score}</div>
+                  <div className="vlabel unscored">keyword</div>
+                </>
+              )}
+            </div>
+
+            <div className="jobmain">
               <p className="title">
                 <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
               </p>
               <div className="meta">
-                {j.track && <span className={`badge ${j.track}`}>{j.track}</span>}
-                {j.remote && <span className="badge remote">remote</span>}
+                {j.track && <span className="badge">{j.track}</span>}
+                {j.remote && <span className="badge">remote</span>}
                 {j.company}
                 {j.location ? ` · ${j.location}` : ""}
                 {j.salaryText ? ` · ${j.salaryText}` : ""}
                 {" · "}
-                <span style={{ color: "var(--muted)" }}>{j.source}</span>
+                <span className="src">{j.source}</span>
               </div>
+              {j.fitComment && <div className="fitcomment">{j.fitComment}</div>}
               {j.scoreReason && <div className="reason">{j.scoreReason}</div>}
-              {j.fitComment && (
-                <div className={`fit fit-${j.fitVerdict ?? "weak"}`}>
-                  <strong>Fit {j.fitScore}/100 · {j.fitVerdict}</strong> — {j.fitComment}
-                </div>
-              )}
               {j.coverLetter && (
-                <details className="cover" open>
-                  <summary>Cover letter draft</summary>
+                <details className="cover">
+                  <summary>cover letter draft</summary>
                   <pre>{j.coverLetter}</pre>
                 </details>
               )}
             </div>
+
             <div className="actions">
               <div className="status-pill">{j.status}</div>
               {j.status !== "applied" && (
                 <form action={setStatus}>
                   <input type="hidden" name="id" value={j.id} />
                   <input type="hidden" name="status" value="applied" />
-                  <button className="btn primary" type="submit">Applied</button>
+                  <button className="btn primary" type="submit">Mark applied</button>
                 </form>
               )}
               {j.status !== "interested" && (
                 <form action={setStatus}>
                   <input type="hidden" name="id" value={j.id} />
                   <input type="hidden" name="status" value="interested" />
-                  <button className="btn" type="submit">★ Interested</button>
+                  <button className="btn" type="submit">Interested</button>
                 </form>
               )}
               <form action={analyzeFitAction}>
                 <input type="hidden" name="id" value={j.id} />
-                <button className="btn" type="submit">◎ Analyze fit</button>
+                <button className="btn" type="submit">Analyze fit</button>
               </form>
               <form action={draftCover}>
                 <input type="hidden" name="id" value={j.id} />
-                <button className="btn" type="submit">✍ Draft letter</button>
+                <button className="btn" type="submit">Draft letter</button>
               </form>
               <form action={setStatus}>
                 <input type="hidden" name="id" value={j.id} />
                 <input type="hidden" name="status" value="ignored" />
-                <button className="btn" type="submit">Dismiss</button>
+                <button className="btn quiet" type="submit">Dismiss</button>
               </form>
             </div>
-          </div>
+          </article>
         ))
+      )}
+
+      {lastPage > 1 && (
+        <nav className="pager" aria-label="Pagination">
+          {page > 1 && <a href={href({ page: String(page - 1) })}>← Prev</a>}
+          <span>page {page} / {lastPage} · {filteredCount} jobs</span>
+          {page < lastPage && <a href={href({ page: String(page + 1) })}>Next →</a>}
+        </nav>
       )}
     </div>
   );

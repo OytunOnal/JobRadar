@@ -126,6 +126,7 @@ Get a free/cheap API key from whichever provider you prefer:
 | `npm run discovery:audit` | Full-accounting check of the slug extractor against a URL corpus — any UNEXPLAINED line is a pattern gap. |
 | `npm run cv:import` | Import your resume (`-- path.pdf`); becomes the CV context for scoring, letters, and profile generation. |
 | `npm run profile:generate` | One LLM call: CV -> role families, granular scoring tracks (with a generic-title safety net), aggregator queries. Reviewed JSON, editable, never regenerates silently. |
+| `npm run rescore` | Free keyword re-score of every stored job — run after regenerating your profile so tracks realign. |
 | `npm run fit:batch` | LLM fit-score the **whole board** in one Anthropic batch (50% cheaper, async). Resume with `npm run fit:batch collect <id>`. |
 | `npm run dev` | Start the dashboard. |
 | `npm run db:studio` | Open Prisma Studio to inspect the DB. |

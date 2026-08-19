@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { chat } from "./llm";
-import { FAMILY_KEYS, ROLE_FAMILIES } from "./taxonomy";
+import { familiesByKey, FAMILY_KEYS, ROLE_FAMILIES } from "./taxonomy";
 import type { TrackDef } from "./profile";
 
 // CV → search profile generation. One strong-tier LLM call per CV change turns
@@ -50,6 +50,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
     "- bodyKeywords: 5-15 lowercase tools/skills/domain terms found in matching job DESCRIPTIONS.",
     "- All keywords in English (job postings are English), lowercase, no duplicates.",
     "- Cover the candidate's breadth: secondary skills get their own track (specific ones first).",
+    "- Companies often title roles GENERICALLY (\"software engineer\", \"product manager\"): make sure the broadest fitting track also lists those generic titles.",
     "",
     "searchQueries: 3-6 short search strings for job aggregators (e.g. \"senior product manager remote\").",
     "",
@@ -103,7 +104,31 @@ export function validateGenerated(raw: string): Omit<GeneratedProfile, "cvHash" 
 
   const searchQueries = cleanWords(parsed.searchQueries ?? [], 1, 8, "searchQueries");
 
-  return { families, tracks, searchQueries };
+  return { families, tracks: withGenericSafetyNet(families, tracks), searchQueries };
+}
+
+// Structural safety net: companies love generic titles ("Software Engineer",
+// "Product Manager"). Whatever the LLM generated, append one general track per
+// selected family — titles from the universal taxonomy, body from the union of
+// the specific tracks' keywords — ORDERED LAST, so specific tracks always win
+// ties. Generic-titled postings can no longer fall through trackless.
+export function withGenericSafetyNet(families: string[], tracks: TrackDef[]): TrackDef[] {
+  const covered = new Set(tracks.flatMap((t) => t.titleKeywords));
+  const bodyUnion = [...new Set(tracks.flatMap((t) => t.bodyKeywords))].slice(0, 18);
+  const nets: TrackDef[] = [];
+  const usedKeys = new Set(tracks.map((t) => t.key));
+  for (const fam of familiesByKey(families)) {
+    if (usedKeys.has(`general-${fam.key}`)) continue;
+    const missing = fam.titleKeywords.filter((k) => !covered.has(k));
+    if (missing.length === 0) continue;
+    nets.push({
+      key: `general-${fam.key}`,
+      label: `General ${fam.label}`,
+      titleKeywords: missing,
+      bodyKeywords: bodyUnion,
+    });
+  }
+  return [...tracks, ...nets];
 }
 
 export async function generateProfile(
@@ -129,6 +154,9 @@ export async function generateProfile(
 // Load the reviewed file (module-load time, sync). Returns null when absent or
 // unreadable — profile.ts then falls back to the built-in template defaults.
 export function loadGeneratedProfile(path: string = GENERATED_PATH): GeneratedProfile | null {
+  // Hermetic tests: the node test runner must see the template defaults, not
+  // whatever personal profile happens to exist on this machine.
+  if (process.env.NODE_TEST_CONTEXT) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     if (!Array.isArray(parsed.tracks) || !Array.isArray(parsed.families)) return null;

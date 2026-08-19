@@ -78,6 +78,18 @@ test("validator caps and dedupes keywords", () => {
   assert.equal(p.tracks[0].bodyKeywords.length, 18); // capped
 });
 
+test("generic safety net: 'Software Engineer' titles can never fall through", () => {
+  const p = validateGenerated(GOOD); // PM profile with specific tracks only
+  const net = p.tracks.find((t) => t.key === "general-product");
+  assert.ok(net, "a general track for the selected family must be appended");
+  assert.ok(net!.titleKeywords.includes("program manager"));
+  assert.equal(p.tracks[p.tracks.length - 1].key.startsWith("general-"), true); // ordered last
+  // Titles the specific tracks already cover are not duplicated into the net.
+  assert.ok(!net!.titleKeywords.includes("product manager"));
+  // Net body keywords come from the specific tracks (real scoring support).
+  assert.ok(net!.bodyKeywords.includes("roadmap"));
+});
+
 // ── prompt & orchestration ───────────────────────────────────────────────────
 
 test("prompt carries the taxonomy, the target override, and the injection guard", () => {

@@ -12,6 +12,8 @@ import { jsearch } from "./sources/jsearch";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
+import { harvest, type HarvestReport } from "./discovery/harvest";
+import { boardSources } from "./discovery/boardSources";
 import type { RawJob, Source } from "./sources/types";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
@@ -29,9 +31,6 @@ const aggregators: Source[] = [
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
 ];
 
-// Company ATS feeds FIRST so that when the same role also shows up on an
-// aggregator, the direct-apply ATS listing is the one we keep.
-const sources: Source[] = [...companySources(), ...aggregators];
 
 // Minimum keyword score to bother storing. Junk (score 0, disqualified) is dropped.
 const STORE_THRESHOLD = 20;
@@ -68,6 +67,13 @@ export interface IngestReport {
   fitAnalyzed: number;
   perSource: Record<string, number>;
   errors: string[];
+  harvest?: HarvestReport;
+}
+
+// Aggregator jobs carry foreign URLs worth harvesting for ATS identities;
+// ATS-sourced jobs (source "gh:x", "lever:x", ...) already reveal theirs.
+function isAggregatorJob(job: RawJob): boolean {
+  return !job.source.includes(":");
 }
 
 export async function runIngest(): Promise<IngestReport> {
@@ -81,6 +87,17 @@ export async function runIngest(): Promise<IngestReport> {
     perSource: {},
     errors: [],
   };
+
+  // Source order decides who wins dedupe: curated ATS feeds first, then
+  // discovered boards (also direct-apply), aggregators last — so when the same
+  // role arrives from several places, the official ATS listing is the one kept.
+  let discovered: Source[] = [];
+  try {
+    discovered = await boardSources();
+  } catch (e: any) {
+    report.errors.push(`boardSources: ${e.message}`);
+  }
+  const sources: Source[] = [...companySources(), ...discovered, ...aggregators];
 
   const all: RawJob[] = [];
   for (const src of sources) {
@@ -98,6 +115,15 @@ export async function runIngest(): Promise<IngestReport> {
   // Track content keys seen within this run so the same role from two sources
   // doesn't get stored twice.
   const seenContent = new Set<string>();
+
+  // Harvest inputs: every aggregator URL gets a free tier-1 scan (junk and
+  // disqualified jobs included — their URLs still reveal ATS identities);
+  // network resolves are spent only on this run's newly-stored jobs.
+  const aggregatorUrls: string[] = [];
+  const newlyStoredUrls: string[] = [];
+  for (const job of all) {
+    if (isAggregatorJob(job) && job.url) aggregatorUrls.push(job.url);
+  }
 
   for (const job of all) {
     const s = scoreJob(job);
@@ -149,13 +175,24 @@ export async function runIngest(): Promise<IngestReport> {
           scoredBy: data.scoredBy,
           salaryText: data.salaryText,
           contentKey: ck,
+          // Pool-diff freshness: the job is still listed at its source.
+          lastSeenAt: new Date(),
         },
       });
       report.updated++;
     } else {
       await prisma.job.create({ data });
       report.stored++;
+      if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
+  }
+
+  // Discovery harvest: mine ATS board candidates from the aggregator URLs.
+  // Isolated so no harvest failure can sink the ingest.
+  try {
+    report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
+  } catch (e: any) {
+    report.errors.push(`harvest: ${e.message}`);
   }
 
   // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so the

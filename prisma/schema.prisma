@@ -7,6 +7,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// A company's board on an ATS platform, found by the discovery layer (or seeded
+// by hand). Boards start as `candidate`; a validation probe against the ATS API
+// promotes them to `active` or marks them `dead` (rechecked every 30 days).
+model AtsBoard {
+  id            Int       @id @default(autoincrement())
+  platform      String    // registry id in src/lib/discovery/platforms.ts
+  token         String    // the board slug, canonical form
+  region        String    @default("") // e.g. "eu" when found on a regional host
+  companyName   String?
+  status        String    @default("candidate") // candidate | active | dead
+  discoveredVia String    // seed | harvest | commoncrawl | wayback | hf-dataset
+  validatedAt   DateTime?
+  lastFetchedAt DateTime?
+  // Fraction of this board's jobs that pass the keyword threshold; drives
+  // adaptive fetch frequency (irrelevant boards get fetched less often).
+  hitRate           Float @default(0)
+  fetchIntervalDays Int   @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([platform, token, region])
+  @@index([status])
+}
+
 model Job {
   id          String   @id @default(cuid())
   // Stable identity across ingests: source + the source's own id, hashed.
@@ -42,6 +66,13 @@ model Job {
   notes       String?
 
   postedAt    DateTime?
+  // Pool-diff freshness: when OUR system first/last saw this job listed.
+  // Source-reported postedAt lies on evergreen boards (Lever createdAt from
+  // 2019); "wasn't in the pool yesterday, is today" does not.
+  // Cold-start caveat: rows existing before this column got firstSeenAt at
+  // migration time — don't trust firstSeenAt older than the migration date.
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

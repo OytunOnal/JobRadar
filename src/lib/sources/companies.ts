@@ -13,6 +13,9 @@ export interface Company {
   name: string;
   provider: AtsProvider;
   token: string;
+  // Regional ATS instance, e.g. "eu" for boards at jobs.eu.lever.co — Lever's
+  // EU deployment has a separate slug namespace (EU boards 404 on the US API).
+  region?: string;
   tags: string[]; // informational: what kind of company this is
 }
 
@@ -74,6 +77,6 @@ export const companies: Company[] = [
 export function companySources(): Source[] {
   return companies.map((c) => ({
     name: `${c.provider}:${c.token}`,
-    fetch: () => atsFetchers[c.provider](c.token, c.name),
+    fetch: () => atsFetchers[c.provider](c.token, c.name, c.region ?? ""),
   }));
 }

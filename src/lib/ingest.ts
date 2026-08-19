@@ -19,6 +19,7 @@ import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
+import { detectVisa } from "./visa";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "./locresolve";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
@@ -196,6 +197,7 @@ export async function runIngest(): Promise<IngestReport> {
       remote: job.remote,
       country: resolveWithCache(job.location, locationCache),
       workMode: deriveWorkMode(job),
+      visa: detectVisa(job.description, job.title),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
       description: job.description.slice(0, 8000),
@@ -231,6 +233,7 @@ export async function runIngest(): Promise<IngestReport> {
           salaryText: data.salaryText,
           workMode: data.workMode,
           country: data.country,
+          visa: data.visa,
           contentKey: ck,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
@@ -314,7 +317,12 @@ export async function runIngest(): Promise<IngestReport> {
         if (!fit) continue;
         await prisma.job.update({
           where: { id: j.id },
-          data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk },
+          data: {
+            fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
+            fitCategory: fit.category, ghostRisk: fit.ghostRisk,
+            // The model read the posting: an explicit refusal beats "unknown".
+            ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
+          },
         });
         report.fitAnalyzed++;
         // Throttle to stay under the provider's per-minute token limit.

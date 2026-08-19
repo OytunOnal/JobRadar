@@ -2,6 +2,7 @@ import { prisma } from "../src/lib/db";
 import { scoreJob } from "../src/lib/score";
 import { deriveWorkMode } from "../src/lib/sources/types";
 import { loadLocationCache, resolveWithCache } from "../src/lib/locresolve";
+import { detectVisa } from "../src/lib/visa";
 import { profile } from "../src/lib/profile";
 
 // Re-run the (free, deterministic) keyword scorer over every stored job.
@@ -42,7 +43,7 @@ for (const j of jobs) {
   if (s.disqualified) disqualified++;
   const updated = await prisma.job.update({
     where: { id: j.id },
-    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy, workMode: deriveWorkMode(raw), country: resolveWithCache(j.location, locationCache) },
+    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy, workMode: deriveWorkMode(raw), country: resolveWithCache(j.location, locationCache), visa: detectVisa(j.description, j.title) },
     select: { track: true },
   });
   if (updated.track !== track) changedTrack++; // defensive; should not happen

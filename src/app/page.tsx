@@ -42,7 +42,7 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string; region?: string; country?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string; region?: string; country?: string; visa?: string }>;
 }) {
   const sp = await searchParams;
   // track is a comma list of track keys; empty = all.
@@ -65,6 +65,10 @@ export default async function Page({
   );
   const region = [...regionSet].sort().join(",");
   const countryParam = new Set((sp.country ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  const visaSet = new Set(
+    (sp.visa ?? "").split(",").map((s) => s.trim()).filter((s) => ["yes", "unknown", "no"].includes(s)),
+  );
+  const visa = [...visaSet].sort().join(",");
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
@@ -77,6 +81,7 @@ export default async function Page({
   if (verdict !== "all") where.fitVerdict = verdict;
   if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
+  if (visaSet.size > 0) where.visa = { in: [...visaSet] };
 
   // The pool's own clock: how far the newest observation has advanced. Guards
   // the delisted check against "we simply haven't ingested lately".
@@ -168,9 +173,9 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age" | "region" | "country", string>>) => {
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age" | "region" | "country" | "visa", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, loc, q, age, region, country, page: "", ...over };
+    const merged = { track, status, verdict, loc, q, age, region, country, visa, page: "", ...over };
     if (merged.track) p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
@@ -178,6 +183,7 @@ export default async function Page({
     if (merged.age !== "fresh") p.set("age", merged.age);
     if (merged.region) p.set("region", merged.region);
     if (merged.country) p.set("country", merged.country);
+    if (merged.visa) p.set("visa", merged.visa);
     if (merged.q) p.set("q", merged.q);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     const s = p.toString();
@@ -280,6 +286,18 @@ export default async function Page({
           })}
         </div>
         <div className="fgroup">
+          <span className="flabel">visa</span>
+          <a href={href({ visa: "" })} className={`chip ${visaSet.size === 0 ? "active" : ""}`}>all</a>
+          {(["yes", "unknown", "no"] as const).map((v) => {
+            const next = new Set(visaSet);
+            if (next.has(v)) next.delete(v); else next.add(v);
+            return (
+              <a key={v} href={href({ visa: [...next].sort().join(",") })}
+                 className={`chip ${visaSet.has(v) ? "active" : ""}`}>{v === "yes" ? "sponsors" : v}</a>
+            );
+          })}
+        </div>
+        <div className="fgroup">
           <span className="flabel">status</span>
           {STATUSES.map((s) => (
             <a key={s} href={href({ status: s })} className={`chip ${status === s ? "active" : ""}`}>{s}</a>
@@ -329,6 +347,7 @@ export default async function Page({
                   <span className={`badge age-${freshness}`}>{freshness}</span>
                 )}
                 {j.ghostRisk && <span className="badge ghost">ghost?</span>}
+                {j.visa === "yes" && <span className="badge s-strong">visa</span>}
                 {j.fitCategory && j.fitCategory !== "NONE" && j.fitCategory !== "OTHER" && (
                   <span className="badge">{j.fitCategory.toLowerCase().replace("_", " ")}</span>
                 )}

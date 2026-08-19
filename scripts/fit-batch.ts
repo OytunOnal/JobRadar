@@ -25,7 +25,7 @@ async function collect(batchId: string) {
         if (!r.fit) continue;
         await prisma.job.update({
           where: { id: r.jobId },
-          data: { fitScore: r.fit.fitScore, fitVerdict: r.fit.verdict, fitComment: r.fit.comment, fitCategory: r.fit.category, ghostRisk: r.fit.ghostRisk },
+          data: { fitScore: r.fit.fitScore, fitVerdict: r.fit.verdict, fitComment: r.fit.comment, fitCategory: r.fit.category, ghostRisk: r.fit.ghostRisk, ...(r.fit.category === "NO_VISA" ? { visa: "no" } : {}) },
         }).catch(() => {}); // job may have been removed
         written++;
       }

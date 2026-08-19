@@ -1,3 +1,4 @@
+import { countryPassesAccept, resolveCountry } from "./geo";
 import { profile, type Track } from "./profile";
 import type { RawJob } from "./sources/types";
 
@@ -17,7 +18,12 @@ function regionOk(job: RawJob): boolean {
   if (job.remote) return true;
   const loc = (job.location ?? "").toLowerCase();
   if (!loc) return true; // unknown location — don't discard, let score decide
-  return profile.acceptRegions.some((r) => loc.includes(r));
+  if (profile.acceptRegions.some((r) => loc.includes(r))) return true;
+  // The substring list misses native spellings ("Frankfurt, Allemagne").
+  // Resolve the country and let region grants in the list ("europe", "emea")
+  // or country names decide.
+  const country = resolveCountry(loc);
+  return country !== null && countryPassesAccept(country, profile.acceptRegions);
 }
 
 // Deterministic keyword scorer. Picks the best-matching track and scores by how

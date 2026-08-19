@@ -1,6 +1,7 @@
 import { prisma } from "../src/lib/db";
 import { scoreJob } from "../src/lib/score";
 import { deriveWorkMode } from "../src/lib/sources/types";
+import { loadLocationCache, resolveWithCache } from "../src/lib/locresolve";
 import { profile } from "../src/lib/profile";
 
 // Re-run the (free, deterministic) keyword scorer over every stored job.
@@ -12,6 +13,7 @@ import { profile } from "../src/lib/profile";
 
 console.log("=== JobRadar rescore ===");
 console.log("Tracks in effect:", profile.tracks.map((t) => t.key).join(", "));
+const locationCache = await loadLocationCache().catch(() => new Map<string, string | null>());
 
 const jobs = await prisma.job.findMany({
   select: {
@@ -40,7 +42,7 @@ for (const j of jobs) {
   if (s.disqualified) disqualified++;
   const updated = await prisma.job.update({
     where: { id: j.id },
-    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy, workMode: deriveWorkMode(raw) },
+    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy, workMode: deriveWorkMode(raw), country: resolveWithCache(j.location, locationCache) },
     select: { track: true },
   });
   if (updated.track !== track) changedTrack++; // defensive; should not happen
@@ -48,6 +50,8 @@ for (const j of jobs) {
 
 const dist = await prisma.job.groupBy({ by: ["track"], _count: true, orderBy: { _count: { track: "desc" } } });
 console.log(`\nRescored ${jobs.length} jobs (${disqualified} no longer qualify under this profile).`);
+const unresolved = await prisma.job.count({ where: { country: null, location: { not: null } } });
+console.log(`Country unresolved (will hit the LLM next ingest): ${unresolved}`);
 console.log("Track distribution:");
 for (const d of dist) console.log(`  ${(d.track ?? "-").padEnd(28)} ${d._count}`);
 await prisma.$disconnect();

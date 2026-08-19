@@ -18,6 +18,8 @@ import { tooOldToStore } from "./freshness";
 import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
+import { normalizeLocation, resolveCountry } from "./geo";
+import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "./locresolve";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -78,6 +80,7 @@ export interface IngestReport {
   tooOld: number;
   junkDomain: number;
   semanticDupes: number;
+  locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
 }
@@ -143,6 +146,11 @@ export async function runIngest(): Promise<IngestReport> {
   // Harvest inputs: every aggregator URL gets a free tier-1 scan (junk and
   // disqualified jobs included — their URLs still reveal ATS identities);
   // network resolves are spent only on this run's newly-stored jobs.
+  // Location resolution: gazetteer + learned cache now; whatever is left
+  // goes into one batched LLM call after the store loop.
+  const locationCache = await loadLocationCache().catch(() => new Map<string, string | null>());
+  const unknownLocations = new Map<string, Set<string>>();
+
   const aggregatorUrls: string[] = [];
   const newlyStoredUrls: string[] = [];
   const newlyCreated: Array<{ id: string; title: string; company: string; description: string }> = [];
@@ -186,6 +194,7 @@ export async function runIngest(): Promise<IngestReport> {
       company: job.company,
       location: job.location ?? null,
       remote: job.remote,
+      country: resolveWithCache(job.location, locationCache),
       workMode: deriveWorkMode(job),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
@@ -196,6 +205,14 @@ export async function runIngest(): Promise<IngestReport> {
       scoredBy: s.scoredBy,
       postedAt: job.postedAt ?? null,
     };
+
+    if (job.location && data.country === null && resolveCountry(job.location) === null) {
+      const key = normalizeLocation(job.location);
+      if (!locationCache.has(key)) {
+        if (!unknownLocations.has(key)) unknownLocations.set(key, new Set());
+        unknownLocations.get(key)!.add(job.location);
+      }
+    }
 
     // Exact same-source match, or the same role stored under a different source.
     const existing =
@@ -213,6 +230,7 @@ export async function runIngest(): Promise<IngestReport> {
           scoredBy: data.scoredBy,
           salaryText: data.salaryText,
           workMode: data.workMode,
+          country: data.country,
           contentKey: ck,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
@@ -233,6 +251,15 @@ export async function runIngest(): Promise<IngestReport> {
     report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
   } catch (e: any) {
     report.errors.push(`harvest: ${e.message}`);
+  }
+
+  // Batched LLM location resolution for strings the gazetteer+cache missed.
+  if (llmEnabled() && unknownLocations.size > 0) {
+    try {
+      report.locations = await resolveUnknownLocations(unknownLocations);
+    } catch (e: any) {
+      report.errors.push(`locations: ${String(e.message).slice(0, 160)}`);
+    }
   }
 
   // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we

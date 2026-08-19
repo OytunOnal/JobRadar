@@ -31,6 +31,17 @@ model AtsBoard {
   @@index([status])
 }
 
+// Learned location knowledge: raw location strings the gazetteer couldn't
+// place, resolved once by a batched LLM call and remembered forever.
+// Editable by hand; a null country means "asked, couldn't tell".
+model LocationCache {
+  id         Int      @id @default(autoincrement())
+  raw        String   @unique // normalized location string
+  country    String? // ISO alpha-2
+  resolvedBy String   @default("llm")
+  createdAt  DateTime @default(now())
+}
+
 model Job {
   id          String   @id @default(cuid())
   // Stable identity across ingests: source + the source's own id, hashed.
@@ -42,6 +53,9 @@ model Job {
   company     String
   location    String?
   remote      Boolean  @default(false)
+  // ISO alpha-2, resolved from the location string (gazetteer → cache →
+  // batched LLM). null = no location (remote) or unresolved.
+  country     String?
   // remote | hybrid | onsite — explicit from the source when it says so,
   // else derived from the posting text. `remote` stays as the boolean the
   // region filter keys on (hybrid is location-bound, NOT remote).

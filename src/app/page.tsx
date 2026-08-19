@@ -6,6 +6,7 @@ import {
   DELISTED_AFTER_DAYS,
   FRESH_MAX_DAYS,
 } from "@/lib/freshness";
+import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string; region?: string; country?: string }>;
 }) {
   const sp = await searchParams;
   // track is a comma list of track keys; empty = all.
@@ -57,6 +58,13 @@ export default async function Page({
   );
   const loc = [...locSet].sort().join(",");
   const age = sp.age ?? "fresh";
+  // region: comma list of region keys; country: comma list of alpha-2 codes
+  // plus the special buckets "other" | "remote" | "unknown".
+  const regionSet = new Set(
+    (sp.region ?? "").split(",").map((s) => s.trim()).filter((s) => REGION_KEYS.includes(s)),
+  );
+  const region = [...regionSet].sort().join(",");
+  const countryParam = new Set((sp.country ?? "").split(",").map((s) => s.trim()).filter(Boolean));
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
@@ -96,6 +104,44 @@ export default async function Page({
     // Jobs being pursued are never hidden by age.
     and.push({ OR: [{ AND: clauses }, { status: { in: PURSUED } }] });
   }
+  // ── Region / country facet ─────────────────────────────────────────────
+  // Country chips cascade from the region selection: top 10 by count within
+  // the allowed set + "other" (the long tail) + "remote" (no location) +
+  // "unknown" (location we couldn't place). Counts are computed with every
+  // filter EXCEPT the country selection, so chips don't jump while picking.
+  const allowedCountries = regionSet.size > 0
+    ? [...new Set([...regionSet].flatMap((r) => [...REGIONS[r]]))]
+    : Object.keys(COUNTRY_NAMES);
+
+  const facetWhere: any = { ...where, AND: [...and] };
+  if (regionSet.size > 0) facetWhere.AND.push({ country: { in: allowedCountries } });
+  const [countryCounts, remoteCount, unknownCount] = await Promise.all([
+    prisma.job.groupBy({ by: ["country"], _count: true, where: { ...facetWhere, country: { in: allowedCountries } } }),
+    prisma.job.count({ where: { ...where, AND: [...and, { country: null, workMode: "remote" }] } }),
+    prisma.job.count({ where: { ...where, AND: [...and, { country: null, workMode: { not: "remote" } }] } }),
+  ]);
+  const counts = new Map(countryCounts.map((c) => [c.country as string, c._count]));
+  const topCountries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c]) => c);
+  const otherCountries = allowedCountries.filter((c) => !topCountries.includes(c));
+  const otherCount = otherCountries.reduce((sum, c) => sum + (counts.get(c) ?? 0), 0);
+
+  const countrySet = new Set(
+    [...countryParam].filter((c) => topCountries.includes(c) || ["other", "remote", "unknown"].includes(c)),
+  );
+  const country = [...countrySet].sort().join(",");
+
+  if (countrySet.size > 0) {
+    const or: any[] = [];
+    const codes = [...countrySet].filter((c) => !["other", "remote", "unknown"].includes(c));
+    if (codes.length) or.push({ country: { in: codes } });
+    if (countrySet.has("other")) or.push({ country: { in: otherCountries } });
+    if (countrySet.has("remote")) or.push({ country: null, workMode: "remote" });
+    if (countrySet.has("unknown")) or.push({ country: null, workMode: { not: "remote" } });
+    and.push({ OR: or });
+  } else if (regionSet.size > 0) {
+    and.push({ country: { in: allowedCountries } });
+  }
+
   if (and.length) where.AND = and;
 
   const [jobs, filteredCount, statusCounts, verdictCounts] = await Promise.all([
@@ -122,14 +168,16 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age", string>>) => {
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age" | "region" | "country", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, loc, q, age, page: "", ...over };
+    const merged = { track, status, verdict, loc, q, age, region, country, page: "", ...over };
     if (merged.track) p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
     if (merged.loc) p.set("loc", merged.loc);
     if (merged.age !== "fresh") p.set("age", merged.age);
+    if (merged.region) p.set("region", merged.region);
+    if (merged.country) p.set("country", merged.country);
     if (merged.q) p.set("q", merged.q);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     const s = p.toString();
@@ -194,6 +242,40 @@ export default async function Page({
             return (
               <a key={m.value} href={href({ loc: [...next].sort().join(",") })}
                  className={`chip ${locSet.has(m.value) ? "active" : ""}`}>{m.label}</a>
+            );
+          })}
+        </div>
+        <div className="fgroup">
+          <span className="flabel">region</span>
+          <a href={href({ region: "", country: "" })} className={`chip ${regionSet.size === 0 ? "active" : ""}`}>all</a>
+          {REGION_KEYS.map((r) => {
+            const next = new Set(regionSet);
+            if (next.has(r)) next.delete(r); else next.add(r);
+            // Region change invalidates the country picks (chip list changes).
+            return (
+              <a key={r} href={href({ region: [...next].sort().join(","), country: "" })}
+                 className={`chip ${regionSet.has(r) ? "active" : ""}`}>{r}</a>
+            );
+          })}
+        </div>
+        <div className="fgroup">
+          <span className="flabel">country</span>
+          <a href={href({ country: "" })} className={`chip ${countrySet.size === 0 ? "active" : ""}`}>all</a>
+          {topCountries.map((c) => {
+            const next = new Set(countrySet);
+            if (next.has(c)) next.delete(c); else next.add(c);
+            return (
+              <a key={c} href={href({ country: [...next].sort().join(",") })}
+                 className={`chip ${countrySet.has(c) ? "active" : ""}`}>{COUNTRY_NAMES[c] ?? c} {counts.get(c)}</a>
+            );
+          })}
+          {([["other", otherCount], ["remote", remoteCount], ["unknown", unknownCount]] as const).map(([b, n]) => {
+            if (n === 0 && !countrySet.has(b)) return null;
+            const next = new Set(countrySet);
+            if (next.has(b)) next.delete(b); else next.add(b);
+            return (
+              <a key={b} href={href({ country: [...next].sort().join(",") })}
+                 className={`chip ${countrySet.has(b) ? "active" : ""}`}>{b} {n}</a>
             );
           })}
         </div>

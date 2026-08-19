@@ -1,3 +1,4 @@
+import { JUNK_DOMAINS, WALL_DOMAINS } from "../domains";
 import { extractSlug, type SlugHit } from "./extract";
 import { upsertCandidates } from "./store";
 
@@ -14,14 +15,11 @@ import { upsertCandidates } from "./store";
 // Tiers 2-3 run only for URLs worth resolving (see shouldResolve) and only
 // within a per-ingest budget, so harvest can never balloon an ingest run.
 
-// Login walls and SEO farms: a resolve can never reach an ATS through these.
-const SKIP_DOMAINS = [
-  "linkedin.com", "indeed.com", "glassdoor.com", "glassdoor.co.uk",
-  "ziprecruiter.com", "upwork.com", "whatjobs.com", "mysmartpros.com",
-  "jooble.org", "talent.com", "bebee.com", "learn4good.com", "jobtome.com",
-  // NOTE: adzuna.* is deliberately NOT here — Adzuna job URLs are its own
-  // /land/ad redirect bridges, and following them is the whole point of tier 2.
-];
+// Login walls and SEO farms (shared lists in lib/domains.ts): a resolve can
+// never reach an ATS through either.
+// NOTE: adzuna.* is deliberately in NEITHER list — Adzuna job URLs are its own
+// /land/ad redirect bridges, and following them is the whole point of tier 2.
+const SKIP_DOMAINS = [...JUNK_DOMAINS, ...WALL_DOMAINS];
 
 export function shouldResolve(rawUrl: string): boolean {
   let url: URL;

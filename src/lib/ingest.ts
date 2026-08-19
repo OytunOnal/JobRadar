@@ -15,6 +15,7 @@ import { llmEnabled, RateLimitError } from "./llm";
 import { harvest, type HarvestReport } from "./discovery/harvest";
 import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
+import { isJunkJobUrl, sourceTrust } from "./domains";
 import type { RawJob, Source } from "./sources/types";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
@@ -68,6 +69,7 @@ export interface IngestReport {
   fitAnalyzed: number;
   perSource: Record<string, number>;
   tooOld: number;
+  junkDomain: number;
   errors: string[];
   harvest?: HarvestReport;
 }
@@ -88,6 +90,7 @@ export async function runIngest(): Promise<IngestReport> {
     fitAnalyzed: 0,
     perSource: {},
     tooOld: 0,
+    junkDomain: 0,
     errors: [],
   };
 
@@ -138,6 +141,11 @@ export async function runIngest(): Promise<IngestReport> {
   }
 
   for (const job of all) {
+    // SEO-farm copies: the original arrives via a better source.
+    if (isJunkJobUrl(job.url)) {
+      report.junkDomain++;
+      continue;
+    }
     // Freshness guard: aggregator reposts of old listings are noise — skip
     // before spending anything on them. (Their URL was still harvested above.)
     if (tooOldToStore(job.postedAt, isAggregatorJob(job))) {
@@ -169,6 +177,7 @@ export async function runIngest(): Promise<IngestReport> {
       location: job.location ?? null,
       remote: job.remote,
       salaryText: job.salaryText ?? null,
+      sourceTrust: sourceTrust(job.source),
       description: job.description.slice(0, 8000),
       score: s.score,
       track: s.track,

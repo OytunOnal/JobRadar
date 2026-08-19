@@ -91,6 +91,7 @@ export default async function Page({
       // LLM-analyzed jobs (real fit) rank first; the rest fall back to keyword score.
       orderBy: [
         { fitScore: { sort: "desc", nulls: "last" } },
+        { sourceTrust: "desc" }, // equal fit: the direct-apply ATS listing outranks the aggregator copy
         { score: "desc" },
         { createdAt: "desc" },
       ],

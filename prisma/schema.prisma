@@ -49,6 +49,9 @@ model Job {
   // role coming in from multiple sources.
   contentKey  String   @default("")
 
+  // Ranking trust: 2 = direct ATS, 1 = curated boards, 0 = mass aggregators.
+  sourceTrust Int      @default(1)
+
   // Scoring
   score       Int      @default(0)
   track       String?  // unity | playable | ai | fullstack | other

@@ -23,6 +23,7 @@ console.log(`Cross-src dupes:${report.duplicates}`);
 console.log(`Too old to keep:${report.tooOld}`);
 console.log(`SEO-farm junk:  ${report.junkDomain}`);
 console.log(`Semantic dupes: ${report.semanticDupes}`);
+console.log(`Swept (closed): ${report.delisted}`);
 if (report.locations) console.log(`Locations:      ${report.locations.llmResolved}/${report.locations.llmAsked} unknown strings resolved by LLM (cached forever)`);
 console.log(`LLM fit-scored: ${report.fitAnalyzed}`);
 if (report.harvest) {

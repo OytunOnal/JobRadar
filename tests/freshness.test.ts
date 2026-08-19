@@ -37,6 +37,11 @@ test("null postedAt falls back to firstSeenAt", () => {
   assert.equal(classifyFreshness(job({ postedAt: null, firstSeenAt: days(200) }), NOW), "evergreen");
 });
 
+test("sweep stamp delists immediately — no grace, beats everything", () => {
+  const j = job({ postedAt: days(1), delistedAt: days(0) }); // fresh yesterday, gone today
+  assert.equal(classifyFreshness(j, NOW, days(0)), "delisted");
+});
+
 test("direct-source job the pool moved past = delisted (beats evergreen)", () => {
   const poolNewest = days(0);
   const j = job({ postedAt: new Date("2019-11-19"), lastSeenAt: days(20) });

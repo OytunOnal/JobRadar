@@ -91,6 +91,7 @@ export default async function Page({
     const now = Date.now();
     const freshCutoff = new Date(now - FRESH_MAX_DAYS * 86_400_000);
     const clauses: any[] = [
+      { delistedAt: null }, // swept-away roles are gone from the default view
       // Anchor (postedAt, else firstSeenAt) within the fresh window...
       {
         OR: [

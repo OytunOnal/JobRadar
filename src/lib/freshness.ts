@@ -27,6 +27,8 @@ export interface FreshnessInput {
   firstSeenAt: Date;
   lastSeenAt: Date;
   source: string;
+  // Set by the ingest sweep when the job vanished from its board's feed.
+  delistedAt?: Date | null;
 }
 
 // Direct sources (ATS fetchers) use "prefix:token" source ids; aggregators
@@ -45,6 +47,8 @@ export function classifyFreshness(
   now: Date = new Date(),
   poolNewest?: Date,
 ): Freshness {
+  // The sweep saw the board WITHOUT this job — closed, no grace needed.
+  if (job.delistedAt) return "delisted";
   if (isDirectSource(job.source) && poolNewest) {
     const poolAdvance = poolNewest.getTime() - job.lastSeenAt.getTime();
     if (poolAdvance > DELISTED_AFTER_DAYS * DAY) return "delisted";

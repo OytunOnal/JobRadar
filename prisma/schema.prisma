@@ -106,6 +106,10 @@ model Job {
   // migration time — don't trust firstSeenAt older than the migration date.
   firstSeenAt DateTime @default(now())
   lastSeenAt  DateTime @default(now())
+  // Stamped by the ingest sweep the moment a direct-source job disappears
+  // from its board's feed; cleared if it reappears. Kills the dead-link
+  // window the 14-day pool-advance grace would otherwise leave open.
+  delistedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

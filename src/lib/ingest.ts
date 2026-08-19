@@ -81,6 +81,7 @@ export interface IngestReport {
   tooOld: number;
   junkDomain: number;
   semanticDupes: number;
+  delisted: number;
   locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
@@ -104,6 +105,7 @@ export async function runIngest(): Promise<IngestReport> {
     tooOld: 0,
     junkDomain: 0,
     semanticDupes: 0,
+    delisted: 0,
     errors: [],
   };
 
@@ -237,6 +239,7 @@ export async function runIngest(): Promise<IngestReport> {
           contentKey: ck,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
+          delistedAt: null, // it's back (or never left)
         },
       });
       report.updated++;
@@ -247,6 +250,31 @@ export async function runIngest(): Promise<IngestReport> {
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
   }
+
+  // Sweep: a direct source was fetched and returned jobs, yet some stored
+  // rows of that source were absent from the feed — those roles are closed.
+  // Stamp them immediately (no grace); a failing/empty fetch sweeps nothing.
+  const seenBySource = new Map<string, Set<string>>();
+  for (const job of all) {
+    if (!job.source.includes(":")) continue;
+    if (!seenBySource.has(job.source)) seenBySource.set(job.source, new Set());
+    seenBySource.get(job.source)!.add(job.externalId);
+  }
+  let swept = 0;
+  for (const [src, seen] of seenBySource) {
+    if (seen.size === 0) continue;
+    const stored = await prisma.job.findMany({
+      where: { source: src, delistedAt: null },
+      select: { id: true, externalId: true },
+    });
+    for (const row of stored) {
+      if (!seen.has(row.externalId)) {
+        await prisma.job.update({ where: { id: row.id }, data: { delistedAt: new Date() } });
+        swept++;
+      }
+    }
+  }
+  report.delisted = swept;
 
   // Discovery harvest: mine ATS board candidates from the aggregator URLs.
   // Isolated so no harvest failure can sink the ingest.

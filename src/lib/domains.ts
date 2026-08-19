@@ -7,13 +7,15 @@
 export const JUNK_DOMAINS: readonly string[] = [
   "whatjobs.com", "mysmartpros.com", "jobtome.com", "learn4good.com",
   "bebee.com", "jooble.org", "talent.com", "expertini.com", "jobrapido.com",
+  // Freelance-marketplace gigs, not jobs — user decision 2026-08-19.
+  "upwork.com",
 ];
 
 // Real listings behind a login/marketplace wall: fine to store (the job is
 // real), pointless to harvest-resolve (the chain dies at the wall).
 export const WALL_DOMAINS: readonly string[] = [
   "linkedin.com", "indeed.com", "glassdoor.com", "glassdoor.co.uk",
-  "ziprecruiter.com", "upwork.com",
+  "ziprecruiter.com",
 ];
 
 function hostMatches(host: string, domains: readonly string[]): boolean {

@@ -6,6 +6,7 @@ test("junk detection: SEO farms yes, real sources no", () => {
   // Real junk URLs from our own DB's top-of-board era:
   assert.equal(isJunkJobUrl("https://www.whatjobs.com/jobs/game-developer-junior-senior?id=2902142466"), true);
   assert.equal(isJunkJobUrl("https://www.mysmartpros.com/tuition/job/senior-unity-developer-fully-remote/"), true);
+  assert.equal(isJunkJobUrl("https://www.upwork.com/freelance-jobs/apply/Senior-Full-Stack_~022080/"), true); // marketplace gigs, not jobs
   assert.equal(isJunkJobUrl("https://boards.greenhouse.io/dreamgames/jobs/1"), false);
   assert.equal(isJunkJobUrl("https://remotive.com/remote-jobs/x"), false);
   assert.equal(isJunkJobUrl("not a url"), false);

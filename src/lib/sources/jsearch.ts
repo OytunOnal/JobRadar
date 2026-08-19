@@ -1,3 +1,4 @@
+import { profile } from "../profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // JSearch (via RapidAPI) indexes Google for Jobs — which carries LinkedIn,
@@ -5,7 +6,9 @@ import { stripHtml, type RawJob, type Source } from "./types";
 // we make one request per query and keep the default query list short.
 // Key: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch — set
 // RAPIDAPI_KEY in .env. Skipped silently when the key is missing.
+// Env wins; else the CV-generated profile; else the template default.
 const QUERIES = (process.env.JSEARCH_QUERIES ||
+  profile.searchQueries?.join(",") ||
   "unity developer remote,ai engineer remote europe,full stack developer remote europe")
   .split(",").map((s) => s.trim()).filter(Boolean);
 

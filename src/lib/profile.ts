@@ -1,7 +1,14 @@
-// Search profile. Scoring/filtering keys off this file. The defaults below are
-// game-dev/AI/full-stack flavored; override `tracks` and `acceptRegions` in your
-// gitignored config/user.ts to retarget the radar without touching tracked code.
+// Search profile. Scoring/filtering keys off this file. Three layers, most
+// personal wins:
+//   1. explicit overrides in gitignored config/user.ts (tracks, acceptRegions)
+//   2. the CV-generated profile (npm run profile:generate → reviewed JSON)
+//   3. the built-in template defaults below (game-dev/AI flavored sample)
+// Role signals/negatives are mirrors derived from the universal taxonomy when
+// a generated profile selects families — that's what makes the pipeline work
+// for a PM or a designer the same way it works for a developer.
 import { user } from "../../config/user";
+import { cvHash, loadGeneratedProfile } from "./profilegen";
+import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
 export type Track = string;
 
@@ -13,7 +20,17 @@ export interface TrackDef {
 }
 
 // Optional overrides a user may add to config/user.ts.
-const u = user as typeof user & { tracks?: TrackDef[]; acceptRegions?: string[] };
+const u = user as typeof user & {
+  tracks?: TrackDef[];
+  acceptRegions?: string[];
+  targetRoles?: string;
+};
+
+const generated = loadGeneratedProfile();
+// Stale = the CV (or stated target) changed after generation; scoring still
+// works, but the radar is aimed at the old CV. Ingest surfaces a warning.
+export const generatedProfileStale =
+  generated !== null && generated.cvHash !== cvHash(user.cv, u.targetRoles);
 
 // A job must look remote OR be in one of these regions to survive the filter.
 const defaultRegions = ["remote", "europe", "emea", "türkiye", "turkey", "turkiye", "izmir", "istanbul", "germany", "berlin", "cyprus", "poland", "lithuania"];
@@ -32,8 +49,8 @@ export const profile = {
   // a track only wins strongly if one of its `titleKeywords` appears in the job
   // title. `bodyKeywords` add supporting weight from the description.
   // Tracks are ordered specific → generic; on a tie the earlier track wins.
-  // Override the whole list from config/user.ts (`tracks: [...]`) to retarget.
-  tracks: u.tracks ?? ([
+  // Precedence: config/user.ts override > CV-generated profile > this template.
+  tracks: u.tracks ?? generated?.tracks ?? ([
     {
       key: "playable" as Track,
       label: "Playable Ads",
@@ -67,22 +84,33 @@ export const profile = {
     "financial advisor", "real estate", "clinical", "therapist", "marketing manager",
   ],
 
-  // A job in a technical track must show one of these role signals in its TITLE.
-  // This is what separates "Game Developer" from "Business Development Manager
-  // at a game studio" — the single most effective noise filter.
-  roleSignals: [
-    "developer", "engineer", "programmer", "architect", "swe",
-    "full stack", "fullstack", "full-stack", "backend", "frontend", "back end", "front end",
-    "coder", "sde", "dev ",
-  ],
+  // A job must announce one of these role signals in its TITLE. This is what
+  // separates "Game Developer" from "Business Development Manager at a game
+  // studio" — the single most effective noise filter. With a generated profile
+  // these derive from the selected taxonomy families (a PM's signals are a
+  // developer's negatives — same table, mirrored); the hardcoded lists below
+  // are the engineering-flavored template fallback.
+  roleSignals: generated
+    ? deriveRoleSignals(generated.families)
+    : [
+        "developer", "engineer", "programmer", "architect", "swe",
+        "full stack", "fullstack", "full-stack", "backend", "frontend", "back end", "front end",
+        "coder", "sde", "dev ",
+      ],
 
-  // Non-engineering roles that slip past keyword matching at tech companies.
-  roleNegatives: [
-    "business development", "marketing", "counsel", "legal", "events lead", "event lead",
-    "compensation", "people partner", "talent", "content writer", "community manager",
-    "product manager", "sales", "artist", "animator", "hr ", "human resources",
-    "designer", "art director", "producer", "analyst", "accountant", "finance",
-    "operations manager", "office manager", "executive assistant", "solutions architect",
-    "growth", "community", "developer relations", "devrel", "developer advocate", "evangelist",
-  ],
+  // Roles from every UNSELECTED family — the mirror of roleSignals.
+  roleNegatives: generated
+    ? deriveRoleNegatives(generated.families)
+    : [
+        "business development", "marketing", "counsel", "legal", "events lead", "event lead",
+        "compensation", "people partner", "talent", "content writer", "community manager",
+        "product manager", "sales", "artist", "animator", "hr ", "human resources",
+        "designer", "art director", "producer", "analyst", "accountant", "finance",
+        "operations manager", "office manager", "executive assistant", "solutions architect",
+        "growth", "community", "developer relations", "devrel", "developer advocate", "evangelist",
+      ],
+
+  // Aggregator search strings (JSearch/Adzuna). Env vars still win; the
+  // generated profile supplies persona-appropriate defaults.
+  searchQueries: generated?.searchQueries ?? null,
 } as const;

@@ -1,5 +1,8 @@
 // Copy this file to config/user.ts and fill in your own details.
 // config/user.ts is gitignored, so your CV and contact info stay private.
+// Optional: state what you're aiming for when it differs from your CV's past
+// (career changers). Feeds `npm run profile:generate`.
+//   targetRoles: "senior product manager in gaming",
 export const user = {
   name: "Your Name",
   location: "Your City, Country (region)",

@@ -1,4 +1,5 @@
 import { runIngest } from "../src/lib/ingest";
+import { generatedProfileStale } from "../src/lib/profile";
 import { prisma } from "../src/lib/db";
 
 const report = await runIngest();
@@ -30,6 +31,9 @@ if (report.harvest) {
       `${h.known} already known (${h.scanned} URLs scanned, ${h.resolved} resolved)`,
   );
   if (h.atsLikeHosts.length) console.log("  ATS-like unmatched hosts:", h.atsLikeHosts.join(", "));
+}
+if (generatedProfileStale) {
+  console.log("NOTE: your CV changed since the profile was generated — run `npm run profile:generate` to re-aim the radar.");
 }
 if (report.errors.length) console.log("Errors:", report.errors);
 

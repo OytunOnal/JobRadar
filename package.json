@@ -13,8 +13,9 @@
     "discovery:validate": "tsx --env-file=.env scripts/discover-validate.ts",
     "discovery:crawl": "tsx --env-file=.env scripts/discover-crawl.ts",
     "discovery:hf": "tsx --env-file=.env scripts/discover-hf.ts",
+    "profile:generate": "tsx --env-file=.env scripts/profile-generate.ts",
     "fit:batch": "tsx --env-file=.env scripts/fit-batch.ts",
-    "test": "node --import tsx --test tests/score.test.ts tests/fit.test.ts tests/discovery.test.ts tests/harvest.test.ts tests/validate.test.ts tests/crawl.test.ts tests/pool.test.ts tests/freshness.test.ts tests/domains.test.ts tests/dedup.test.ts tests/hfDataset.test.ts",
+    "test": "node --import tsx --test tests/score.test.ts tests/fit.test.ts tests/discovery.test.ts tests/harvest.test.ts tests/validate.test.ts tests/crawl.test.ts tests/pool.test.ts tests/freshness.test.ts tests/domains.test.ts tests/dedup.test.ts tests/hfDataset.test.ts tests/profilegen.test.ts",
     "db:push": "prisma db push",
     "db:studio": "prisma studio"
   },

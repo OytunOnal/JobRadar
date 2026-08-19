@@ -1,3 +1,4 @@
+import { profile } from "../profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Adzuna aggregates many job boards (free developer API, strong EU coverage,
@@ -8,7 +9,10 @@ import { stripHtml, type RawJob, type Source } from "./types";
 // defaults stay modest to respect the free tier.
 const COUNTRIES = (process.env.ADZUNA_COUNTRIES || "gb,de,nl")
   .split(",").map((s) => s.trim()).filter(Boolean);
-const QUERIES = (process.env.ADZUNA_QUERIES || "unity developer,game developer,ai engineer,full stack developer")
+// Env wins; else the CV-generated profile; else the template default.
+const QUERIES = (process.env.ADZUNA_QUERIES ||
+  profile.searchQueries?.join(",") ||
+  "unity developer,game developer,ai engineer,full stack developer")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
 export const adzuna: Source = {

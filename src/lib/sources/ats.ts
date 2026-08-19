@@ -36,6 +36,9 @@ export async function lever(token: string, company: string, region = ""): Promis
     company,
     location: j.categories?.location ?? "",
     remote: /remote/i.test(j.categories?.location ?? "") || /remote/i.test(j.workplaceType ?? ""),
+    workMode: j.workplaceType === "remote" ? "remote" as const
+      : j.workplaceType === "hybrid" ? "hybrid" as const
+      : j.workplaceType === "onsite" ? "onsite" as const : undefined,
     description: j.descriptionPlain ?? stripHtml(j.description),
     postedAt: j.createdAt ? new Date(j.createdAt) : undefined,
   }));
@@ -110,6 +113,7 @@ export async function recruitee(token: string, company: string): Promise<RawJob[
     company: o.company_name || company,
     location: [o.city, o.country].filter(Boolean).join(", "),
     remote: Boolean(o.remote),
+    workMode: o.remote ? "remote" as const : o.hybrid ? "hybrid" as const : undefined,
     description: stripHtml(o.description ?? "") || (o.title ?? ""),
     postedAt: o.published_at
       ? new Date(o.published_at)

@@ -42,6 +42,10 @@ model Job {
   company     String
   location    String?
   remote      Boolean  @default(false)
+  // remote | hybrid | onsite — explicit from the source when it says so,
+  // else derived from the posting text. `remote` stays as the boolean the
+  // region filter keys on (hybrid is location-bound, NOT remote).
+  workMode    String   @default("onsite")
   salaryText  String?
   description String
 

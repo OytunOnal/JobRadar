@@ -1,5 +1,6 @@
 import { prisma } from "../src/lib/db";
 import { scoreJob } from "../src/lib/score";
+import { deriveWorkMode } from "../src/lib/sources/types";
 import { profile } from "../src/lib/profile";
 
 // Re-run the (free, deterministic) keyword scorer over every stored job.
@@ -22,7 +23,7 @@ const jobs = await prisma.job.findMany({
 let changedTrack = 0;
 let disqualified = 0;
 for (const j of jobs) {
-  const s = scoreJob({
+  const raw = {
     source: j.source,
     externalId: j.externalId,
     url: j.url,
@@ -31,14 +32,15 @@ for (const j of jobs) {
     location: j.location ?? undefined,
     remote: j.remote,
     description: j.description,
-  });
+  };
+  const s = scoreJob(raw);
   // Rows that no longer pass are kept (the user may have acted on them) but
   // sink: score 0 and track "other" put them behind everything relevant.
   const track = s.disqualified ? "other" : s.track;
   if (s.disqualified) disqualified++;
   const updated = await prisma.job.update({
     where: { id: j.id },
-    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy },
+    data: { score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy, workMode: deriveWorkMode(raw) },
     select: { track: true },
   });
   if (updated.track !== track) changedTrack++; // defensive; should not happen

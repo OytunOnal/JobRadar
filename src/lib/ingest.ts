@@ -17,7 +17,7 @@ import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
 import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
-import type { RawJob, Source } from "./sources/types";
+import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -186,6 +186,7 @@ export async function runIngest(): Promise<IngestReport> {
       company: job.company,
       location: job.location ?? null,
       remote: job.remote,
+      workMode: deriveWorkMode(job),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
       description: job.description.slice(0, 8000),
@@ -211,6 +212,7 @@ export async function runIngest(): Promise<IngestReport> {
           scoreReason: data.scoreReason,
           scoredBy: data.scoredBy,
           salaryText: data.salaryText,
+          workMode: data.workMode,
           contentKey: ck,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),

@@ -1,4 +1,6 @@
 // The shape every source normalizes into before scoring/storage.
+export type WorkMode = "remote" | "hybrid" | "onsite";
+
 export interface RawJob {
   source: string;
   externalId: string;
@@ -7,9 +9,23 @@ export interface RawJob {
   company: string;
   location?: string;
   remote: boolean;
+  // Set only when the source states it explicitly (Lever workplaceType,
+  // Recruitee's hybrid flag); otherwise deriveWorkMode infers it at ingest.
+  workMode?: WorkMode;
   salaryText?: string;
   description: string;
   postedAt?: Date;
+}
+
+// Explicit source signal wins; otherwise "hybrid" in the posting text beats
+// the remote flag (a "hybrid, 2 days office" job often also says remote-ish
+// things), then the remote flag, then onsite.
+export function deriveWorkMode(job: RawJob): WorkMode {
+  if (job.workMode) return job.workMode;
+  const text = `${job.title} ${job.location ?? ""} ${job.description.slice(0, 2000)}`;
+  if (/\bhybrid\b/i.test(text)) return "hybrid";
+  if (job.remote) return "remote";
+  return "onsite";
 }
 
 export type Source = {

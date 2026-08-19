@@ -14,7 +14,12 @@ export const dynamic = "force-dynamic";
 // or the defaults in profile.ts).
 const TRACKS = ["all", ...profile.tracks.map((t) => t.key)];
 const VERDICTS = ["all", "strong", "possible", "weak"] as const;
-const LOCS = ["all", "remote", "on-site"] as const;
+// Multi-select work-mode filter; "all" clears. Values match Job.workMode.
+const WORK_MODES = [
+  { value: "remote", label: "remote" },
+  { value: "hybrid", label: "hybrid" },
+  { value: "onsite", label: "on-site" },
+] as const;
 const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
 const AGES = ["fresh", "all"] as const;
 const PAGE_SIZE = 30;
@@ -42,7 +47,11 @@ export default async function Page({
   const track = sp.track ?? "all";
   const status = sp.status ?? "active";
   const verdict = sp.verdict ?? "all";
-  const loc = sp.loc ?? "all";
+  // loc is a comma list of work modes (e.g. "remote,hybrid"); empty = all.
+  const locSet = new Set(
+    (sp.loc ?? "").split(",").map((s) => s.trim()).filter((s) => WORK_MODES.some((m) => m.value === s)),
+  );
+  const loc = [...locSet].sort().join(",");
   const age = sp.age ?? "fresh";
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
@@ -54,8 +63,7 @@ export default async function Page({
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
   else if (status !== "all") where.status = status;
   if (verdict !== "all") where.fitVerdict = verdict;
-  if (loc === "remote") where.remote = true;
-  else if (loc === "on-site") where.remote = false;
+  if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
 
   // The pool's own clock: how far the newest observation has advanced. Guards
@@ -116,7 +124,7 @@ export default async function Page({
     if (merged.track !== "all") p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
-    if (merged.loc !== "all") p.set("loc", merged.loc);
+    if (merged.loc) p.set("loc", merged.loc);
     if (merged.age !== "fresh") p.set("age", merged.age);
     if (merged.q) p.set("q", merged.q);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
@@ -138,7 +146,7 @@ export default async function Page({
           {track !== "all" && <input type="hidden" name="track" value={track} />}
           {status !== "active" && <input type="hidden" name="status" value={status} />}
           {verdict !== "all" && <input type="hidden" name="verdict" value={verdict} />}
-          {loc !== "all" && <input type="hidden" name="loc" value={loc} />}
+          {loc && <input type="hidden" name="loc" value={loc} />}
           <input name="q" defaultValue={q} placeholder="Search title or company" aria-label="Search jobs" />
         </form>
         <form action={triggerIngest}>
@@ -169,9 +177,15 @@ export default async function Page({
         </div>
         <div className="fgroup">
           <span className="flabel">where</span>
-          {LOCS.map((l) => (
-            <a key={l} href={href({ loc: l })} className={`chip ${loc === l ? "active" : ""}`}>{l}</a>
-          ))}
+          <a href={href({ loc: "" })} className={`chip ${locSet.size === 0 ? "active" : ""}`}>all</a>
+          {WORK_MODES.map((m) => {
+            const next = new Set(locSet);
+            if (next.has(m.value)) next.delete(m.value); else next.add(m.value);
+            return (
+              <a key={m.value} href={href({ loc: [...next].sort().join(",") })}
+                 className={`chip ${locSet.has(m.value) ? "active" : ""}`}>{m.label}</a>
+            );
+          })}
         </div>
         <div className="fgroup">
           <span className="flabel">status</span>
@@ -218,7 +232,7 @@ export default async function Page({
               </p>
               <div className="meta">
                 {j.track && <span className="badge">{j.track}</span>}
-                {j.remote && <span className="badge">remote</span>}
+                {j.workMode !== "onsite" && <span className="badge">{j.workMode}</span>}
                 {(freshness === "evergreen" || freshness === "delisted") && (
                   <span className={`badge age-${freshness}`}>{freshness}</span>
                 )}

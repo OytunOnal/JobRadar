@@ -23,7 +23,10 @@ import type { RawJob, Source } from "./sources/types";
 // Bounded to keep token cost + rate-limit pressure predictable.
 const AUTO_FIT_TOP_N = 25;
 
-// Strong-tier comparison calls the semantic dedup may spend per ingest.
+// Semantic-dedup budgets per ingest: how many new jobs get a title prefilter
+// at all (fast tier), and how many full comparisons (strong tier) may run.
+// The first trial run showed unbudgeted prefilters eating the free tiers.
+const DEDUP_MAX_CHECKS = 60;
 const DEDUP_MAX_COMPARES = 15;
 
 const aggregators: Source[] = [
@@ -236,7 +239,8 @@ export async function runIngest(): Promise<IngestReport> {
   // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
   if (llmEnabled() && newlyCreated.length > 0) {
     let compareBudget = DEDUP_MAX_COMPARES;
-    for (const nj of newlyCreated) {
+    let dedupErrors = 0;
+    for (const nj of newlyCreated.slice(0, DEDUP_MAX_CHECKS)) {
       if (compareBudget <= 0) break;
       try {
         const candidates = await prisma.job.findMany({
@@ -259,9 +263,12 @@ export async function runIngest(): Promise<IngestReport> {
           report.errors.push(`dedup stopped: token budget reached (${report.semanticDupes} found)`);
           break;
         }
-        report.errors.push(`dedup ${nj.id}: ${e.message}`);
+        // One line per failure flooded the first trial's report — summarize.
+        dedupErrors++;
+        if (dedupErrors <= 3) report.errors.push(`dedup ${nj.id}: ${e.message}`);
       }
     }
+    if (dedupErrors > 3) report.errors.push(`dedup: ${dedupErrors - 3} more failures suppressed`);
   }
 
   // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so the

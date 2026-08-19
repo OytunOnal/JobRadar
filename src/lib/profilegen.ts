@@ -113,7 +113,9 @@ export async function generateProfile(
 ): Promise<GeneratedProfile> {
   const raw = await chatFn(
     [{ role: "user", content: generationPrompt(cv, targetRoles) }],
-    { temperature: 0.2, maxTokens: 1500, tier: "strong" },
+    // Generous ceiling: reasoning models (gpt-oss on Groq) spend part of the
+    // budget thinking before the JSON; a low cap truncates mid-array.
+    { temperature: 0.2, maxTokens: 4000, tier: "strong" },
   );
   if (!raw) throw new Error("no LLM provider answered — set an API key in .env");
   const validated = validateGenerated(raw);

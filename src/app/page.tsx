@@ -10,9 +10,9 @@ import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./action
 
 export const dynamic = "force-dynamic";
 
-// Track chips come from the user's configured tracks (config/user.ts override
-// or the defaults in profile.ts).
-const TRACKS = ["all", ...profile.tracks.map((t) => t.key)];
+// Track chips come from the user's configured tracks (config/user.ts override,
+// generated profile, or the template defaults). Multi-select; "all" clears.
+const TRACK_KEYS = profile.tracks.map((t) => t.key);
 const VERDICTS = ["all", "strong", "possible", "weak"] as const;
 // Multi-select work-mode filter; "all" clears. Values match Job.workMode.
 const WORK_MODES = [
@@ -44,7 +44,11 @@ export default async function Page({
   searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string }>;
 }) {
   const sp = await searchParams;
-  const track = sp.track ?? "all";
+  // track is a comma list of track keys; empty = all.
+  const trackSet = new Set(
+    (sp.track ?? "").split(",").map((s) => s.trim()).filter((s) => TRACK_KEYS.includes(s)),
+  );
+  const track = [...trackSet].sort().join(",");
   const status = sp.status ?? "active";
   const verdict = sp.verdict ?? "all";
   // loc is a comma list of work modes (e.g. "remote,hybrid"); empty = all.
@@ -59,7 +63,7 @@ export default async function Page({
   // Semantic duplicates (reposts of a tracked role) never render.
   const where: any = { duplicateOfId: null };
   const and: any[] = [];
-  if (track !== "all") where.track = track;
+  if (trackSet.size > 0) where.track = { in: [...trackSet] };
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
   else if (status !== "all") where.status = status;
   if (verdict !== "all") where.fitVerdict = verdict;
@@ -121,7 +125,7 @@ export default async function Page({
   const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age", string>>) => {
     const p = new URLSearchParams();
     const merged = { track, status, verdict, loc, q, age, page: "", ...over };
-    if (merged.track !== "all") p.set("track", merged.track);
+    if (merged.track) p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
     if (merged.loc) p.set("loc", merged.loc);
@@ -143,7 +147,7 @@ export default async function Page({
           </div>
         </div>
         <form className="search" action="/" method="get">
-          {track !== "all" && <input type="hidden" name="track" value={track} />}
+          {track && <input type="hidden" name="track" value={track} />}
           {status !== "active" && <input type="hidden" name="status" value={status} />}
           {verdict !== "all" && <input type="hidden" name="verdict" value={verdict} />}
           {loc && <input type="hidden" name="loc" value={loc} />}
@@ -165,9 +169,15 @@ export default async function Page({
       <div className="filterbar">
         <div className="fgroup">
           <span className="flabel">track</span>
-          {TRACKS.map((t) => (
-            <a key={t} href={href({ track: t })} className={`chip ${track === t ? "active" : ""}`}>{t}</a>
-          ))}
+          <a href={href({ track: "" })} className={`chip ${trackSet.size === 0 ? "active" : ""}`}>all</a>
+          {TRACK_KEYS.map((t) => {
+            const next = new Set(trackSet);
+            if (next.has(t)) next.delete(t); else next.add(t);
+            return (
+              <a key={t} href={href({ track: [...next].sort().join(",") })}
+                 className={`chip ${trackSet.has(t) ? "active" : ""}`}>{t}</a>
+            );
+          })}
         </div>
         <div className="fgroup">
           <span className="flabel">fit</span>

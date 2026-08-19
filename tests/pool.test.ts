@@ -53,9 +53,10 @@ test("blendHitRate is a 70/30 moving average", () => {
 test("curatedKeys matches companies.ts entries so boards are not fetched twice", () => {
   const keys = curatedKeys();
   // Real entries from the curated list — provider ids equal registry platform ids.
-  assert.ok(keys.has("greenhouse:peak"));
   assert.ok(keys.has("lever:dreamgames"));
   assert.ok(keys.has("ashby:supabase"));
+  assert.ok(keys.has("ashby:voodoo")); // moved from Lever after validation caught the dead board
   assert.ok(keys.has("smartrecruiters:gameloft")); // curated as "Gameloft" — key is lowercased
+  assert.ok(!keys.has("greenhouse:peak")); // removed: token belongs to an unrelated company now
   assert.ok(!keys.has("workable:azumo")); // discovered, not curated
 });

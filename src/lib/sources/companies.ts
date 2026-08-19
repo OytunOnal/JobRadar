@@ -22,12 +22,16 @@ export interface Company {
 export const companies: Company[] = [
   // --- Casual / mobile games (example niche: incl. Turkish studios) ---
   { name: "Dream Games", provider: "lever", token: "dreamgames", tags: ["games", "casual", "turkey"] },
-  { name: "Peak Games", provider: "greenhouse", token: "peak", tags: ["games", "casual", "turkey"] },
+  // Peak Games removed 2026-08-19: validation showed gh:peak now serves a
+  // different company entirely ("Peak Physical Therapy"), and no Greenhouse
+  // board exists under peakgames/peak-games. (Zynga-owned; likely hires
+  // through Zynga's channels now.)
   { name: "Good Job Games", provider: "greenhouse", token: "goodjobgames", tags: ["games", "casual", "turkey"] },
   { name: "Gameloft", provider: "smartrecruiters", token: "Gameloft", tags: ["games", "mobile"] },
   { name: "Scopely", provider: "greenhouse", token: "scopely", tags: ["games", "mobile"] },
   { name: "Wooga", provider: "greenhouse", token: "wooga", tags: ["games", "casual"] },
-  { name: "Voodoo", provider: "lever", token: "voodoo", tags: ["games", "playable", "hypercasual"] },
+  // Moved from Lever (validated dead there) to Ashby — probe-verified live.
+  { name: "Voodoo", provider: "ashby", token: "voodoo", tags: ["games", "playable", "hypercasual"] },
 
   { name: "Codeway", provider: "ashby", token: "codeway", tags: ["mobile", "turkey"] },
   { name: "Supercell", provider: "ashby", token: "supercell", tags: ["games", "mobile"] },

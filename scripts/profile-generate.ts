@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { user } from "../config/user";
+import { CV_CONTEXT } from "../src/lib/cv";
 import { generateProfile, GENERATED_PATH } from "../src/lib/profilegen";
 import { familiesByKey, deriveRoleNegatives } from "../src/lib/taxonomy";
 
@@ -16,7 +17,7 @@ console.log("=== JobRadar profile generation ===");
 if (u.targetRoles) console.log(`Stated target: ${u.targetRoles}`);
 console.log("Generating from CV (one strong-tier LLM call)…\n");
 
-const profile = await generateProfile(user.cv, u.targetRoles);
+const profile = await generateProfile(CV_CONTEXT, u.targetRoles);
 
 const fams = familiesByKey(profile.families);
 console.log(`Families: ${fams.map((f) => f.label).join(", ")}`);

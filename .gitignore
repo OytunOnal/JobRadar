@@ -13,5 +13,6 @@ data/
 # Personal data — never commit (each user keeps their own, gitignored)
 config/user.ts
 config/profile.generated.json
+config/cv.txt
 application-kit.md
 job-search-sites.md

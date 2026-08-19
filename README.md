@@ -88,22 +88,26 @@ npm install
 #    scoring + cover letters. Without any, JobRadar falls back to keyword scoring.
 cp .env.example .env         # then edit: add ANTHROPIC_API_KEY (and/or others)
 
-# 2. Your profile — name, location, CV. Kept private (gitignored).
+# 2. Your profile — name, location. Kept private (gitignored).
 cp config/user.example.ts config/user.ts   # then fill in your details
 
-# 3. (optional) Retarget the search to your field — add `tracks` and
+# 3. Your CV — hand it your resume and the radar aims itself:
+npm run cv:import -- "path/to/Resume.pdf"   # .pdf, .txt, or .md
+npm run profile:generate   # CV -> role families + scoring tracks (review the JSON it prints)
+
+# 4. (optional) Fine-tune — add `targetRoles` (career changers) or explicit `tracks` and
 #    `acceptRegions` overrides in config/user.ts (see the commented examples),
 #    and edit src/lib/sources/companies.ts (companies to watch via their ATS).
 
-# 4. Database (local SQLite)
+# 5. Database (local SQLite)
 npx prisma db push
 
-# 5. (optional but recommended) Fill the company pool from the web archives —
+# 6. (optional but recommended) Fill the company pool from the web archives —
 #    takes ~15 min, finds tens of thousands of boards, then validate a slice:
 npm run discovery:crawl
 npm run discovery:validate -- 5000
 
-# 6. Run
+# 7. Run
 npm run ingest    # fetch + score jobs into the DB (also harvests new boards)
 npm run dev       # dashboard at http://localhost:3000
 ```
@@ -120,6 +124,8 @@ Get a free/cheap API key from whichever provider you prefer:
 | `npm run discovery:crawl` | Bulk-discover company boards from Common Crawl + Wayback CDX (monthly job; flags: `--platform=`, `--source=`, `--snapshots=`). |
 | `npm run discovery:validate` | Probe candidate boards → active/dead; extracts company names; 30-day rechecks. Optional cap: `-- 5000`. |
 | `npm run discovery:audit` | Full-accounting check of the slug extractor against a URL corpus — any UNEXPLAINED line is a pattern gap. |
+| `npm run cv:import` | Import your resume (`-- path.pdf`); becomes the CV context for scoring, letters, and profile generation. |
+| `npm run profile:generate` | One LLM call: CV -> role families, granular scoring tracks (with a generic-title safety net), aggregator queries. Reviewed JSON, editable, never regenerates silently. |
 | `npm run fit:batch` | LLM fit-score the **whole board** in one Anthropic batch (50% cheaper, async). Resume with `npm run fit:batch collect <id>`. |
 | `npm run dev` | Start the dashboard. |
 | `npm run db:studio` | Open Prisma Studio to inspect the DB. |

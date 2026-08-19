@@ -7,6 +7,7 @@
 // a generated profile selects families — that's what makes the pipeline work
 // for a PM or a designer the same way it works for a developer.
 import { user } from "../../config/user";
+import { CV_CONTEXT } from "./cv";
 import { cvHash, loadGeneratedProfile } from "./profilegen";
 import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
@@ -30,7 +31,7 @@ const generated = loadGeneratedProfile();
 // Stale = the CV (or stated target) changed after generation; scoring still
 // works, but the radar is aimed at the old CV. Ingest surfaces a warning.
 export const generatedProfileStale =
-  generated !== null && generated.cvHash !== cvHash(user.cv, u.targetRoles);
+  generated !== null && generated.cvHash !== cvHash(CV_CONTEXT, u.targetRoles);
 
 // A job must look remote OR be in one of these regions to survive the filter.
 const defaultRegions = ["remote", "europe", "emea", "türkiye", "turkey", "turkiye", "izmir", "istanbul", "germany", "berlin", "cyprus", "poland", "lithuania"];

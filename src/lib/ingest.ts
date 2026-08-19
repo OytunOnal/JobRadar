@@ -13,7 +13,7 @@ import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
 import { harvest, type HarvestReport } from "./discovery/harvest";
-import { boardSources } from "./discovery/boardSources";
+import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import type { RawJob, Source } from "./sources/types";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
@@ -105,6 +105,15 @@ export async function runIngest(): Promise<IngestReport> {
       const jobs = await src.fetch();
       report.perSource[src.name] = jobs.length;
       all.push(...jobs);
+      // Adaptive frequency: tell the board how it did against the keyword
+      // threshold, so no-hit boards get fetched less often over time.
+      if (src.name.startsWith("board:")) {
+        const passed = jobs.filter((j) => {
+          const s = scoreJob(j);
+          return !s.disqualified && s.score >= STORE_THRESHOLD;
+        }).length;
+        await recordBoardOutcome(src.name, jobs.length, passed).catch(() => {});
+      }
     } catch (e: any) {
       report.errors.push(`${src.name}: ${e.message}`);
       report.perSource[src.name] = 0;

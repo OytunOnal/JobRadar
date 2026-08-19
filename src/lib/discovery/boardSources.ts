@@ -53,7 +53,8 @@ export async function boardSources(limit = DEFAULT_MAX_BOARDS): Promise<Source[]
 
     const company = b.companyName ?? titleizeToken(b.token);
     out.push({
-      name: `board:${b.platform}:${b.token}${b.region ? `@${b.region}` : ""}`,
+      // "|" as the region separator — "@" appears inside Workday tokens.
+      name: `board:${b.platform}:${b.token}${b.region ? `|${b.region}` : ""}`,
       fetch: async () => {
         const jobs = await atsFetchers[fetcherId](b.token, company, b.region);
         await prisma.atsBoard.update({
@@ -65,6 +66,65 @@ export async function boardSources(limit = DEFAULT_MAX_BOARDS): Promise<Source[]
     });
   }
   return out;
+}
+
+// ── Adaptive fetch frequency (hitRate) ───────────────────────────────────────
+// After each ingest, every fetched board reports how many of its jobs passed
+// the keyword threshold. Boards that keep missing get fetched less often;
+// a single hit snaps them back to daily. This is what keeps a many-thousand
+// board pool affordable: the request budget concentrates on companies that
+// actually match the user's tracks.
+
+export function parseBoardSourceName(
+  name: string,
+): { platform: string; token: string; region: string } | null {
+  if (!name.startsWith("board:")) return null;
+  const rest = name.slice("board:".length);
+  const sep = rest.indexOf(":");
+  if (sep <= 0) return null;
+  const platform = rest.slice(0, sep);
+  let token = rest.slice(sep + 1);
+  let region = "";
+  const bar = token.lastIndexOf("|");
+  if (bar >= 0) {
+    region = token.slice(bar + 1);
+    token = token.slice(0, bar);
+  }
+  if (!token) return null;
+  return { platform, token, region };
+}
+
+// Miss → back off exponentially (capped at monthly); hit → straight back to
+// daily. Self-correcting: one good posting rescues a demoted board instantly.
+export function nextInterval(current: number, hadHit: boolean): number {
+  if (hadHit) return 1;
+  return Math.min(30, Math.max(2, current * 2));
+}
+
+// Exponential moving average so one odd run doesn't erase history.
+export function blendHitRate(previous: number, latest: number): number {
+  return Math.round((previous * 0.7 + latest * 0.3) * 1000) / 1000;
+}
+
+export async function recordBoardOutcome(
+  sourceName: string,
+  fetched: number,
+  passed: number,
+): Promise<void> {
+  const key = parseBoardSourceName(sourceName);
+  if (!key) return;
+  const board = await prisma.atsBoard.findUnique({
+    where: { platform_token_region: key },
+  });
+  if (!board) return;
+  const rate = fetched > 0 ? passed / fetched : 0;
+  await prisma.atsBoard.update({
+    where: { id: board.id },
+    data: {
+      hitRate: blendHitRate(board.hitRate, rate),
+      fetchIntervalDays: nextInterval(board.fetchIntervalDays, passed > 0),
+    },
+  });
 }
 
 // Bring the hand-curated list under the discovery layer's supervision: each

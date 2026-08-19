@@ -227,7 +227,7 @@ export async function runIngest(): Promise<IngestReport> {
         if (!fit) continue;
         await prisma.job.update({
           where: { id: j.id },
-          data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment },
+          data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk },
         });
         report.fitAnalyzed++;
         // Throttle to stay under the provider's per-minute token limit.

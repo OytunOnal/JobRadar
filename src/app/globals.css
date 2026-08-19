@@ -129,6 +129,7 @@ header.top {
 /* Freshness warnings: talent-pool postings and roles gone from their source */
 .badge.age-evergreen { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
 .badge.age-delisted { color: var(--faint); border-style: dashed; }
+.badge.ghost { color: var(--weak, #b58900); border-style: dotted; }
 .fitcomment { margin-top: 8px; font-size: 13px; color: var(--text); opacity: 0.92; }
 .reason {
   margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--faint);

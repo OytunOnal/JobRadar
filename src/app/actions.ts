@@ -36,7 +36,7 @@ export async function analyzeFitAction(formData: FormData) {
   if (!fit) return;
   await prisma.job.update({
     where: { id },
-    data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment },
+    data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk },
   });
   revalidatePath("/");
 }

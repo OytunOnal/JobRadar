@@ -220,6 +220,10 @@ export default async function Page({
                 {(freshness === "evergreen" || freshness === "delisted") && (
                   <span className={`badge age-${freshness}`}>{freshness}</span>
                 )}
+                {j.ghostRisk && <span className="badge ghost">ghost?</span>}
+                {j.fitCategory && j.fitCategory !== "NONE" && j.fitCategory !== "OTHER" && (
+                  <span className="badge">{j.fitCategory.toLowerCase().replace("_", " ")}</span>
+                )}
                 {j.company}
                 {j.location ? ` · ${j.location}` : ""}
                 {j.salaryText ? ` · ${j.salaryText}` : ""}

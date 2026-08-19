@@ -59,6 +59,9 @@ model Job {
   fitScore    Int?
   fitVerdict  String?  // strong | possible | weak
   fitComment  String?
+  fitCategory String?  // why weak: NO_VISA | LANGUAGE | PROFILE | OTHER (NONE otherwise)
+  // Posting reads like an evergreen/talent-pool ad, per the fit analysis.
+  ghostRisk   Boolean  @default(false)
 
   // Application pipeline
   status      String   @default("new") // new | interested | applied | interview | rejected | offer | ignored

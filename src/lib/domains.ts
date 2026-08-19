@@ -45,7 +45,7 @@ export function isWallJobUrl(url: string): boolean {
 //       first-party, deduped winner, apply link goes straight to the company
 //   1 — curated remote boards (Remotive, WWR, ...): human-reviewed listings
 //   0 — mass aggregators (Adzuna, JSearch): real jobs mixed with reposts
-const TIER0_SOURCES = new Set(["adzuna", "jsearch"]);
+const TIER0_SOURCES = new Set(["adzuna", "jsearch", "indeed"]);
 
 export function sourceTrust(source: string): number {
   if (source.includes(":")) return 2;

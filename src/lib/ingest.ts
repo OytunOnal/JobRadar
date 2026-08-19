@@ -10,6 +10,7 @@ import { weworkremotely } from "./sources/weworkremotely";
 import { adzuna } from "./sources/adzuna";
 import { jsearch } from "./sources/jsearch";
 import { linkedin } from "./sources/linkedin";
+import { indeed } from "./sources/indeed";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -43,6 +44,7 @@ const aggregators: Source[] = [
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // needs APIFY_API_TOKEN (free ~$5/mo credit); skips itself otherwise
+  indeed,   // same token; kaix actor, DACH countries by default
 ];
 
 

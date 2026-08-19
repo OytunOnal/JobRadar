@@ -16,11 +16,15 @@ import { harvest, type HarvestReport } from "./discovery/harvest";
 import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
 import { isJunkJobUrl, sourceTrust } from "./domains";
+import { findDuplicate } from "./dedup";
 import type { RawJob, Source } from "./sources/types";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
 const AUTO_FIT_TOP_N = 25;
+
+// Strong-tier comparison calls the semantic dedup may spend per ingest.
+const DEDUP_MAX_COMPARES = 15;
 
 const aggregators: Source[] = [
   arbeitnow,
@@ -70,6 +74,7 @@ export interface IngestReport {
   perSource: Record<string, number>;
   tooOld: number;
   junkDomain: number;
+  semanticDupes: number;
   errors: string[];
   harvest?: HarvestReport;
 }
@@ -91,6 +96,7 @@ export async function runIngest(): Promise<IngestReport> {
     perSource: {},
     tooOld: 0,
     junkDomain: 0,
+    semanticDupes: 0,
     errors: [],
   };
 
@@ -136,6 +142,7 @@ export async function runIngest(): Promise<IngestReport> {
   // network resolves are spent only on this run's newly-stored jobs.
   const aggregatorUrls: string[] = [];
   const newlyStoredUrls: string[] = [];
+  const newlyCreated: Array<{ id: string; title: string; company: string; description: string }> = [];
   for (const job of all) {
     if (isAggregatorJob(job) && job.url) aggregatorUrls.push(job.url);
   }
@@ -208,8 +215,9 @@ export async function runIngest(): Promise<IngestReport> {
       });
       report.updated++;
     } else {
-      await prisma.job.create({ data });
+      const created = await prisma.job.create({ data });
       report.stored++;
+      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: created.description });
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
   }
@@ -222,11 +230,45 @@ export async function runIngest(): Promise<IngestReport> {
     report.errors.push(`harvest: ${e.message}`);
   }
 
+  // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we
+  // already track from the same company (repost / reworded / per-city)?
+  // Cheap funnel: no same-company rows → no LLM call at all; a titles-only
+  // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
+  if (llmEnabled() && newlyCreated.length > 0) {
+    let compareBudget = DEDUP_MAX_COMPARES;
+    for (const nj of newlyCreated) {
+      if (compareBudget <= 0) break;
+      try {
+        const candidates = await prisma.job.findMany({
+          where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
+          orderBy: { lastSeenAt: "desc" },
+          take: 12,
+          select: { id: true, title: true, description: true },
+        });
+        if (candidates.length === 0) continue;
+        const outcome = await findDuplicate(nj, candidates);
+        compareBudget -= outcome.compareCalls;
+        if (outcome.duplicateOfId) {
+          await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
+          // A repost proves the original role is still open.
+          await prisma.job.update({ where: { id: outcome.duplicateOfId }, data: { lastSeenAt: new Date() } });
+          report.semanticDupes++;
+        }
+      } catch (e: any) {
+        if (e instanceof RateLimitError) {
+          report.errors.push(`dedup stopped: token budget reached (${report.semanticDupes} found)`);
+          break;
+        }
+        report.errors.push(`dedup ${nj.id}: ${e.message}`);
+      }
+    }
+  }
+
   // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so the
   // dashboard can rank by real fit, not just keyword score. No-ops without a key.
   if (llmEnabled()) {
     const toAnalyze = await prisma.job.findMany({
-      where: { fitScore: null, status: { in: ["new", "interested"] } },
+      where: { fitScore: null, status: { in: ["new", "interested"] }, duplicateOfId: null },
       orderBy: { score: "desc" },
       take: AUTO_FIT_TOP_N,
     });

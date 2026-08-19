@@ -66,6 +66,11 @@ model Job {
   // Posting reads like an evergreen/talent-pool ad, per the fit analysis.
   ghostRisk   Boolean  @default(false)
 
+  // Set when the LLM semantic dedup confirms this row is the same opportunity
+  // as an existing one (repost / reworded / per-city listing). The row stays so
+  // identity dedupe recognizes the source id, but it never renders on the board.
+  duplicateOfId String?
+
   // Application pipeline
   status      String   @default("new") // new | interested | applied | interview | rejected | offer | ignored
   coverLetter String?

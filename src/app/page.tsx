@@ -47,7 +47,8 @@ export default async function Page({
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
-  const where: any = {};
+  // Semantic duplicates (reposts of a tracked role) never render.
+  const where: any = { duplicateOfId: null };
   const and: any[] = [];
   if (track !== "all") where.track = track;
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };

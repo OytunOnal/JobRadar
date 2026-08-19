@@ -21,6 +21,7 @@ console.log(`Updated:        ${report.updated}`);
 console.log(`Cross-src dupes:${report.duplicates}`);
 console.log(`Too old to keep:${report.tooOld}`);
 console.log(`SEO-farm junk:  ${report.junkDomain}`);
+console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`LLM fit-scored: ${report.fitAnalyzed}`);
 if (report.harvest) {
   const h = report.harvest;

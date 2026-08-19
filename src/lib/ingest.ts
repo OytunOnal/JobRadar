@@ -9,6 +9,7 @@ import { himalayas } from "./sources/himalayas";
 import { weworkremotely } from "./sources/weworkremotely";
 import { adzuna } from "./sources/adzuna";
 import { jsearch } from "./sources/jsearch";
+import { linkedin } from "./sources/linkedin";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -41,6 +42,7 @@ const aggregators: Source[] = [
   weworkremotely,
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
+  linkedin, // needs APIFY_API_TOKEN (free ~$5/mo credit); skips itself otherwise
 ];
 
 

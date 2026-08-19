@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/db";
 import { profile } from "@/lib/profile";
+import {
+  ageLabel,
+  classifyFreshness,
+  DELISTED_AFTER_DAYS,
+  FRESH_MAX_DAYS,
+} from "@/lib/freshness";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +16,11 @@ const TRACKS = ["all", ...profile.tracks.map((t) => t.key)];
 const VERDICTS = ["all", "strong", "possible", "weak"] as const;
 const LOCS = ["all", "remote", "on-site"] as const;
 const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
+const AGES = ["fresh", "all"] as const;
 const PAGE_SIZE = 30;
+
+// Jobs the user is actively pursuing stay visible whatever their age.
+const PURSUED = ["applied", "interview", "offer"];
 
 function RadarMark() {
   return (
@@ -26,24 +36,54 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string }>;
 }) {
   const sp = await searchParams;
   const track = sp.track ?? "all";
   const status = sp.status ?? "active";
   const verdict = sp.verdict ?? "all";
   const loc = sp.loc ?? "all";
+  const age = sp.age ?? "fresh";
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
   const where: any = {};
+  const and: any[] = [];
   if (track !== "all") where.track = track;
   if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
   else if (status !== "all") where.status = status;
   if (verdict !== "all") where.fitVerdict = verdict;
   if (loc === "remote") where.remote = true;
   else if (loc === "on-site") where.remote = false;
-  if (q) where.OR = [{ title: { contains: q } }, { company: { contains: q } }];
+  if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
+
+  // The pool's own clock: how far the newest observation has advanced. Guards
+  // the delisted check against "we simply haven't ingested lately".
+  const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
+
+  if (age === "fresh") {
+    const now = Date.now();
+    const freshCutoff = new Date(now - FRESH_MAX_DAYS * 86_400_000);
+    const clauses: any[] = [
+      // Anchor (postedAt, else firstSeenAt) within the fresh window...
+      {
+        OR: [
+          { postedAt: { gte: freshCutoff } },
+          { postedAt: null, firstSeenAt: { gte: freshCutoff } },
+        ],
+      },
+    ];
+    // ...and, for direct-source jobs, still listed at the source.
+    if (poolNewest) {
+      const delistCutoff = new Date(poolNewest.getTime() - DELISTED_AFTER_DAYS * 86_400_000);
+      clauses.push({
+        NOT: { AND: [{ source: { contains: ":" } }, { lastSeenAt: { lt: delistCutoff } }] },
+      });
+    }
+    // Jobs being pursued are never hidden by age.
+    and.push({ OR: [{ AND: clauses }, { status: { in: PURSUED } }] });
+  }
+  if (and.length) where.AND = and;
 
   const [jobs, filteredCount, statusCounts, verdictCounts] = await Promise.all([
     prisma.job.findMany({
@@ -68,13 +108,14 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page", string>>) => {
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, loc, q, page: "", ...over };
+    const merged = { track, status, verdict, loc, q, age, page: "", ...over };
     if (merged.track !== "all") p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
     if (merged.loc !== "all") p.set("loc", merged.loc);
+    if (merged.age !== "fresh") p.set("age", merged.age);
     if (merged.q) p.set("q", merged.q);
     if (merged.page && merged.page !== "1") p.set("page", merged.page);
     const s = p.toString();
@@ -136,6 +177,12 @@ export default async function Page({
             <a key={s} href={href({ status: s })} className={`chip ${status === s ? "active" : ""}`}>{s}</a>
           ))}
         </div>
+        <div className="fgroup">
+          <span className="flabel">age</span>
+          {AGES.map((a) => (
+            <a key={a} href={href({ age: a })} className={`chip ${age === a ? "active" : ""}`}>{a}</a>
+          ))}
+        </div>
       </div>
 
       {jobs.length === 0 ? (
@@ -144,7 +191,9 @@ export default async function Page({
           <div className="hint">Clear a filter, or run a scan to pull fresh listings.</div>
         </div>
       ) : (
-        jobs.map((j) => (
+        jobs.map((j) => {
+          const freshness = classifyFreshness(j, new Date(), poolNewest ?? undefined);
+          return (
           <article className="job" key={j.id}>
             <div className="fitcell">
               {j.fitScore != null ? (
@@ -168,11 +217,18 @@ export default async function Page({
               <div className="meta">
                 {j.track && <span className="badge">{j.track}</span>}
                 {j.remote && <span className="badge">remote</span>}
+                {(freshness === "evergreen" || freshness === "delisted") && (
+                  <span className={`badge age-${freshness}`}>{freshness}</span>
+                )}
                 {j.company}
                 {j.location ? ` · ${j.location}` : ""}
                 {j.salaryText ? ` · ${j.salaryText}` : ""}
                 {" · "}
                 <span className="src">{j.source}</span>
+                {" · "}
+                <span className="src" title={j.postedAt ? "posted" : "first seen"}>
+                  {ageLabel(j.postedAt ?? j.firstSeenAt)}
+                </span>
               </div>
               {j.fitComment && <div className="fitcomment">{j.fitComment}</div>}
               {j.scoreReason && <div className="reason">{j.scoreReason}</div>}
@@ -215,7 +271,8 @@ export default async function Page({
               </form>
             </div>
           </article>
-        ))
+          );
+        })
       )}
 
       {lastPage > 1 && (

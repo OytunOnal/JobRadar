@@ -34,8 +34,9 @@ CV and personal data on your machine (never committed).
   fetch frequency, so boards that never match your profile back off to monthly
   while relevant ones stay daily.
 - **Aggregates** the classics too: remote boards (Arbeitnow, Remotive, RemoteOK,
-  Jobicy, Himalayas, WeWorkRemotely) and — with free API keys — Adzuna and
-  JSearch/Google-for-Jobs. Aggregators double as discovery sensors: even a junk
+  Jobicy, Himalayas, WeWorkRemotely), **LinkedIn** (free public guest API,
+  tiered city/country/EU-remote searches), and — with free API keys — Adzuna,
+  JSearch/Google-for-Jobs, and Indeed (Apify). Aggregators double as discovery sensors: even a junk
   listing can reveal a company's ATS, upgrading it to a first-party source.
 - **Fights junk on every layer:**
   - SEO-farm domains are dropped outright; source trust (own ATS > curated

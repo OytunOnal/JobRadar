@@ -163,7 +163,16 @@ function isAggregatorJob(job: RawJob): boolean {
   return !job.source.includes(":");
 }
 
-export async function runIngest(): Promise<IngestReport> {
+export interface IngestOptions {
+  // Full-pool board sweep mode: ONLY discovered boards (no curated feeds, no
+  // aggregators, no sponsor refresh, no harvest/probes/liveness, no LLM
+  // layers). Run in slices so job batches never pile up in memory; the
+  // stalest-first rotation advances the pool one slice per call.
+  boardsOnly?: boolean;
+  boardLimit?: number;
+}
+
+export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport> {
   const report: IngestReport = {
     fetched: 0,
     scored: 0,
@@ -184,18 +193,22 @@ export async function runIngest(): Promise<IngestReport> {
   // role arrives from several places, the official ATS listing is the one kept.
   let discovered: Source[] = [];
   try {
-    discovered = await boardSources();
+    discovered = await boardSources(opts.boardLimit);
   } catch (e: any) {
     report.errors.push(`boardSources: ${e.message}`);
   }
-  const sources: Source[] = [...companySources(), ...discovered, ...aggregators];
+  const sources: Source[] = opts.boardsOnly
+    ? discovered
+    : [...companySources(), ...discovered, ...aggregators];
 
   // Visa-sponsor registers: refresh when older than two weeks (isolated —
   // a register outage never sinks the ingest).
-  try {
-    if (await sponsorsStale()) report.sponsors = await refreshSponsors();
-  } catch (e: any) {
-    report.errors.push(`sponsors: ${String(e.message).slice(0, 160)}`);
+  if (!opts.boardsOnly) {
+    try {
+      if (await sponsorsStale()) report.sponsors = await refreshSponsors();
+    } catch (e: any) {
+      report.errors.push(`sponsors: ${String(e.message).slice(0, 160)}`);
+    }
   }
 
   const all: RawJob[] = [];
@@ -372,6 +385,7 @@ export async function runIngest(): Promise<IngestReport> {
 
   // Discovery harvest: mine ATS board candidates from the aggregator URLs.
   // Isolated so no harvest failure can sink the ingest.
+  if (opts.boardsOnly) return report; // sweep mode: store + delist only
   try {
     report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
   } catch (e: any) {

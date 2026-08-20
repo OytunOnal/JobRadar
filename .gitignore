@@ -16,3 +16,6 @@ config/profile.generated.json
 config/cv.txt
 application-kit.md
 job-search-sites.md
+
+sweep-state.json
+sweep.log

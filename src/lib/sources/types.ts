@@ -15,6 +15,10 @@ export interface RawJob {
   salaryText?: string;
   description: string;
   postedAt?: Date;
+  // Set only when the source states sponsorship EXPLICITLY as data (e.g.
+  // SwissDevJobs' hasVisaSponsorship field); otherwise ingest derives the
+  // signal from the posting text.
+  visa?: "yes" | "no" | "unknown";
 }
 
 // Explicit source signal wins; otherwise "hybrid" in the posting text beats

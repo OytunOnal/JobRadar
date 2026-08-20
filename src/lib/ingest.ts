@@ -17,6 +17,9 @@ import { eures } from "./sources/eures";
 import { sweden } from "./sources/sweden";
 import { denmark } from "./sources/denmark";
 import { switzerland } from "./sources/switzerland";
+import { hn } from "./sources/hn";
+import { landingjobs } from "./sources/landingjobs";
+import { swissdevjobs } from "./sources/swissdevjobs";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -60,6 +63,9 @@ const aggregators: Source[] = [
   sweden,         // Arbetsförmedlingen JobTech API, keyless
   denmark,        // Jobnet BFF API, keyless (Cloudflare-tolerant)
   switzerland,    // SECO Job-Room API, keyless; de+fr titles
+  hn,             // monthly "Ask HN: Who is hiring?" via Algolia; ATS links feed harvest
+  landingjobs,    // Landing.Jobs (PT-centric, relocation flag), keyless
+  swissdevjobs,   // SwissDevJobs: structured visa/workMode/salary, keyless
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor
@@ -224,7 +230,7 @@ export async function runIngest(): Promise<IngestReport> {
       remote: job.remote,
       country: resolveWithCache(job.location, locationCache),
       workMode: deriveWorkMode(job),
-      visa: detectVisa(job.description, job.title),
+      visa: job.visa ?? detectVisa(job.description, job.title),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
       description: job.description.slice(0, 8000),

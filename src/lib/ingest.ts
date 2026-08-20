@@ -261,31 +261,50 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   if (opts.boardsOnly) {
     // Sweep mode: boards are independent companies, so ordering carries no
-    // dedupe priority — fetch them through a RAM-adaptive worker pool. The
-    // concurrency target follows the heap: comfortable → full width, tight →
-    // half, critical → drain to 1 and let GC catch up. Mostly-distinct hosts
-    // keep this polite; the shared API hosts (Greenhouse etc.) see at most
-    // pool-width concurrent requests.
+    // dedupe priority — fetch them through a RAM-adaptive worker pool.
+    //
+    // Two politeness lessons learned live:
+    //  - The pool arrives in PLATFORM BLOCKS (crawl insertion order), so a
+    //    slice can be 1500 consecutive requests to one host. Shuffle first:
+    //    mixed platforms spread the concurrency across distinct hosts.
+    //  - Single-host platforms (join.com; apply.workable.com 429'd at 8-wide
+    //    live) additionally get a PER-PLATFORM in-flight cap.
+    for (let i = sources.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [sources[i], sources[j]] = [sources[j], sources[i]];
+    }
     const base = Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16);
+    const PER_PLATFORM_CAP: Record<string, number> = { join: 2, workable: 2, recruitee: 2 };
+    const platformOf = (name: string): string => name.split(":")[1] ?? "";
     const limitNow = (): number => {
       const heapMB = process.memoryUsage().heapUsed / 1_048_576;
       if (heapMB > 1200) return 1;
       if (heapMB > 800) return Math.max(2, Math.floor(base / 2));
       return base;
     };
-    let idx = 0;
+    const queue = [...sources];
+    const inFlight = new Map<string, number>();
     let active = 0;
     await new Promise<void>((resolve) => {
       const pump = (): void => {
-        while (idx < sources.length && active < limitNow()) {
-          const src = sources[idx++];
+        while (active < limitNow()) {
+          // First queued source whose platform is under its cap.
+          const qi = queue.findIndex((s) => {
+            const p = platformOf(s.name);
+            return (inFlight.get(p) ?? 0) < (PER_PLATFORM_CAP[p] ?? base);
+          });
+          if (qi === -1) break;
+          const src = queue.splice(qi, 1)[0];
+          const p = platformOf(src.name);
+          inFlight.set(p, (inFlight.get(p) ?? 0) + 1);
           active++;
           void fetchOne(src).finally(() => {
+            inFlight.set(p, (inFlight.get(p) ?? 0) - 1);
             active--;
             pump();
           });
         }
-        if (idx >= sources.length && active === 0) resolve();
+        if (queue.length === 0 && active === 0) resolve();
       };
       pump();
     });

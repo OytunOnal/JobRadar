@@ -112,18 +112,23 @@ export async function runNameProbes(
 ): Promise<NameProbeReport> {
   const report: NameProbeReport = { checked: 0, found: 0 };
 
-  // Names our board table already covers need no probing.
-  const known = new Set(
-    (await prisma.atsBoard.findMany({ select: { companyName: true } }))
-      .map((b) => (b.companyName ? normalizeCompanyName(b.companyName) : ""))
-      .filter(Boolean),
-  );
+  // Names our board table already covers need no probing. Matching is
+  // namesMatch-loose, not exact: "Mistral" and "Mistral Ai" are the same
+  // company (learned when tier 5 re-discovered a board we already had).
+  const knownCollapsed = (await prisma.atsBoard.findMany({ select: { companyName: true } }))
+    .map((b) => (b.companyName ? normalizeCompanyName(b.companyName).replace(/ /g, "") : ""))
+    .filter((n) => n.length >= 4);
+  const isKnown = (norm: string) => {
+    const c = norm.replace(/ /g, "");
+    if (c.length < 4) return false;
+    return knownCollapsed.some((k) => k === c || k.includes(c) || c.includes(k));
+  };
 
   const seen = new Set<string>();
   for (const raw of companyNames) {
     if (report.checked >= budget) break;
     const norm = normalizeCompanyName(raw);
-    if (!norm || seen.has(norm) || known.has(norm)) continue;
+    if (!norm || seen.has(norm) || isKnown(norm)) continue;
     seen.add(norm);
     if (slugCandidates(raw).length === 0) continue;
     const cached = await prisma.companyProbe.findUnique({ where: { name: norm } });

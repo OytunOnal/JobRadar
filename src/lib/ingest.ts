@@ -20,6 +20,9 @@ import { switzerland } from "./sources/switzerland";
 import { hn } from "./sources/hn";
 import { landingjobs } from "./sources/landingjobs";
 import { swissdevjobs } from "./sources/swissdevjobs";
+import { berlinstartupjobs } from "./sources/berlinstartupjobs";
+import { manfred } from "./sources/manfred";
+import { netempregos } from "./sources/netempregos";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -66,6 +69,9 @@ const aggregators: Source[] = [
   hn,             // monthly "Ask HN: Who is hiring?" via Algolia; ATS links feed harvest
   landingjobs,    // Landing.Jobs (PT-centric, relocation flag), keyless
   swissdevjobs,   // SwissDevJobs: structured visa/workMode/salary, keyless
+  berlinstartupjobs, // Berlin startup scene via WP RSS (Cloudflare-tolerant)
+  manfred,        // Spanish tech platform, open API; two-stage detail
+  netempregos,    // Portugal's biggest general board, RSS -> IT slice
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor

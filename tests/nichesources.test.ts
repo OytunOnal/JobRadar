@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { firstLink, parseComment } from "../src/lib/sources/hn";
 import { mapJob as landingMap } from "../src/lib/sources/landingjobs";
 import { mapJob as sdjMap } from "../src/lib/sources/swissdevjobs";
+import { parseFeed as bsjParse } from "../src/lib/sources/berlinstartupjobs";
+import { mapOffer, detailToText } from "../src/lib/sources/manfred";
+import { parseFeed as neParse } from "../src/lib/sources/netempregos";
 
 // ── HN Who is hiring ─────────────────────────────────────────────────────────
 
@@ -95,4 +98,70 @@ test("swissdevjobs mapJob: structured visa/workMode/salary, employer link wins",
   assert.equal(own.url, "https://swissdevjobs.ch/jobs/slug");
   assert.equal(own.visa, "no");
   assert.equal(sdjMap({ _id: "b", name: "Y", jobUrl: "s", isPaused: true }), null);
+});
+
+// ── Berlin Startup Jobs ──────────────────────────────────────────────────────
+
+test("BSJ parseFeed: 'Title // Company' convention, Berlin default location", () => {
+  const xml = `<rss><channel><item>
+    <title><![CDATA[Senior Backend Engineer // Acme GmbH]]></title>
+    <link>https://berlinstartupjobs.com/engineering/senior-backend-acme/</link>
+    <pubDate>Wed, 20 Aug 2026 08:00:00 +0000</pubDate>
+    <description><![CDATA[<p>Build things in Berlin.</p>]]></description>
+  </item></channel></rss>`;
+  const jobs = bsjParse(xml);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].title, "Senior Backend Engineer");
+  assert.equal(jobs[0].company, "Acme GmbH");
+  assert.equal(jobs[0].location, "Berlin, Germany");
+  assert.equal(jobs[0].description, "Build things in Berlin.");
+});
+
+// ── Manfred ──────────────────────────────────────────────────────────────────
+
+test("manfred mapOffer: remote percentage -> work mode, ACTIVE only", () => {
+  const base = {
+    id: 8457, position: ".NET Developer", slug: "gof-net-dev", status: "ACTIVE",
+    salaryFrom: 30000, salaryTo: 35000, currency: "€", remotePercentage: 40,
+    company: { name: "CENTRALIA" }, locations: ["Santander, Spain"],
+    updatedAt: "2026-08-01T00:00:00Z",
+  };
+  const job = mapOffer(base)!;
+  assert.equal(job.workMode, "hybrid");
+  assert.equal(job.salaryText, "30000–35000 €");
+  assert.equal(job.company, "CENTRALIA");
+  assert.ok(job.url.includes("/job-offers/8457/gof-net-dev"));
+  assert.equal(mapOffer({ ...base, remotePercentage: 100 })!.workMode, "remote");
+  assert.equal(mapOffer({ ...base, status: "CLOSED" }), null);
+});
+
+test("manfred detailToText joins sections and stack", () => {
+  const text = detailToText({
+    introduction: "<p>Great team.</p>",
+    whatWillYouDo: ["Ship features", "Review code"],
+    techs: [{ name: "TypeScript" }, { name: "React" }],
+  });
+  assert.ok(text.includes("Great team."));
+  assert.ok(text.includes("Ship features"));
+  assert.ok(text.includes("Tech stack: TypeScript, React"));
+});
+
+// ── Net-Empregos ─────────────────────────────────────────────────────────────
+
+test("netempregos parseFeed: IT category slice, Empresa/Zona extraction", () => {
+  const xml = `<rss><item>
+    <title><![CDATA[Programador Full Stack (M/F)]]></title>
+    <link>https://www.net-empregos.com/15882900/programador-full-stack/</link>
+    <pubDate>Thu, 20 Aug 2026 12:00:00 GMT</pubDate>
+    <description><![CDATA[&lt;b&gt;Empresa: &lt;/b&gt;TechCo Lda&lt;br&gt;&lt;b&gt;Categoria: &lt;/b&gt;Informática ( Programação )&lt;br&gt;&lt;b&gt;Zona: &lt;/b&gt;Lisboa]]></description>
+  </item><item>
+    <title><![CDATA[Encarregado de Obra]]></title>
+    <link>https://www.net-empregos.com/15882901/obra/</link>
+    <description><![CDATA[&lt;b&gt;Categoria: &lt;/b&gt;Construção Civil]]></description>
+  </item></rss>`;
+  const jobs = neParse(xml);
+  assert.equal(jobs.length, 1); // construction filtered out
+  assert.equal(jobs[0].externalId, "15882900");
+  assert.equal(jobs[0].company, "TechCo Lda");
+  assert.equal(jobs[0].location, "Lisboa, Portugal");
 });

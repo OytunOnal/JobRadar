@@ -7,6 +7,9 @@ import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
 import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
 import { canonicalJobUrl } from "../src/lib/domains";
+import { parseNl, parseGb, parseDk, parseIe, splitCsvLine, collapseName } from "../src/lib/sponsors";
+import { mapHit as wnMap, buildQuery as wnQuery } from "../src/lib/sources/workingnomads";
+import { parseFeed as jiParse } from "../src/lib/sources/jobindexdk";
 
 // ── WTTJ ─────────────────────────────────────────────────────────────────────
 
@@ -179,4 +182,64 @@ test("canonicalJobUrl: strips tracking denylist, KEEPS functional params", () =>
   assert.equal(canonicalJobUrl("https://a.com/jobs/x/"), "https://a.com/jobs/x");
   // Non-URLs pass through untouched (no fake keys):
   assert.equal(canonicalJobUrl("N/A"), "N/A");
+});
+
+// ── Visa sponsor registers ───────────────────────────────────────────────────
+
+test("sponsor parsers: NL th/td, UK CSV with quotes, DK CVR rows, IE xlsx", () => {
+  const nl = parseNl('<th scope="row">Adyen N.V.</th><td>34259528</td>');
+  assert.equal(nl[0].name, "Adyen N.V.");
+  assert.ok(nl[0].detail!.includes("34259528"));
+
+  const gb = parseGb(
+    'Organisation Name,Town/City,County,Type & Rating,Route\n' +
+    '"Acme, Ltd",London,,Worker (A rating),Skilled Worker\n' +
+    'Acme Ltd,Leeds,,Worker (A rating),Skilled Worker',
+  );
+  assert.equal(gb.length, 1); // same collapsed name -> deduped across routes/rows
+  assert.equal(gb[0].name, "Acme, Ltd");
+  assert.ok(gb[0].detail!.includes("Skilled Worker"));
+
+  const dk = parseDk("<tr><td>Unity Technologies ApS</td><td>30719913</td></tr><tr><td>Header</td><td>no digits</td></tr>");
+  assert.equal(dk.length, 1);
+  assert.ok(dk[0].detail!.includes("CVR 30719913"));
+
+  assert.deepEqual(splitCsvLine('a,"b, with comma","c ""q"""'), ["a", "b, with comma", 'c "q"']);
+});
+
+test("collapseName: legal suffixes and spacing fold away for matching", () => {
+  assert.equal(collapseName("Adyen N.V."), collapseName("adyen"));
+  assert.equal(collapseName("Booking.com B.V."), collapseName("Booking com"));
+});
+
+// ── Working Nomads ───────────────────────────────────────────────────────────
+
+test("workingnomads: apply_url wins, expired filtered in the query", () => {
+  const q = wnQuery("llm engineer") as any;
+  assert.deepEqual(q.query.bool.must_not, [{ term: { expired: true } }]);
+  const job = wnMap({
+    id: 1804551, title: "Principal Software Engineer", slug: "pse-dropbox",
+    company: "Dropbox", apply_url: "https://jobs.dropbox.com/123",
+    salary_range: "$285k-$385k per year", description: "<p>Role</p>",
+    pub_date: "2026-08-20T08:03:04-04:00",
+  })!;
+  assert.equal(job.url, "https://jobs.dropbox.com/123");
+  assert.equal(job.workMode, "remote");
+  assert.equal(job.salaryText, "$285k-$385k per year");
+});
+
+// ── Jobindex ─────────────────────────────────────────────────────────────────
+
+test("jobindex parseFeed: hex entities decoded, id from vis-job link", () => {
+  const xml = `<rss><item>
+    <title>Software Engineer til Flonidan, Kleven &#x26; Partners</title>
+    <link>https://www.jobindex.dk/vis-job/h1691215</link>
+    <pubDate>Thu, 20 Aug 2026 00:00:00 +0200</pubDate>
+    <description>&#x3C;div&#x3E;Vi s&#xF8;ger en dygtig udvikler.&#x3C;/div&#x3E;</description>
+  </item></rss>`;
+  const jobs = jiParse(xml);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].externalId, "h1691215");
+  assert.ok(jobs[0].title.includes("Kleven & Partners"));
+  assert.ok(jobs[0].description.includes("dygtig udvikler"));
 });

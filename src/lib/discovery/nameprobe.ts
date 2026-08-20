@@ -17,7 +17,7 @@ const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecru
 // Legal suffixes carry no identity; product words (Games, Labs, Studio) DO —
 // stripping "Games" would turn Dream Games into a different company.
 const LEGAL_SUFFIX_RE =
-  /\b(gmbh|inc|ltd|llc|ag|plc|corp|corporation|limited|b\.?v\.?|s\.?a\.?|s\.?l\.?|a\/s|aps|ab|oy|kft|sp\.? z ?o\.?o\.?)\b\.?/gi;
+  /\b(gmbh|inc|ltd|llc|ag|plc|corp|corporation|limited|b\.?v\.?|n\.?v\.?|s\.?a\.?|s\.?l\.?|s\.?a\.?s|sarl|a\/s|aps|ab|oy|kft|sp\.? z ?o\.?o\.?)\b\.?/gi;
 
 export function normalizeCompanyName(name: string): string {
   return name

@@ -28,6 +28,8 @@ import { vdab } from "./sources/vdab";
 import { justjoin, nofluffjobs } from "./sources/poland";
 import { thehub } from "./sources/thehub";
 import { agenticjobs, a16zspeedrun } from "./sources/nichejobs";
+import { workingnomads } from "./sources/workingnomads";
+import { jobindexdk } from "./sources/jobindexdk";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -39,6 +41,7 @@ import { findDuplicate } from "./dedup";
 import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "./liveness";
+import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -85,6 +88,8 @@ export const aggregators: Source[] = [
   thehub,         // Nordic startups (EU + remote passes)
   agenticjobs,    // AI-agent engineering niche (visa flag as data)
   a16zspeedrun,   // a16z SPEEDRUN portfolio (games/AI)
+  workingnomads,  // remote board via its public Elasticsearch endpoint
+  jobindexdk,     // Denmark's biggest private board, RSS per query
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor
@@ -133,6 +138,7 @@ export interface IngestReport {
   nameProbe?: NameProbeReport;
   deepProbe?: DeepProbeReport;
   liveness?: LivenessReport;
+  sponsors?: SponsorRefreshReport;
   locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
@@ -170,6 +176,14 @@ export async function runIngest(): Promise<IngestReport> {
     report.errors.push(`boardSources: ${e.message}`);
   }
   const sources: Source[] = [...companySources(), ...discovered, ...aggregators];
+
+  // Visa-sponsor registers: refresh when older than two weeks (isolated —
+  // a register outage never sinks the ingest).
+  try {
+    if (await sponsorsStale()) report.sponsors = await refreshSponsors();
+  } catch (e: any) {
+    report.errors.push(`sponsors: ${String(e.message).slice(0, 160)}`);
+  }
 
   const all: RawJob[] = [];
   for (const src of sources) {
@@ -251,6 +265,8 @@ export async function runIngest(): Promise<IngestReport> {
       country: resolveWithCache(job.location, locationCache),
       workMode: deriveWorkMode(job),
       visa: job.visa ?? detectVisa(job.description, job.title),
+      // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
+      sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
       description: job.description.slice(0, 8000),

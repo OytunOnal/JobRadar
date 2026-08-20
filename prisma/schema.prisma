@@ -101,6 +101,8 @@ model Job {
   // Visa sponsorship signal: yes | no | unknown. Free text heuristic at
   // ingest; the LLM fit pass upgrades unknown -> no on an explicit refusal.
   visa        String   @default("unknown")
+  // Company appears in its country's public sponsor register (see VisaSponsor).
+  sponsorReg  Boolean  @default(false)
 
   // Set when the LLM semantic dedup confirms this row is the same opportunity
   // as an existing one (repost / reworded / per-city listing). The row stays so
@@ -130,4 +132,21 @@ model Job {
   @@index([status])
   @@index([score])
   @@index([contentKey])
+}
+
+// Public visa-sponsor registers (the complete set of European countries that
+// publish one): NL IND recognised sponsors, UK Home Office licensed Worker
+// sponsors, DK SIRI fast-track certified companies, IE employment-permit
+// holders. Matching a job's company against its country's register is a
+// COMPANY-level signal ("licensed to sponsor"), independent of what the
+// posting text says.
+model VisaSponsor {
+  id        Int      @id @default(autoincrement())
+  country   String   // iso2: nl | gb | dk | ie
+  name      String
+  nameNorm  String   // normalized + collapsed for matching
+  detail    String?  // route/type info from the register
+  updatedAt DateTime @default(now())
+
+  @@index([country, nameNorm])
 }

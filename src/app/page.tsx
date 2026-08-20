@@ -349,6 +349,11 @@ export default async function Page({
                 )}
                 {j.ghostRisk && <span className="badge ghost">ghost?</span>}
                 {j.visa === "yes" && <span className="badge s-strong">visa</span>}
+                {j.sponsorReg && (
+                  <span className="badge s-strong" title="Company appears in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE)">
+                    sponsor✓
+                  </span>
+                )}
                 {j.fitCategory && j.fitCategory !== "NONE" && j.fitCategory !== "OTHER" && (
                   <span className="badge">{j.fitCategory.toLowerCase().replace("_", " ")}</span>
                 )}

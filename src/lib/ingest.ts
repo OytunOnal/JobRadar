@@ -34,7 +34,7 @@ import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
 import { harvest, type HarvestReport } from "./discovery/harvest";
-import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
+import { boardSources, parseBoardSourceName, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
 import { canonicalJobUrl, isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
@@ -244,6 +244,18 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     } catch (e: any) {
       report.errors.push(`${src.name}: ${e.message}`);
       report.perSource[src.name] = 0;
+      // A failed board still counts as ATTEMPTED: stamp + back off, or the
+      // stalest-first rotation re-selects the same failing cluster forever.
+      if (src.name.startsWith("board:")) {
+        const key = parseBoardSourceName(src.name);
+        if (key) {
+          await prisma.atsBoard.updateMany({
+            where: { platform: key.platform, token: key.token, region: key.region },
+            data: { lastFetchedAt: new Date() },
+          }).catch(() => {});
+          await recordBoardOutcome(src.name, 0, 0).catch(() => {});
+        }
+      }
     }
   };
 

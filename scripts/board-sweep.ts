@@ -109,6 +109,9 @@ for (let i = 0; i < MAX_SLICES; i++) {
       `toplam ${state.boards}/${state.poolAtStart} (~%${donePct}) | heap ${heapMB}MB rss ${rssMB}MB | slice→${slice}`,
   );
 
+  if (r.errors.length > 0) {
+    for (const e of r.errors.slice(0, 3)) log(`  hata örneği: ${e.slice(0, 110)}`);
+  }
   if (boards === 0) {
     log(`=== Sweep COMPLETE: ${state.boards} boards, +${state.stored} new jobs, ${state.updated} updated, ${state.delisted} delisted ===`);
     break;

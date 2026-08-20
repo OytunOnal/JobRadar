@@ -52,3 +52,36 @@ export function sourceTrust(source: string): number {
   if (TIER0_SOURCES.has(source)) return 0;
   return 1;
 }
+
+// ── Canonical posting URLs ───────────────────────────────────────────────────
+// Strip only a DENYLIST of known tracking params (career-ops' url-key lesson,
+// which mirrors RFC 3986 §6): over-normalizing merges two genuinely different
+// postings (silent data loss), under-normalizing leaves a visible duplicate.
+// Generic names (ref, source, src) are deliberately KEPT — they are
+// functional on some boards (gh_jid is a Greenhouse posting id).
+const TRACKING_PARAMS = [
+  /^utm_/i, /^gh_src$/i, /^fbclid$/i, /^gclid$/i, /^msclkid$/i,
+  /^mc_cid$/i, /^mc_eid$/i, /^igshid$/i, /^_hsenc$/i, /^_hsmi$/i,
+  /^trk$/i, /^trackingid$/i, /^wt_mc$/i,
+];
+
+// Returns the cleaned URL, or the input unchanged when it isn't http(s).
+export function canonicalJobUrl(raw: string): string {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return raw;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return raw;
+  u.hostname = u.hostname.toLowerCase();
+  u.hash = "";
+  const kept = [...u.searchParams.entries()].filter(
+    ([k]) => !TRACKING_PARAMS.some((re) => re.test(k)),
+  );
+  kept.sort(([a], [b]) => a.localeCompare(b));
+  u.search = kept.length ? `?${new URLSearchParams(kept).toString()}` : "";
+  let out = u.toString();
+  if (u.pathname !== "/" && out.endsWith("/") && !u.search) out = out.slice(0, -1);
+  return out;
+}

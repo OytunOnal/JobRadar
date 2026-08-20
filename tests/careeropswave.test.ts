@@ -6,6 +6,7 @@ import { mapJustJoin, mapNoFluff } from "../src/lib/sources/poland";
 import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
 import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
+import { canonicalJobUrl } from "../src/lib/domains";
 
 // ── WTTJ ─────────────────────────────────────────────────────────────────────
 
@@ -164,4 +165,18 @@ test("liveness: hard statuses, banners, and the honest defaults", () => {
   assert.equal(classifyLiveness(200, "<h1>Senior Engineer</h1><button>Apply</button>"), "active");
   assert.equal(classifyLiveness(403, ""), "uncertain"); // walls prove nothing
   assert.equal(classifyLiveness(500, ""), "uncertain");
+});
+
+// ── Canonical URLs ───────────────────────────────────────────────────────────
+
+test("canonicalJobUrl: strips tracking denylist, KEEPS functional params", () => {
+  assert.equal(
+    canonicalJobUrl("https://Boards.Greenhouse.io/acme/jobs/1?utm_source=x&gh_src=abc&gh_jid=42#apply"),
+    "https://boards.greenhouse.io/acme/jobs/1?gh_jid=42", // gh_jid survives — it IS the posting id on some boards
+  );
+  // Query params are sorted for stability, trailing slash dropped:
+  assert.equal(canonicalJobUrl("https://a.com/jobs/?b=2&a=1"), "https://a.com/jobs/?a=1&b=2");
+  assert.equal(canonicalJobUrl("https://a.com/jobs/x/"), "https://a.com/jobs/x");
+  // Non-URLs pass through untouched (no fake keys):
+  assert.equal(canonicalJobUrl("N/A"), "N/A");
 });

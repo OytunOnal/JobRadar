@@ -34,7 +34,7 @@ import { llmEnabled, RateLimitError } from "./llm";
 import { harvest, type HarvestReport } from "./discovery/harvest";
 import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
-import { isJunkJobUrl, sourceTrust } from "./domains";
+import { canonicalJobUrl, isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
 import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
@@ -59,7 +59,7 @@ const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 8;
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
 
-const aggregators: Source[] = [
+export const aggregators: Source[] = [
   arbeitnow,
   remotive,
   remoteok,
@@ -243,7 +243,7 @@ export async function runIngest(): Promise<IngestReport> {
       contentKey: ck,
       source: job.source,
       externalId: job.externalId,
-      url: job.url,
+      url: canonicalJobUrl(job.url), // tracking params stripped, stable form
       title: job.title,
       company: job.company,
       location: job.location ?? null,

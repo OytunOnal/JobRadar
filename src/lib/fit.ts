@@ -63,7 +63,13 @@ export function fitSystemPrompt(): string {
     "  NO_VISA = posting explicitly rules out visa sponsorship the candidate would need;",
     "  LANGUAGE = requires fluency in a language the CV doesn't show;",
     "  PROFILE = role/stack simply doesn't match; OTHER = anything else.",
-    "ghostRisk: true when the posting reads like an evergreen/talent-pool/mass-recruiting ad rather than one concrete opening — vague responsibilities, 'always looking for talent', staffing-agency voice, no specific team or product.",
+    "ghostRisk: true when the posting is unlikely to be one real, active opening. Weigh these signals:",
+    "  - evergreen/talent-pool voice: 'always looking for talent', 'join our talent community', no specific team or product;",
+    "  - staffing-agency voice: 'our client', 'various positions', multiple unrelated stacks in one ad;",
+    "  - low tech specificity: responsibilities so generic they fit any company (a strong signal when combined with others; alone it may just be poor writing);",
+    "  - contradictory requirements (e.g. 'junior role' demanding 8+ years, or a stack that makes no sense together) — a strong signal;",
+    "  - no location, no team, no product, AND no salary anywhere in a long posting.",
+    "One weak signal alone is not enough; two or more, or one strong one, is.",
   ].join("\n");
 }
 

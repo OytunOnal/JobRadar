@@ -159,11 +159,20 @@ export async function runDeepProbes(
   report.checked = rows.length;
 
   const names = rows.map((r) => r.displayName ?? r.name);
-  const answer = await (deps.chatFn ?? chat)(
-    [{ role: "user", content: websitePrompt(names) }],
-    { temperature: 0, maxTokens: 800, tier: "fast" },
-  );
-  const domains = answer ? parseWebsiteAnswers(answer, names.length) : new Array(names.length).fill(null);
+  // Rows that already carry a website (e.g. seeded from a VC portfolio list)
+  // skip the LLM entirely — only the unknown ones get resolved.
+  const domains: Array<string | null> = rows.map((r) => r.website ?? null);
+  const unknownIdx = rows.map((_, i) => i).filter((i) => !domains[i]);
+  if (unknownIdx.length > 0) {
+    const answer = await (deps.chatFn ?? chat)(
+      [{ role: "user", content: websitePrompt(unknownIdx.map((i) => names[i])) }],
+      { temperature: 0, maxTokens: 800, tier: "fast" },
+    );
+    const resolved = answer ? parseWebsiteAnswers(answer, unknownIdx.length) : [];
+    unknownIdx.forEach((rowI, k) => {
+      domains[rowI] = resolved[k] ?? null;
+    });
+  }
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];

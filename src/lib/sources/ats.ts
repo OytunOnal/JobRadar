@@ -217,6 +217,154 @@ export async function workday(token: string, company: string): Promise<RawJob[]>
   return out;
 }
 
+// Teamtailor: public per-tenant RSS at <slug>.teamtailor.com/jobs.rss.
+// (Most customers CNAME a branded domain — the registry only sees the
+// *.teamtailor.com minority; job links may point at the branded host.)
+export async function teamtailor(token: string, company: string): Promise<RawJob[]> {
+  const xml = await getText(`https://${token}.teamtailor.com/jobs.rss`);
+  const out: RawJob[] = [];
+  const pick = (block: string, tag: string) => {
+    const m = block.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
+    if (!m) return "";
+    return m[1].replace(/^\s*<!\[CDATA\[/, "").replace(/\]\]>\s*$/, "").trim();
+  };
+  for (const block of xml.split(/<item>/).slice(1)) {
+    const body = block.split(/<\/item>/)[0];
+    const link = pick(body, "link");
+    const title = stripHtml(pick(body, "title"));
+    if (!link || !title) continue;
+    const pub = pick(body, "pubDate");
+    out.push({
+      source: `teamtailor:${token}`,
+      externalId: link.split("/").filter(Boolean).pop() ?? link,
+      url: link,
+      title,
+      company,
+      location: stripHtml(pick(body, "tt:location") || pick(body, "location") || pick(body, "tt:city")),
+      remote: /remote/i.test(title),
+      description: stripHtml(pick(body, "description")),
+      postedAt: pub ? new Date(pub) : undefined,
+    });
+  }
+  return out;
+}
+
+// BambooHR: /careers/list JSON — lightweight metadata (no body, no dates).
+// Shape: { result: [{ id, jobOpeningName, location: {city, state}, isRemote }] }
+export async function bamboohr(token: string, company: string): Promise<RawJob[]> {
+  const data = await getJSON(`https://${token}.bamboohr.com/careers/list`);
+  const rows: any[] = Array.isArray(data?.result) ? data.result : [];
+  return rows
+    .filter((j) => j?.jobOpeningName && String(j.id ?? "").trim())
+    .map((j) => {
+      const loc = [j.location?.city, j.location?.state].filter(Boolean).join(", ");
+      return {
+        source: `bamboohr:${token}`,
+        externalId: String(j.id),
+        url: `https://${token}.bamboohr.com/careers/${encodeURIComponent(String(j.id))}`,
+        title: String(j.jobOpeningName),
+        company,
+        location: loc,
+        remote: Boolean(j.isRemote),
+        // List payload has no body; title-based scoring classifies these.
+        description: String(j.jobOpeningName),
+        postedAt: undefined,
+      };
+    });
+}
+
+// Breezy: <tenant>.breezy.hr/json — top-level array with absolute posting
+// URLs and a published date, no body.
+export async function breezy(token: string, company: string): Promise<RawJob[]> {
+  const data = await getJSON(`https://${token}.breezy.hr/json`);
+  const rows: any[] = Array.isArray(data) ? data : [];
+  const out: RawJob[] = [];
+  for (const j of rows) {
+    if (!j?.name || typeof j.url !== "string" || !j.url.startsWith("https://")) continue;
+    const loc = j.location ?? {};
+    const base = (typeof loc.name === "string" && loc.name.trim()) ||
+      [loc.city, loc.state, loc.country?.name].filter(Boolean).join(", ");
+    out.push({
+      source: `breezy:${token}`,
+      externalId: j.url.split("/").filter(Boolean).pop() ?? j.url,
+      url: j.url,
+      title: String(j.name),
+      company,
+      location: base,
+      remote: Boolean(loc.is_remote),
+      description: String(j.name), // no body in the list payload
+      postedAt: j.published_date && !Number.isNaN(Date.parse(j.published_date))
+        ? new Date(j.published_date)
+        : undefined,
+    });
+  }
+  return out;
+}
+
+// JOIN: no public API — the company page embeds __NEXT_DATA__ with
+// state.jobs.items. Paged (?page=N); capped to keep the huge pool affordable.
+export async function join(token: string, company: string): Promise<RawJob[]> {
+  const MAX_PAGES = 3;
+  const out: RawJob[] = [];
+  let companySlug = token;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const html = await getText(`https://join.com/companies/${token}${page > 1 ? `?page=${page}` : ""}`);
+    const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) break;
+    let state: any;
+    try {
+      state = JSON.parse(m[1])?.props?.pageProps?.initialState;
+    } catch {
+      break;
+    }
+    const items: any[] = state?.jobs?.items ?? [];
+    companySlug = state?.company?.domain || companySlug;
+    for (const j of items) {
+      if (!j?.title || !j?.idParam) continue;
+      out.push({
+        source: `join:${token}`,
+        externalId: String(j.idParam),
+        url: `https://join.com/companies/${companySlug}/jobs/${j.idParam}`,
+        title: String(j.title),
+        company,
+        location: j.city?.cityName ?? "",
+        remote: /remote/i.test(String(j.title)),
+        description: String(j.title), // embedded state has no body
+        postedAt: undefined,
+      });
+    }
+    const pageCount = Number(state?.jobs?.pagination?.pageCount ?? 1);
+    if (page >= pageCount) break;
+  }
+  return out;
+}
+
+// Pinpoint: /postings.json — rich payload (description AND compensation).
+export async function pinpoint(token: string, company: string): Promise<RawJob[]> {
+  const data = await getJSON(`https://${token}.pinpointhq.com/postings.json`);
+  const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+  const out: RawJob[] = [];
+  for (const j of rows) {
+    const url = typeof j?.url === "string" && j.url.startsWith("https://") ? j.url : "";
+    if (!j?.title || !url) continue;
+    const loc = j.location ?? {};
+    out.push({
+      source: `pinpoint:${token}`,
+      externalId: String(j.id ?? url),
+      url,
+      title: String(j.title).trim(),
+      company,
+      location: (typeof loc.name === "string" && loc.name.trim()) ||
+        [loc.city, loc.province].filter(Boolean).join(", "),
+      remote: /remote/i.test(`${j.workplace_type ?? ""} ${loc.name ?? ""}`),
+      salaryText: j.compensation ? String(j.compensation) : undefined,
+      description: stripHtml(j.description ?? "") || String(j.title),
+      postedAt: undefined,
+    });
+  }
+  return out;
+}
+
 // Uniform shape: fetchers that are single-instance (Greenhouse, Ashby,
 // SmartRecruiters, Workable, Recruitee, Personio, Workday) simply ignore the
 // region argument.
@@ -231,5 +379,10 @@ export const atsFetchers = {
   recruitee,
   personio,
   workday,
+  teamtailor,
+  bamboohr,
+  breezy,
+  join,
+  pinpoint,
 } as const satisfies Record<string, AtsFetcher>;
 export type AtsProvider = keyof typeof atsFetchers;

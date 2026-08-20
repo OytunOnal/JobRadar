@@ -387,9 +387,11 @@ test("join: prefix-gated path tokens (real CC records)", () => {
   assert.equal(extractSlug("https://join.com/companies"), null); // prefix root
 });
 
-test("parked platforms have no fetcher wired (discover-and-park)", () => {
-  for (const id of ["bamboohr", "breezy", "teamtailor", "join"]) {
-    assert.equal(getPlatform(id)!.fetcher, undefined, id);
+test("every platform has a fetcher — the parked era is over", () => {
+  // The formerly parked four (26.8k accumulated boards) plus pinpoint got
+  // fetchers in the career-ops provider wave; nothing accumulates unfetched.
+  for (const id of ["bamboohr", "breezy", "teamtailor", "join", "pinpoint"]) {
+    assert.equal(typeof getPlatform(id)!.fetcher, "string", id);
   }
 });
 

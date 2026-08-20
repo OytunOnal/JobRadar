@@ -335,6 +335,7 @@ const bamboohrPlatform: AtsPlatform = {
   ],
   crawlDomains: ["*.bamboohr.com"],
   probeUrl: (token) => `https://${token}.bamboohr.com/careers/list`,
+  fetcher: "bamboohr",
 };
 
 const breezyPlatform: AtsPlatform = {
@@ -351,6 +352,7 @@ const breezyPlatform: AtsPlatform = {
   ],
   crawlDomains: ["*.breezy.hr"],
   probeUrl: (token) => `https://${token}.breezy.hr/json`,
+  fetcher: "breezy",
 };
 
 const teamtailorPlatform: AtsPlatform = {
@@ -368,6 +370,7 @@ const teamtailorPlatform: AtsPlatform = {
   ],
   crawlDomains: ["*.teamtailor.com"],
   probeUrl: (token) => `https://${token}.teamtailor.com/jobs`,
+  fetcher: "teamtailor",
 };
 
 const joinPlatform: AtsPlatform = {
@@ -384,6 +387,25 @@ const joinPlatform: AtsPlatform = {
   ],
   crawlDomains: ["join.com/companies"],
   probeUrl: (token) => `https://join.com/companies/${token}`,
+  fetcher: "join",
+};
+
+const pinpointPlatform: AtsPlatform = {
+  id: "pinpoint",
+  // <slug>.pinpointhq.com hosted boards (xeneta). Probe verified live
+  // 2026-08: /postings.json answers 200 JSON, unknown subdomains 404 with no
+  // redirect, uppercase slugs answer 200 (case-insensitive). The payload is
+  // rich: full description AND a compensation string.
+  patterns: [
+    {
+      kind: "subdomain",
+      suffixes: ["pinpointhq.com"],
+      denyLabels: COMMON_DENY_LABELS,
+    },
+  ],
+  crawlDomains: ["*.pinpointhq.com"],
+  probeUrl: (token) => `https://${token}.pinpointhq.com/postings.json`,
+  fetcher: "pinpoint",
 };
 
 export const platforms: readonly AtsPlatform[] = [
@@ -409,6 +431,7 @@ export const platforms: readonly AtsPlatform[] = [
   workdayPlatform,
   bamboohrPlatform,
   breezyPlatform,
+  pinpointPlatform,
   teamtailorPlatform,
   joinPlatform,
 ];

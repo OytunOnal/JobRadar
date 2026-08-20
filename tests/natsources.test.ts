@@ -92,7 +92,7 @@ test("EURES payload: multi-word titles split into ANDed TITLE keywords", () => {
 test("EURES titlesFor pairs local language with country", () => {
   const group = { en: ["software engineer"], es: ["desarrollador de software"], nl: ["software ontwikkelaar"] };
   assert.deepEqual(titlesFor(group, "es"), ["software engineer", "desarrollador de software"]);
-  assert.deepEqual(titlesFor(group, "pt"), ["software engineer"]); // no pt support → EN only
+  assert.deepEqual(titlesFor(group, "pt"), ["software engineer"]); // group has no pt variant → EN only
 });
 
 test("EURES mapJv: portal detail URL, epoch dates, HTML stripped", () => {

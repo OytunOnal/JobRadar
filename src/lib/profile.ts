@@ -13,7 +13,8 @@ import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
 export type Track = string;
 
-export type SearchLang = "en" | "de" | "nl" | "fr" | "es";
+export { SEARCH_LANGS, type SearchLang } from "./langs";
+import type { SearchLang } from "./langs";
 
 // One group per specific track: its search names by language. EN always starts
 // with the lead titleKeyword, so a variant-less profile keeps working. Shared

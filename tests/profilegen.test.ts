@@ -114,13 +114,15 @@ test("cleanVariants keeps known languages, drops junk, caps at 3", () => {
   const v = cleanVariants({
     en: ["AI Engineer", "ml engineer", "machine learning engineer", "llm engineer", 42],
     de: ["KI-Entwickler"],
-    pt: ["engenheiro"], // unsupported language → dropped
+    pl: ["Programista AI"],
+    ja: ["エンジニア"], // not a European search language → dropped
     fr: [],
     nl: "not-an-array",
   });
   assert.deepEqual(v, {
     en: ["ai engineer", "ml engineer", "machine learning engineer"],
     de: ["ki-entwickler"],
+    pl: ["programista ai"],
   });
   assert.equal(cleanVariants(undefined), undefined);
   assert.equal(cleanVariants({ de: [] }), undefined);

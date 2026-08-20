@@ -1,3 +1,5 @@
+import type { SearchLang } from "./langs";
+
 // Geography: turn messy location strings into ISO country codes, and countries
 // into regions. Three layers resolve a location (cheap → expensive):
 //   1. this gazetteer (multilingual country names + major hiring-hub cities)
@@ -51,13 +53,19 @@ export function regionsOf(country: string): string[] {
   return REGION_KEYS.filter((r) => REGIONS[r].includes(country));
 }
 
-// Local posting language per country — only languages the search layer has
-// query variants for. Countries not listed search in English.
-export const COUNTRY_LANGUAGE: Record<string, "de" | "nl" | "fr" | "es"> = {
+// Local posting language per country — the language local-titled postings
+// use. Countries not listed (or whose profile carries no variant for the
+// language) search in English only. Values must be members of SEARCH_LANGS
+// in profile.ts. Belgium → nl is a simplification (Flanders majority; the
+// EN lead covers Brussels' French-titled roles).
+export const COUNTRY_LANGUAGE: Record<string, SearchLang> = {
   de: "de", at: "de", ch: "de",
-  nl: "nl",
-  fr: "fr",
+  nl: "nl", be: "nl",
+  fr: "fr", lu: "fr",
   es: "es", mx: "es", ar: "es", cl: "es", co: "es", pe: "es", uy: "es",
+  it: "it", pt: "pt", br: "pt", pl: "pl", cz: "cs", sk: "sk", ro: "ro",
+  hu: "hu", gr: "el", se: "sv", dk: "da", no: "no", fi: "fi", bg: "bg",
+  hr: "hr", si: "sl", lt: "lt", lv: "lv", ee: "et",
 };
 
 // ── Gazetteer: names/cities → country ────────────────────────────────────────

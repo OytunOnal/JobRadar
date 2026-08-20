@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { chat } from "./llm";
 import { familiesByKey, FAMILY_KEYS, ROLE_FAMILIES } from "./taxonomy";
-import type { SearchLang, TrackDef } from "./profile";
+import { SEARCH_LANGS } from "./langs";
+import type { TrackDef } from "./profile";
 
 // CV → search profile generation. One strong-tier LLM call per CV change turns
 // the pasted CV (plus an optional stated target) into the personal half of the
@@ -39,7 +40,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
       : "Infer the target roles from the CV.",
     "",
     "Return STRICT JSON only, exactly this shape:",
-    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "nl": ["..."], "fr": ["..."], "es": ["..."]}}], "searchQueries": ["..."]}',
+    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "...": ["..."]}}], "searchQueries": ["..."]}',
     "",
     "families: 1-3 keys from this fixed list (which professional families the candidate belongs to / targets):",
     familyList,
@@ -51,7 +52,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
     "- All keywords in English (job postings are English), lowercase, no duplicates.",
     "- Cover the candidate's breadth: secondary skills get their own track (specific ones first).",
     "- Companies often title roles GENERICALLY (\"software engineer\", \"product manager\"): make sure the broadest fitting track also lists those generic titles.",
-    "- searchVariants: search-engine query strings for this track. en: 2-3 DIFFERENT common job-title names for the same function (the same work ships under many titles). de/nl/fr/es: 1-2 job titles as a German/Dutch/French/Spanish company would actually write them in a posting (e.g. de: \"softwareentwickler\", not a word-for-word translation). Omit a language only if the English title is universally used in that market for this role.",
+    "- searchVariants: search-engine query strings for this track. en: 2-3 DIFFERENT common job-title names for the same function (the same work ships under many titles). Other keys are European language codes: de, nl, fr, es, it, pl, pt, cs, sk, ro, hu, el, sv, da, no, fi, bg, hr, sl, lt, lv, et — 1-2 job titles per language, written the way a company in that market actually titles postings (e.g. de: \"softwareentwickler\", pl: \"programista\" — never word-for-word translations). INCLUDE a language only where local-language titles are common for this role in that market; OMIT markets where English titles dominate (e.g. Nordics for engineering).",
     "",
     "searchQueries: 3-6 short search strings for job aggregators (e.g. \"senior product manager remote\").",
     "",
@@ -65,7 +66,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
 
 // Search variants are OPTIONAL configuration — invalid entries are dropped,
 // never fatal (a track without variants degrades to its lead titleKeyword).
-const VARIANT_LANGS: SearchLang[] = ["en", "de", "nl", "fr", "es"];
+const VARIANT_LANGS = SEARCH_LANGS;
 export function cleanVariants(raw: unknown): TrackDef["searchVariants"] | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
   const out: TrackDef["searchVariants"] = {};
@@ -163,8 +164,9 @@ export async function generateProfile(
   const raw = await chatFn(
     [{ role: "user", content: generationPrompt(cv, targetRoles) }],
     // Generous ceiling: reasoning models (gpt-oss on Groq) spend part of the
-    // budget thinking before the JSON; a low cap truncates mid-array.
-    { temperature: 0.2, maxTokens: 4000, tier: "strong" },
+    // budget thinking before the JSON; a low cap truncates mid-array — but
+    // Groq on_demand caps prompt+completion around 8k, so 5000 is the ceiling.
+    { temperature: 0.2, maxTokens: 5000, tier: "strong" },
   );
   if (!raw) throw new Error("no LLM provider answered — set an API key in .env");
   const validated = validateGenerated(raw);

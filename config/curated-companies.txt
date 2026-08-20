@@ -1,0 +1,100 @@
+# Companies hiring internationally — from AndrewStetsenko/tech-jobs-with-relocation.
+# Format: Company Name <TAB> careers URL. Lines starting with # are ignored.
+# Known list bugs left as-is (foodspring→researchgate, Zound→ziegert): the
+# name-match verification rejects wrong-company boards, and the run report
+# shows them honestly.
+Applike Group	https://applike-group.com/jobs
+BandLab	https://www.bandlab.com/careers
+Betsson Group	https://www.betssongroup.com/career/available-jobs
+BlaBlaCar	https://blog.blablacar.com/dreamjobs
+Blinkist	https://www.blinkist.com/en/jobs
+Bol.com	https://careers.bol.com/en/jobs
+Byborg Enterprises	https://careers.smartrecruiters.com/DoclerHolding
+Catawiki	https://catawiki.careers/vacancies
+CloudLinux	https://www.cloudlinux.com/about-us-company-jobs
+Coolblue	https://www.careersatcoolblue.com
+Creative Fabrica	https://boards.eu.greenhouse.io/creativefabrica
+Cube Dev	https://cube.dev/careers
+e-bot7	https://e-bot7.com/careers
+Elements	https://www.elements.nl/en/careers
+ePages	https://epages.com/en/career
+EPAM	https://www.epam.com/careers/job-listings
+EVBox	https://evbox.com/en/about/careers
+Exness	https://exness.bamboohr.com/jobs
+FINN	https://www.finn.auto/careers
+Flow Traders	https://www.flowtraders.com/careers
+foodspring	https://www.researchgate.net/careers
+FxPro	http://www.fxpro.com/careers
+GeoPhy	https://geophy.com/careers
+Gnosis	https://gnosis.io/careers
+Greentube	https://www.greentube.com/careers
+HENNGE	https://recruit.hennge.com/en/mid-career
+Highsnobiety	https://company.highsnobiety.com/jobs
+HomeToGo	https://www.hometogo.com/careers
+HousingAnywhere	https://careers.housinganywhere.com
+Intropic	https://jobs.lever.co/intropic
+JOIN	https://join.com/companies/join
+Journi	https://www.journiapp.com/careers
+Jumbo	https://jobs.jumbo.com/en/tech
+Just Eat Takeaway.com	https://careers.justeattakeaway.com/global/en
+Lemonade	https://makers.lemonade.com
+Lightspeed	https://boards.greenhouse.io/lightspeedhq
+LINE Fukuoka	https://linefukuoka.co.jp/en/career/engineer
+LOOP	https://www.agentur-loop.com/careers
+Manychat	https://careers.manychat.com/#vacancies
+Mercari	https://careers.mercari.com
+Mollie	https://jobs.mollie.com
+Monzo	https://monzo.com/careers
+movingimage	https://www.movingimage.com/careers/#jobs
+Mujin	https://jobs.lever.co/mujininc
+Multiverse Computing	https://multiversecomputing.com/join-us
+NavVis	https://www.navvis.com/company/careers
+Neocom	https://www.neocom.ai/careers#section-job-openings
+Oda	https://careers.oda.com/jobs
+OJ Electronics	https://ojelectronics.com/career
+Optum	https://careers.unitedhealthgroup.com/optum-ireland
+Oxbotica	https://www.oxbotica.com/our-people
+PayPay	https://boards.greenhouse.io/paypay
+Payrails	https://www.payrails.com/careers
+PhotoRoom	https://jobs.lever.co/photoroom
+Picnic	https://picnic.app/careers/all-jobs
+Procreate	https://procreate.com/careers
+QuadSAT	https://quadsat.com/career
+Queue-it	https://careers.queue-it.com/jobs
+Reaktor	https://www.reaktor.com/careers
+Runtastic	https://www.runtastic.com/career/jobs
+Scout24	http://jobs.scout24.com
+Seldon	https://www.seldon.io/careers
+Shape	https://shape.dk/careers
+Shape Games	https://careers.shapegames.com/jobs
+SimScale	https://www.simscale.com/jobs
+Smallpdf	https://smallpdf.com/careers
+Smartly.io	https://www.smartly.io/careers
+SmartNews	https://apply.workable.com/smartnews
+Solsten	https://boards.greenhouse.io/solsten
+Solvians	https://www.solvians.com/career
+SoundCloud	https://careers.soundcloud.com
+straiv	https://straiv.io/en/career
+Stream	https://boards.greenhouse.io/stream
+Sumo Digital	https://www.sumo-digital.com/careers
+Swisscom	https://sdcrotterdam.swisscom.ch/openpositions
+Tactile Games	https://tactilegames.com/careers
+Talkwalker	https://www.talkwalker.com/careers
+The LEGO Group	https://www.lego.com/da-dk/careers/search
+Tractable	https://tractable.ai/careers
+TuSimple	https://www.tusimple.com/careers
+Uphold	https://uphold.com/careers
+Vimcar	https://careers.vimcar.com/en
+Volkswagen Digital Solutions	https://www.vwds.pt/careers
+Wallapop	https://boards.eu.greenhouse.io/wallapop
+Wayve	https://wayve.ai/join-us
+Welltech	https://welltech.com/career
+WiseTech Global	https://www.wisetechglobal.com/join-us/current-openings
+Wise	https://www.wise.jobs/search/?t=engineering&o=&sort=newest
+WorldQuant	https://www.worldquant.com/career-listing
+Xeneta	https://xeneta.pinpointhq.com
+Xovis	https://www.xovis.com/careers
+Zenly	https://zen.ly/jobs
+Ziegert Group	https://ziegert-group.com/en/careers
+Zivid	https://www.zivid.com/career-join-zivid
+Zound Industries	https://ziegert-group.com/en/careers

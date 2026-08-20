@@ -34,6 +34,16 @@ model AtsBoard {
 // Learned location knowledge: raw location strings the gazetteer couldn't
 // place, resolved once by a batched LLM call and remembered forever.
 // Editable by hand; a null country means "asked, couldn't tell".
+// Name-guess probe memory (harvest tier 4): company names we already tried
+// to map to an ATS board by slugifying and probing. found=false entries are
+// remembered so a name is never probed twice.
+model CompanyProbe {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // normalized company name
+  found     Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
 model LocationCache {
   id         Int      @id @default(autoincrement())
   raw        String   @unique // normalized location string

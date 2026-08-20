@@ -19,6 +19,7 @@ import { boardSources, recordBoardOutcome } from "./discovery/boardSources";
 import { tooOldToStore } from "./freshness";
 import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
+import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -32,6 +33,9 @@ const AUTO_FIT_TOP_N = 25;
 // at all (fast tier), and how many full comparisons (strong tier) may run.
 // The first trial run showed unbudgeted prefilters eating the free tiers.
 const DEDUP_MAX_CHECKS = 60;
+
+// Companies name-guess-probed per ingest (harvest tier 4).
+const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 8;
 const DEDUP_MAX_COMPARES = 15;
 
 const aggregators: Source[] = [
@@ -86,6 +90,7 @@ export interface IngestReport {
   junkDomain: number;
   semanticDupes: number;
   delisted: number;
+  nameProbe?: NameProbeReport;
   locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
@@ -160,7 +165,7 @@ export async function runIngest(): Promise<IngestReport> {
 
   const aggregatorUrls: string[] = [];
   const newlyStoredUrls: string[] = [];
-  const newlyCreated: Array<{ id: string; title: string; company: string; description: string }> = [];
+  const newlyCreated: Array<{ id: string; title: string; company: string; description: string; source: string }> = [];
   for (const job of all) {
     if (isAggregatorJob(job) && job.url) aggregatorUrls.push(job.url);
   }
@@ -250,7 +255,7 @@ export async function runIngest(): Promise<IngestReport> {
     } else {
       const created = await prisma.job.create({ data });
       report.stored++;
-      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: created.description });
+      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: created.description, source: created.source });
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
   }
@@ -286,6 +291,19 @@ export async function runIngest(): Promise<IngestReport> {
     report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
   } catch (e: any) {
     report.errors.push(`harvest: ${e.message}`);
+  }
+
+  // Harvest tier 4: aggregator jobs carry no company URL, but the company
+  // NAME slugifies into probeable ATS tokens. Verified hits join the board
+  // pool as active — the whole company upgrades to first-party next ingest.
+  try {
+    const names = newlyCreated
+      .filter((j) => !j.source.includes(":"))
+      .map((j) => j.company)
+      .filter(Boolean);
+    if (names.length > 0) report.nameProbe = await runNameProbes(names, NAME_PROBE_MAX);
+  } catch (e: any) {
+    report.errors.push(`name-probe: ${String(e.message).slice(0, 160)}`);
   }
 
   // Batched LLM location resolution for strings the gazetteer+cache missed.

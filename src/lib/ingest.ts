@@ -11,6 +11,9 @@ import { adzuna } from "./sources/adzuna";
 import { jsearch } from "./sources/jsearch";
 import { linkedin } from "./sources/linkedin";
 import { indeed } from "./sources/indeed";
+import { freehire } from "./sources/freehire";
+import { arbeitsagentur } from "./sources/arbeitsagentur";
+import { eures } from "./sources/eures";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -48,10 +51,13 @@ const aggregators: Source[] = [
   jobicy,
   himalayas,
   weworkremotely,
+  freehire,       // keyless aggregator; first-party ATS links feed harvest too
+  arbeitsagentur, // German national job board, keyless; German titles matter
+  eures,          // EU official portal: werk.nl/SEPE/IEFP/France Travail content
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
-  linkedin, // needs APIFY_API_TOKEN (free ~$5/mo credit); skips itself otherwise
-  indeed,   // same token; kaix actor, DACH countries by default
+  linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor
+  indeed,   // needs APIFY_API_TOKEN; kaix actor, DACH countries by default
 ];
 
 

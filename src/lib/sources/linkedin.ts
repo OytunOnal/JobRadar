@@ -1,5 +1,5 @@
 import { COUNTRY_LANGUAGE, resolveCountry } from "../geo";
-import { profile, type SearchLang } from "../profile";
+import { profileSearchGroups, type SearchGroup, type SearchLang } from "../profile";
 import { scoreJob } from "../score";
 import { apifyToken, runActor } from "./apify";
 import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
@@ -53,23 +53,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Config → search plan ─────────────────────────────────────────────────────
 
-// One group per specific track: its search names by language. EN always
-// starts with the lead titleKeyword so a variant-less profile keeps working.
-export type SearchGroup = Partial<Record<SearchLang, string[]>> & { en: string[] };
-
 function searchGroups(): SearchGroup[] {
   const env = process.env.LINKEDIN_TITLES;
   if (env) return env.split(",").map((s) => s.trim()).filter(Boolean).map((t) => ({ en: [t] }));
-  return profile.tracks
-    .filter((t) => !t.key.startsWith("general-") && t.titleKeywords.length > 0)
-    .slice(0, 4)
-    .map((t) => {
-      const v = t.searchVariants ?? {};
-      return {
-        ...v,
-        en: [...new Set([t.titleKeywords[0], ...(v.en ?? [])])],
-      };
-    });
+  return profileSearchGroups(4);
 }
 
 // "Berlin, Germany" → "de", "European Union" → null. Local-language queries

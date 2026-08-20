@@ -15,6 +15,11 @@ export type Track = string;
 
 export type SearchLang = "en" | "de" | "nl" | "fr" | "es";
 
+// One group per specific track: its search names by language. EN always starts
+// with the lead titleKeyword, so a variant-less profile keeps working. Shared
+// by every search-driven source (LinkedIn, EURES, Arbeitsagentur, freehire).
+export type SearchGroup = Partial<Record<SearchLang, string[]>> & { en: string[] };
+
 export interface TrackDef {
   key: Track;
   label: string;
@@ -122,3 +127,13 @@ export const profile = {
   // generated profile supplies persona-appropriate defaults.
   searchQueries: generated?.searchQueries ?? null,
 } as const;
+
+export function profileSearchGroups(max = 4): SearchGroup[] {
+  return profile.tracks
+    .filter((t) => !t.key.startsWith("general-") && t.titleKeywords.length > 0)
+    .slice(0, max)
+    .map((t) => {
+      const v = t.searchVariants ?? {};
+      return { ...v, en: [...new Set([t.titleKeywords[0], ...(v.en ?? [])])] };
+    });
+}

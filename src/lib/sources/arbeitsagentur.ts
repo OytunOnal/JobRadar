@@ -13,7 +13,8 @@ import { type RawJob, type Source } from "./types";
 // cards get a v4 jobdetails call (description + the employer's own URL when
 // the posting has one).
 //
-// Config: BA_WINDOW_DAYS (7)  BA_SIZE (50/search)  BA_DETAIL_MAX (60)
+// Config: BA_WINDOW_DAYS (7)  BA_SIZE (100/page)  BA_MAX_PAGES (4)
+//         BA_DETAIL_MAX (60)
 
 const SEARCH_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs";
 const DETAIL_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails";
@@ -21,20 +22,21 @@ const API_KEY = "jobboerse-jobsuche"; // the public web client's static key
 const UA = "JobRadar/0.1 (personal job search)";
 
 const WINDOW_DAYS = Number(process.env.BA_WINDOW_DAYS) || 7;
-const SIZE = Number(process.env.BA_SIZE) || 50;
+const SIZE = Number(process.env.BA_SIZE) || 100;
+const MAX_PAGES = Number(process.env.BA_MAX_PAGES) || 4;
 const DETAIL_MAX = Number(process.env.BA_DETAIL_MAX) || 60;
 // Mirrors ingest's STORE_THRESHOLD (importing it would be circular).
 const SCORE_GATE = 20;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function buildSearchUrl(query: string): string {
+export function buildSearchUrl(query: string, page = 1): string {
   const p = new URLSearchParams();
   p.set("was", query);
   p.set("angebotsart", "1"); // 1 = ARBEIT (jobs, not apprenticeships/trainings)
   p.set("veroeffentlichtseit", String(WINDOW_DAYS));
   p.set("size", String(SIZE));
-  p.set("page", "1");
+  p.set("page", String(page));
   return `${SEARCH_URL}?${p.toString()}`;
 }
 
@@ -126,14 +128,21 @@ export async function fetchArbeitsagentur(fetchImpl: typeof fetch = fetch): Prom
     queries.add(g.en[0]);
   }
 
+  // The window filter is server-side (veroeffentlichtseit), so paging just
+  // walks the full weekly result: live, "softwareentwickler" alone is ~485
+  // postings/week - a single 50-row page saw a tenth of it.
   const cards = new Map<string, BaCard>();
   for (const q of queries) {
-    const data = await baFetch(buildSearchUrl(q), fetchImpl);
-    for (const item of data?.ergebnisliste ?? []) {
-      const card = parseCard(item);
-      if (card && !cards.has(card.refnr)) cards.set(card.refnr, card);
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const data = await baFetch(buildSearchUrl(q, page), fetchImpl);
+      const items: any[] = data?.ergebnisliste ?? [];
+      for (const item of items) {
+        const card = parseCard(item);
+        if (card && !cards.has(card.refnr)) cards.set(card.refnr, card);
+      }
+      await sleep(400);
+      if (items.length < SIZE) break; // short page = done
     }
-    await sleep(400);
   }
 
   // Detail budget goes to the best title scores first (two-stage cost model).

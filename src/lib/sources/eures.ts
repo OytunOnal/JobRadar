@@ -23,11 +23,12 @@ import { stripHtml, type RawJob, type Source } from "./types";
 // the richer BA copy.
 //
 // Config: EURES_COUNTRIES (";"-sep ISO codes to narrow the sweep)
-//         EURES_LIMIT (50/search)
+//         EURES_LIMIT (50/page)  EURES_MAX_PAGES (3)
 
 const SEARCH_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search";
 const UA = "JobRadar/0.1 (personal job search)";
 const LIMIT = Number(process.env.EURES_LIMIT) || 50;
+const MAX_PAGES = Number(process.env.EURES_MAX_PAGES) || 3;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,10 +43,10 @@ function countries(): string[] {
   return defaultCountries();
 }
 
-export function buildPayload(title: string, country: string): object {
+export function buildPayload(title: string, country: string, page = 1): object {
   return {
     resultsPerPage: LIMIT,
-    page: 1,
+    page,
     sortSearch: "MOST_RECENT",
     // AND of single words — a multi-word phrase in one entry matches nothing.
     keywords: title.split(/\s+/).filter(Boolean).map((keyword) => ({
@@ -110,14 +111,20 @@ export async function fetchEures(fetchImpl: typeof fetch = fetch): Promise<RawJo
   for (const country of countries()) {
     const titles = new Set(groups.flatMap((g) => titlesFor(g, country)));
     for (const title of titles) {
-      const data = await euresSearch(buildPayload(title, country), fetchImpl);
-      for (const jv of data?.jvs ?? []) {
-        const job = mapJv(jv, country);
-        if (!job || seen.has(job.externalId)) continue;
-        seen.add(job.externalId);
-        out.push(job);
+      // A busy (title, country) pair overflows one page (DE "software
+      // engineer" does weekly); page while pages come back full.
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const data = await euresSearch(buildPayload(title, country, page), fetchImpl);
+        const jvs: any[] = data?.jvs ?? [];
+        for (const jv of jvs) {
+          const job = mapJv(jv, country);
+          if (!job || seen.has(job.externalId)) continue;
+          seen.add(job.externalId);
+          out.push(job);
+        }
+        await sleep(500);
+        if (jvs.length < LIMIT) break; // short page = done
       }
-      await sleep(500);
     }
   }
   return out;

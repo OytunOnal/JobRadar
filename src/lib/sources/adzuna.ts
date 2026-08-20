@@ -5,8 +5,9 @@ import { stripHtml, type RawJob, type Source } from "./types";
 // salary data). Get keys at https://developer.adzuna.com — set ADZUNA_APP_ID
 // and ADZUNA_APP_KEY in .env. Skipped silently when keys are missing.
 //
-// One request per (country, query). Both lists are env-configurable; the
-// defaults stay modest to respect the free tier.
+// Paged per (country, query) with a server-side date window (max_days_old).
+// Both lists are env-configurable; page count stays modest to respect the
+// free tier call budget. ADZUNA_WINDOW_DAYS (7)  ADZUNA_MAX_PAGES (3)
 const COUNTRIES = (process.env.ADZUNA_COUNTRIES || "gb,de,nl")
   .split(",").map((s) => s.trim()).filter(Boolean);
 // Env wins; else the CV-generated profile; else the template default.
@@ -22,19 +23,23 @@ export const adzuna: Source = {
     const key = process.env.ADZUNA_APP_KEY;
     if (!id || !key) return [];
 
+    const windowDays = Number(process.env.ADZUNA_WINDOW_DAYS) || 7;
+    const maxPages = Number(process.env.ADZUNA_MAX_PAGES) || 3;
     const out: RawJob[] = [];
     const seen = new Set<string>();
     for (const country of COUNTRIES) {
       for (const q of QUERIES) {
+       for (let page = 1; page <= maxPages; page++) {
         try {
           const url =
-            `https://api.adzuna.com/v1/api/jobs/${country}/search/1` +
+            `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}` +
             `?app_id=${id}&app_key=${key}&results_per_page=50` +
-            `&what=${encodeURIComponent(q)}&sort_by=date`;
+            `&what=${encodeURIComponent(q)}&sort_by=date&max_days_old=${windowDays}`;
           const res = await fetch(url, { headers: { Accept: "application/json" } });
-          if (!res.ok) continue;
+          if (!res.ok) break;
           const data = await res.json();
-          for (const j of data.results ?? []) {
+          const results: any[] = data.results ?? [];
+          for (const j of results) {
             const extId = String(j.id);
             if (seen.has(extId)) continue; // same job can match several queries
             seen.add(extId);
@@ -55,9 +60,11 @@ export const adzuna: Source = {
               postedAt: j.created ? new Date(j.created) : undefined,
             });
           }
+          if (results.length < 50) break; // short page = window exhausted
         } catch {
-          // one bad (country, query) pair shouldn't sink the source
+          break; // one bad (country, query) pair shouldn't sink the source
         }
+       }
       }
     }
     return out;

@@ -13,7 +13,7 @@ import { stripHtml, type RawJob, type Source } from "./types";
 //
 // Config:
 //   FREEHIRE_COUNTRIES  comma-sep ISO codes, default "de,nl,es,pt,fr"
-//   FREEHIRE_WINDOW_DAYS (7)   FREEHIRE_LIMIT (50/search)
+//   FREEHIRE_WINDOW_DAYS (7)   FREEHIRE_LIMIT (50/page)   FREEHIRE_MAX_PAGES (3)
 //   FREEHIRE_API_URL    self-hosted instance override
 //
 // The public instance is community-run and sometimes slow or 504ing under
@@ -23,6 +23,7 @@ const BASE = () => process.env.FREEHIRE_API_URL || "https://freehire.me";
 const UA = "JobRadar/0.1 (personal job search)";
 const WINDOW_DAYS = Number(process.env.FREEHIRE_WINDOW_DAYS) || 7;
 const LIMIT = Number(process.env.FREEHIRE_LIMIT) || 50;
+const MAX_PAGES = Number(process.env.FREEHIRE_MAX_PAGES) || 3;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,11 +32,11 @@ function countries(): string[] {
     .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 
-export function buildSearchUrl(query: string, opts: { remote?: boolean } = {}): string {
+export function buildSearchUrl(query: string, opts: { remote?: boolean; page?: number } = {}): string {
   const p = new URLSearchParams();
   p.set("q", query);
   p.set("limit", String(LIMIT));
-  p.set("offset", "0");
+  p.set("offset", String((opts.page ?? 0) * LIMIT));
   p.set("semantic_ratio", "0"); // keyword search; the semantic index is opt-in
   p.set("include_description", "true");
   p.set("description_format", "text");
@@ -106,18 +107,22 @@ export async function fetchFreehire(fetchImpl: typeof fetch = fetch): Promise<Ra
   for (const q of queries) {
     // Country pass (onsite/hybrid/remote within our countries) + EU-remote pass.
     for (const remote of [false, true]) {
-      // Circuit breaker: two searches down in a row = the instance is down
-      // today; stop grinding retry-backoff on the rest.
-      if (consecutiveFailures >= 2) return out;
-      const data = await apiGet(buildSearchUrl(q, { remote }), fetchImpl);
-      consecutiveFailures = data ? 0 : consecutiveFailures + 1;
-      for (const j of data?.data ?? []) {
-        const job = mapJob(j);
-        if (!job || seen.has(job.externalId)) continue;
-        seen.add(job.externalId);
-        out.push(job);
+      for (let page = 0; page < MAX_PAGES; page++) {
+        // Circuit breaker: two searches down in a row = the instance is down
+        // today; stop grinding retry-backoff on the rest.
+        if (consecutiveFailures >= 2) return out;
+        const data = await apiGet(buildSearchUrl(q, { remote, page }), fetchImpl);
+        consecutiveFailures = data ? 0 : consecutiveFailures + 1;
+        const items: any[] = data?.data ?? [];
+        for (const j of items) {
+          const job = mapJob(j);
+          if (!job || seen.has(job.externalId)) continue;
+          seen.add(job.externalId);
+          out.push(job);
+        }
+        await sleep(500);
+        if (items.length < LIMIT) break; // short page = window exhausted
       }
-      await sleep(500);
     }
   }
   return out;

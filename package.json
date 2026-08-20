@@ -24,7 +24,8 @@
     "sponsors": "tsx --env-file=.env scripts/sponsors-refresh.ts",
     "sweep": "tsx --env-file=.env scripts/board-sweep.ts",
     "locations:fill": "tsx --env-file=.env scripts/locations-fill.ts",
-    "fit:fill": "tsx --env-file=.env scripts/fit-fill.ts"
+    "fit:fill": "tsx --env-file=.env scripts/fit-fill.ts",
+    "fit:review": "tsx --env-file=.env scripts/fit-review.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

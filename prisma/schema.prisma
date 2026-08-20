@@ -92,6 +92,9 @@ model Job {
 
   // LLM fit analysis (CV vs job description) — filled on demand.
   fitScore    Int?
+  // Which lane produced the fit verdict (null = first-pass cloud/8b chain;
+  // "qwen27b-review" = the deep local second pass).
+  fitBy       String?
   fitVerdict  String?  // strong | possible | weak
   fitComment  String?
   fitCategory String?  // why weak: NO_VISA | LANGUAGE | PROFILE | OTHER (NONE otherwise)

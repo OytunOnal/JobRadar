@@ -25,6 +25,7 @@ console.log(`SEO-farm junk:  ${report.junkDomain}`);
 console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`Swept (closed): ${report.delisted}`);
 if (report.nameProbe) console.log(`Name probes:    ${report.nameProbe.found}/${report.nameProbe.checked} companies mapped to their ATS`);
+if (report.deepProbe) console.log(`Deep probes:    ${report.deepProbe.found}/${report.deepProbe.checked} misses rescued via careers-page scan (${report.deepProbe.sitesResolved} sites resolved)`);
 if (report.locations) console.log(`Locations:      ${report.locations.llmResolved}/${report.locations.llmAsked} unknown strings resolved by LLM (cached forever)`);
 console.log(`LLM fit-scored: ${report.fitAnalyzed}`);
 if (report.harvest) {

@@ -38,10 +38,14 @@ model AtsBoard {
 // to map to an ATS board by slugifying and probing. found=false entries are
 // remembered so a name is never probed twice.
 model CompanyProbe {
-  id        Int      @id @default(autoincrement())
-  name      String   @unique // normalized company name
-  found     Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // normalized company name
+  displayName String? // original spelling, for the tier-5 website lookup
+  found       Boolean  @default(false)
+  // Tier 5 (website -> careers-page scan) already attempted for this name.
+  deepChecked Boolean  @default(false)
+  website     String? // domain the LLM resolved (kept even on a miss)
+  createdAt   DateTime @default(now())
 }
 
 model LocationCache {

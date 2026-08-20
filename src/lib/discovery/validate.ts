@@ -31,6 +31,8 @@ export function titleizeToken(token: string): string {
 // Company name from the probe body where the API offers one. `body` is parsed
 // JSON when the response parses, else the raw text (Personio's XML).
 const JOB_COUNTERS: Record<string, (body: any) => number | undefined> = {
+  lever: (b) => (Array.isArray(b) ? b.length : undefined),
+  ashby: (b) => (Array.isArray(b?.jobs) ? b.jobs.length : undefined),
   workable: (b) => (Array.isArray(b?.jobs) ? b.jobs.length : undefined),
   recruitee: (b) => (Array.isArray(b?.offers) ? b.offers.length : undefined),
   smartrecruiters: (b) => (typeof b?.totalFound === "number" ? b.totalFound : undefined),

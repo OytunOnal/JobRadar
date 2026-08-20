@@ -20,6 +20,7 @@ import { tooOldToStore } from "./freshness";
 import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
 import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
+import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -36,6 +37,8 @@ const DEDUP_MAX_CHECKS = 60;
 
 // Companies name-guess-probed per ingest (harvest tier 4).
 const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 8;
+// Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
+const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
 
 const aggregators: Source[] = [
@@ -91,6 +94,7 @@ export interface IngestReport {
   semanticDupes: number;
   delisted: number;
   nameProbe?: NameProbeReport;
+  deepProbe?: DeepProbeReport;
   locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
@@ -304,6 +308,16 @@ export async function runIngest(): Promise<IngestReport> {
     if (names.length > 0) report.nameProbe = await runNameProbes(names, NAME_PROBE_MAX);
   } catch (e: any) {
     report.errors.push(`name-probe: ${String(e.message).slice(0, 160)}`);
+  }
+
+  // Harvest tier 5: rescue lane for name-probe misses — LLM resolves the
+  // company website, the careers page reveals the ATS, probe verifies.
+  if (llmEnabled()) {
+    try {
+      report.deepProbe = await runDeepProbes(DEEP_PROBE_MAX);
+    } catch (e: any) {
+      report.errors.push(`deep-probe: ${String(e.message).slice(0, 160)}`);
+    }
   }
 
   // Batched LLM location resolution for strings the gazetteer+cache missed.

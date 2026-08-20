@@ -131,7 +131,7 @@ export async function runNameProbes(
 
     report.checked++;
     const hit = await probeCompany(raw, probeFn);
-    await prisma.companyProbe.create({ data: { name: norm, found: hit !== null } });
+    await prisma.companyProbe.create({ data: { name: norm, displayName: raw, found: hit !== null } });
     if (hit) {
       report.found++;
       await prisma.atsBoard.upsert({

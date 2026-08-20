@@ -12,11 +12,35 @@ import {
 // ── Guest API: search plan and URL (the tiered matrix) ───────────────────────
 
 test("searchPlan: city×onsite+hybrid, country×remote, EU×remote", () => {
-  const plan = searchPlan(["unity developer"], ["Berlin, Germany"], ["Turkey"]);
+  const plan = searchPlan([{ en: ["unity developer"] }], ["Berlin, Germany"], ["Turkey"]);
   assert.equal(plan.length, 3);
   assert.deepEqual(plan[0], { keywords: "unity developer", location: "Berlin, Germany", workTypes: ["1", "3"], tier: "city" });
   assert.deepEqual(plan[1].workTypes, ["2"]);
   assert.equal(plan[2].location, "European Union");
+});
+
+test("searchPlan pairs query language with geography", () => {
+  const group = {
+    en: ["software engineer", "software developer"],
+    de: ["softwareentwickler"],
+    es: ["desarrollador de software"],
+  };
+  const plan = searchPlan([group], ["Berlin, Germany", "Lisbon, Portugal"], ["Spain"]);
+  const q = (tier: string, location: string) =>
+    plan.filter((s) => s.tier === tier && s.location === location).map((s) => s.keywords);
+  // City tier: EN lead + local lead — German in Berlin, nothing extra in Lisbon
+  assert.deepEqual(q("city", "Berlin, Germany"), ["software engineer", "softwareentwickler"]);
+  assert.deepEqual(q("city", "Lisbon, Portugal"), ["software engineer"]);
+  // Country tier adds the 2nd EN variant; Spain also gets the Spanish title
+  assert.deepEqual(q("country", "Spain"), ["software engineer", "software developer", "desarrollador de software"]);
+  // EU tier: EN variants only
+  assert.deepEqual(q("region", "European Union"), ["software engineer", "software developer"]);
+});
+
+test("searchPlan dedupes when the local variant equals the EN lead", () => {
+  const plan = searchPlan([{ en: ["product manager"], de: ["product manager"] }], ["Munich, Germany"], []);
+  assert.deepEqual(plan.map((s) => s.keywords), ["product manager", "product manager"]);
+  assert.equal(plan.filter((s) => s.tier === "city").length, 1);
 });
 
 test("buildSearchUrl encodes the guest-API contract", () => {

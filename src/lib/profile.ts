@@ -13,11 +13,18 @@ import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
 export type Track = string;
 
+export type SearchLang = "en" | "de" | "nl" | "fr" | "es";
+
 export interface TrackDef {
   key: Track;
   label: string;
   titleKeywords: string[];
   bodyKeywords: string[];
+  // Search-side title variants per language ("organize by function, not job
+  // title" — the same work ships under many names, and German/Dutch/French/
+  // Spanish postings use local titles English queries never see). Populated
+  // by profile:generate; scoring ignores this field entirely.
+  searchVariants?: Partial<Record<SearchLang, string[]>>;
 }
 
 // Optional overrides a user may add to config/user.ts.

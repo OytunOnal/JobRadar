@@ -5,6 +5,7 @@ import {
   generateProfile,
   generationPrompt,
   validateGenerated,
+  cleanVariants,
 } from "../src/lib/profilegen";
 import {
   deriveRoleNegatives,
@@ -105,4 +106,40 @@ test("generateProfile stamps the cv hash; hash tracks CV and target changes", as
   assert.equal(p.cvHash, cvHash("my cv", "pm roles"));
   assert.notEqual(cvHash("my cv", "pm roles"), cvHash("my cv", "design roles"));
   assert.notEqual(cvHash("my cv"), cvHash("my cv v2"));
+});
+
+// ── search variants ──────────────────────────────────────────────────────────
+
+test("cleanVariants keeps known languages, drops junk, caps at 3", () => {
+  const v = cleanVariants({
+    en: ["AI Engineer", "ml engineer", "machine learning engineer", "llm engineer", 42],
+    de: ["KI-Entwickler"],
+    pt: ["engenheiro"], // unsupported language → dropped
+    fr: [],
+    nl: "not-an-array",
+  });
+  assert.deepEqual(v, {
+    en: ["ai engineer", "ml engineer", "machine learning engineer"],
+    de: ["ki-entwickler"],
+  });
+  assert.equal(cleanVariants(undefined), undefined);
+  assert.equal(cleanVariants({ de: [] }), undefined);
+});
+
+test("validateGenerated carries searchVariants through, tolerates their absence", () => {
+  const raw = JSON.stringify({
+    families: ["engineering"],
+    tracks: [
+      { key: "backend", label: "Backend", titleKeywords: ["backend engineer", "backend developer"],
+        bodyKeywords: ["go", "postgres", "kubernetes"],
+        searchVariants: { en: ["backend engineer", "server engineer"], nl: ["backend ontwikkelaar"] } },
+      { key: "platform", label: "Platform", titleKeywords: ["platform engineer", "sre"],
+        bodyKeywords: ["terraform", "aws", "ci/cd"] },
+    ],
+    searchQueries: ["backend engineer europe"],
+  });
+  const out = validateGenerated(raw);
+  const backend = out.tracks.find((t) => t.key === "backend")!;
+  assert.deepEqual(backend.searchVariants?.nl, ["backend ontwikkelaar"]);
+  assert.equal(out.tracks.find((t) => t.key === "platform")!.searchVariants, undefined);
 });

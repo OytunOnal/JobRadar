@@ -1,4 +1,5 @@
-import { profile } from "../profile";
+import { COUNTRY_LANGUAGE, resolveCountry } from "../geo";
+import { profile, type SearchLang } from "../profile";
 import { scoreJob } from "../score";
 import { apifyToken, runActor } from "./apify";
 import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
@@ -15,12 +16,24 @@ import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
 //   "European Union"   × remote         — cross-border EU-remote roles
 // Tiers are nearly disjoint by construction; ingest dedupe absorbs overlap.
 //
+// Query variants (the ai-job-search "organize by function" lesson): each track
+// searches under several names, language paired with geography —
+//   city tier:    EN lead + LOCAL-language lead (local titles dominate
+//                 onsite/hybrid postings: "Softwareentwickler" jobs never
+//                 surface for "software engineer")
+//   country tier: EN lead + EN 2nd variant + LOCAL lead (remote nets are wide
+//                 and mostly English — the extra EN name pays off here)
+//   EU tier:      EN lead + EN 2nd variant (no single local language)
+// Variants come from the generated profile's per-track searchVariants;
+// without them a track degrades to its lead titleKeyword, as before.
+//
 // Cost model is two-stage: search cards carry title/company/location/date —
 // enough for the free title-first keyword score. Full descriptions are fetched
 // only for cards that pass, within a per-run budget.
 //
 // Config (interim until the planned `searches` config block):
-//   LINKEDIN_TITLES     comma-sep;  default: specific tracks' lead keywords
+//   LINKEDIN_TITLES     comma-sep;  overrides ALL variants (EN-only escape hatch);
+//                       default: per-track searchVariants from the generated profile
 //   LINKEDIN_CITIES     ";"-sep     default: Berlin/Munich/Amsterdam/Istanbul
 //   LINKEDIN_COUNTRIES  ";"-sep     default: Germany;Netherlands;Turkey
 //   LINKEDIN_WINDOW_DAYS (7)  LINKEDIN_PAGES (2/search)  LINKEDIN_DETAIL_MAX (120)
@@ -40,14 +53,30 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Config → search plan ─────────────────────────────────────────────────────
 
-function titles(): string[] {
+// One group per specific track: its search names by language. EN always
+// starts with the lead titleKeyword so a variant-less profile keeps working.
+export type SearchGroup = Partial<Record<SearchLang, string[]>> & { en: string[] };
+
+function searchGroups(): SearchGroup[] {
   const env = process.env.LINKEDIN_TITLES;
-  if (env) return env.split(",").map((s) => s.trim()).filter(Boolean);
+  if (env) return env.split(",").map((s) => s.trim()).filter(Boolean).map((t) => ({ en: [t] }));
   return profile.tracks
-    .filter((t) => !t.key.startsWith("general-"))
+    .filter((t) => !t.key.startsWith("general-") && t.titleKeywords.length > 0)
     .slice(0, 4)
-    .map((t) => t.titleKeywords[0])
-    .filter(Boolean);
+    .map((t) => {
+      const v = t.searchVariants ?? {};
+      return {
+        ...v,
+        en: [...new Set([t.titleKeywords[0], ...(v.en ?? [])])],
+      };
+    });
+}
+
+// "Berlin, Germany" → "de", "European Union" → null. Local-language queries
+// only make sense where that language is the posting language.
+export function languageOf(location: string): SearchLang | null {
+  const country = resolveCountry(location);
+  return (country && COUNTRY_LANGUAGE[country]) || null;
 }
 
 // ";"-separated because LinkedIn place strings contain commas.
@@ -65,19 +94,26 @@ export interface PlannedSearch {
 }
 
 export function searchPlan(
-  titleList: string[],
+  groups: SearchGroup[],
   cities: string[],
   countries: string[],
 ): PlannedSearch[] {
   const plan: PlannedSearch[] = [];
-  for (const keywords of titleList) {
+  const push = (queries: Array<string | undefined>, location: string, workTypes: string[], tier: PlannedSearch["tier"]) => {
+    for (const keywords of new Set(queries.filter((q): q is string => !!q))) {
+      plan.push({ keywords, location, workTypes, tier });
+    }
+  };
+  for (const g of groups) {
     for (const location of cities) {
-      plan.push({ keywords, location, workTypes: ["1", "3"], tier: "city" });
+      const local = languageOf(location);
+      push([g.en[0], local && local !== "en" ? g[local]?.[0] : undefined], location, ["1", "3"], "city");
     }
     for (const location of countries) {
-      plan.push({ keywords, location, workTypes: ["2"], tier: "country" });
+      const local = languageOf(location);
+      push([g.en[0], g.en[1], local && local !== "en" ? g[local]?.[0] : undefined], location, ["2"], "country");
     }
-    plan.push({ keywords, location: "European Union", workTypes: ["2"], tier: "region" });
+    push([g.en[0], g.en[1]], "European Union", ["2"], "region");
   }
   return plan;
 }
@@ -188,7 +224,7 @@ export function parseJobDetail(html: string): string {
 
 async function fetchViaGuestApi(): Promise<RawJob[]> {
   const plan = searchPlan(
-    titles(),
+    searchGroups(),
     splitEnv("LINKEDIN_CITIES", ["Berlin, Germany", "Munich, Germany", "Amsterdam, Netherlands", "Istanbul, Turkey"]),
     splitEnv("LINKEDIN_COUNTRIES", ["Germany", "Netherlands", "Turkey"]),
   );
@@ -302,7 +338,7 @@ export function mapItem(item: KaixLinkedInItem): RawJob | null {
 }
 
 async function fetchViaApify(token: string): Promise<RawJob[]> {
-  const titleList = titles();
+  const titleList = searchGroups().map((g) => g.en[0]);
   const locations = splitEnv("LINKEDIN_COUNTRIES", ["Germany", "Netherlands", "Turkey"]);
   const combos = titleList.flatMap((t) => locations.map((l) => [t, l] as const));
   if (combos.length === 0) return [];

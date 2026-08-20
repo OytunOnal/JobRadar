@@ -26,6 +26,10 @@ for (const t of profile.tracks) {
   console.log(`  [${t.key}] ${t.label}`);
   console.log(`    title: ${t.titleKeywords.join(", ")}`);
   console.log(`    body:  ${t.bodyKeywords.join(", ")}`);
+  if (t.searchVariants) {
+    const langs = Object.entries(t.searchVariants).map(([l, v]) => `${l}: ${v!.join(" / ")}`);
+    console.log(`    search: ${langs.join("  |  ")}`);
+  }
 }
 console.log(`\nAggregator queries: ${profile.searchQueries.join(" | ")}`);
 console.log(`\nThese role families will be FILTERED OUT (mirror of your selection):`);

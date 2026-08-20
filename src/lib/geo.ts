@@ -51,6 +51,15 @@ export function regionsOf(country: string): string[] {
   return REGION_KEYS.filter((r) => REGIONS[r].includes(country));
 }
 
+// Local posting language per country — only languages the search layer has
+// query variants for. Countries not listed search in English.
+export const COUNTRY_LANGUAGE: Record<string, "de" | "nl" | "fr" | "es"> = {
+  de: "de", at: "de", ch: "de",
+  nl: "nl",
+  fr: "fr",
+  es: "es", mx: "es", ar: "es", cl: "es", co: "es", pe: "es", uy: "es",
+};
+
 // ── Gazetteer: names/cities → country ────────────────────────────────────────
 // Multilingual country names (the languages job postings actually arrive in)
 // and the major hiring-hub cities. Lowercase; matched per comma/dash segment.

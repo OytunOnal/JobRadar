@@ -23,6 +23,11 @@ import { swissdevjobs } from "./sources/swissdevjobs";
 import { berlinstartupjobs } from "./sources/berlinstartupjobs";
 import { manfred } from "./sources/manfred";
 import { netempregos } from "./sources/netempregos";
+import { wttj } from "./sources/wttj";
+import { vdab } from "./sources/vdab";
+import { justjoin, nofluffjobs } from "./sources/poland";
+import { thehub } from "./sources/thehub";
+import { agenticjobs, a16zspeedrun } from "./sources/nichejobs";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -72,6 +77,13 @@ const aggregators: Source[] = [
   berlinstartupjobs, // Berlin startup scene via WP RSS (Cloudflare-tolerant)
   manfred,        // Spanish tech platform, open API; two-stage detail
   netempregos,    // Portugal's biggest general board, RSS -> IT slice
+  wttj,           // Welcome to the Jungle via its public Algolia index (FR+)
+  vdab,           // Flanders' public employment service, self-healing key
+  justjoin,       // justjoin.it — Poland tech, cursor-paged
+  nofluffjobs,    // nofluffjobs.com — Poland tech, salary-transparent
+  thehub,         // Nordic startups (EU + remote passes)
+  agenticjobs,    // AI-agent engineering niche (visa flag as data)
+  a16zspeedrun,   // a16z SPEEDRUN portfolio (games/AI)
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor

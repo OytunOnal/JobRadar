@@ -8,7 +8,9 @@ console.log("\n=== JobRadar ingest ===");
 // Discovered-board sources can number in the hundreds — summarize them.
 const boardEntries = Object.entries(report.perSource).filter(([k]) => k.startsWith("board:"));
 const otherSources = Object.fromEntries(
-  Object.entries(report.perSource).filter(([k]) => !k.startsWith("board:")),
+  Object.entries(report.perSource)
+    .filter(([k]) => !k.startsWith("board:"))
+    .map(([k, n]) => [k, n === -1 ? "cooldown" : n]), // -1 = skipped this run
 );
 console.log("Fetched per source:", otherSources);
 if (boardEntries.length) {

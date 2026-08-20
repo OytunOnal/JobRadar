@@ -7,6 +7,7 @@ import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
 import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
 import { canonicalJobUrl } from "../src/lib/domains";
+import { isOnCooldown } from "../src/lib/ingest";
 import { parseNl, parseGb, parseDk, parseIe, splitCsvLine, collapseName } from "../src/lib/sponsors";
 import { mapHit as wnMap, buildQuery as wnQuery } from "../src/lib/sources/workingnomads";
 import { parseFeed as jiParse } from "../src/lib/sources/jobindexdk";
@@ -242,4 +243,16 @@ test("jobindex parseFeed: hex entities decoded, id from vis-job link", () => {
   assert.equal(jobs[0].externalId, "h1691215");
   assert.ok(jobs[0].title.includes("Kleven & Partners"));
   assert.ok(jobs[0].description.includes("dygtig udvikler"));
+});
+
+// ── Source cooldowns ─────────────────────────────────────────────────────────
+
+test("isOnCooldown: LinkedIn keeps weekly cadence, others always run", () => {
+  const now = new Date("2026-08-20T12:00:00Z");
+  const twoDaysAgo = new Date("2026-08-18T12:00:00Z");
+  const sixDaysAgo = new Date("2026-08-14T11:00:00Z");
+  assert.equal(isOnCooldown("linkedin", twoDaysAgo, now), true);   // < 5 days
+  assert.equal(isOnCooldown("linkedin", sixDaysAgo, now), false);  // window passed
+  assert.equal(isOnCooldown("linkedin", null, now), false);        // never fetched
+  assert.equal(isOnCooldown("eures", twoDaysAgo, now), false);     // no cooldown entry
 });

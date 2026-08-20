@@ -62,6 +62,19 @@ const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 8;
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
 
+// Rate-sensitive sources keep their own cadence regardless of how often
+// ingest runs (the user's rule: LinkedIn guest API stays personal/low-volume,
+// weekly). Days between fetches; sources not listed run every ingest.
+export const SOURCE_COOLDOWN_DAYS: Record<string, number> = {
+  linkedin: 5, // the 103-search matrix — weekly with slack for early runs
+};
+
+export function isOnCooldown(name: string, lastFetchedAt: Date | null, now = new Date()): boolean {
+  const days = SOURCE_COOLDOWN_DAYS[name];
+  if (!days || !lastFetchedAt) return false;
+  return now.getTime() - lastFetchedAt.getTime() < days * 86_400_000;
+}
+
 export const aggregators: Source[] = [
   arbeitnow,
   remotive,
@@ -186,9 +199,23 @@ export async function runIngest(): Promise<IngestReport> {
   }
 
   const all: RawJob[] = [];
+  const sourceStates = new Map(
+    (await prisma.sourceState.findMany()).map((s) => [s.name, s.lastFetchedAt]),
+  );
   for (const src of sources) {
+    if (isOnCooldown(src.name, sourceStates.get(src.name) ?? null)) {
+      report.perSource[src.name] = -1; // sentinel: skipped on cooldown
+      continue;
+    }
     try {
       const jobs = await src.fetch();
+      if (src.name in SOURCE_COOLDOWN_DAYS) {
+        await prisma.sourceState.upsert({
+          where: { name: src.name },
+          update: { lastFetchedAt: new Date() },
+          create: { name: src.name, lastFetchedAt: new Date() },
+        });
+      }
       report.perSource[src.name] = jobs.length;
       all.push(...jobs);
       // Adaptive frequency: tell the board how it did against the keyword

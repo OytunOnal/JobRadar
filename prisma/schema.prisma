@@ -150,3 +150,11 @@ model VisaSponsor {
 
   @@index([country, nameNorm])
 }
+
+// Per-source fetch timestamps, so heavy/rate-sensitive sources (LinkedIn's
+// 103-search matrix) keep their weekly cadence even when ingest runs more
+// often. Sources without a cooldown entry run every ingest.
+model SourceState {
+  name          String   @id
+  lastFetchedAt DateTime
+}

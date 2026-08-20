@@ -20,6 +20,10 @@ const args = process.argv.slice(2);
 const WIDE = args.includes("--wide");
 const limIdx = args.indexOf("--limit");
 const LIMIT = limIdx !== -1 ? Number(args[limIdx + 1]) || 100000 : 100000;
+// --wait N: on chain exhaustion, sleep N minutes and retry instead of exiting
+// (free quotas refill on rolling/daily windows — an overnight run rides them).
+const waitIdx = args.indexOf("--wait");
+const WAIT_MIN = waitIdx !== -1 ? Number(args[waitIdx + 1]) || 30 : 0;
 const TARGETS = ["de", "nl", "es", "ch", "dk", "se", "be", "pl", "fr", "pt", "at", "ie", "gb", "no", "fi"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -84,9 +88,15 @@ while (done < LIMIT) {
       log(`  hata (${j.company.slice(0, 20)}): ${String(e.message).slice(0, 90)}`);
     }
     if (failStreak >= 3) {
-      log(`Zincir tükendi görünüyor (3 ardışık başarısızlık) — ${done} analizle zarifçe duruldu. Sonra tekrar koş.`);
-      await prisma.$disconnect();
-      process.exit(0);
+      if (WAIT_MIN > 0) {
+        log(`Zincir tükendi — ${WAIT_MIN} dk uyuyup tekrar denenecek (şu ana dek ${done} analiz).`);
+        await sleep(WAIT_MIN * 60_000);
+        failStreak = 0;
+      } else {
+        log(`Zincir tükendi görünüyor (3 ardışık başarısızlık) — ${done} analizle zarifçe duruldu. Sonra tekrar koş.`);
+        await prisma.$disconnect();
+        process.exit(0);
+      }
     }
     await sleep(1_500); // free-tier nezaket temposu
   }

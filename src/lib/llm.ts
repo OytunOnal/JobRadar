@@ -6,7 +6,7 @@
 export class RateLimitError extends Error {}
 
 // "anthropic" uses the /v1/messages shape; "openai" uses /chat/completions.
-type ProviderKind = "openai" | "anthropic";
+type ProviderKind = "openai" | "anthropic" | "ollama";
 
 interface Provider {
   name: string;
@@ -67,6 +67,20 @@ function providers(): Provider[] {
       strongModel: env.GEMINI_MODEL || "gemini-flash-latest",
     });
   }
+  // Ollama last: the local model has no quota, so it catches everything the
+  // cloud free tiers drop — backlog fills keep running at local speed instead
+  // of stopping. Enable with OLLAMA_MODEL (e.g. "qwen3.8:27b"); the endpoint
+  // is OpenAI-compatible and keyless.
+  if (env.OLLAMA_MODEL) {
+    list.push({
+      name: "ollama",
+      kind: "ollama",
+      baseURL: env.OLLAMA_URL || "http://localhost:11434",
+      key: "ollama", // the endpoint ignores auth; the header just needs a value
+      fastModel: env.OLLAMA_FAST_MODEL || env.OLLAMA_MODEL,
+      strongModel: env.OLLAMA_MODEL,
+    });
+  }
   if (env.DEEPSEEK_API_KEY) {
     list.push({
       name: "deepseek",
@@ -106,7 +120,10 @@ async function callOpenAI(p: Provider, messages: Msg[], model: string, opts: Cha
   if (res.status === 429) throw new RateLimitError(`${p.name} rate limit`);
   if (!res.ok) throw new Error(`${p.name} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "";
+  const content: string = data.choices?.[0]?.message?.content ?? "";
+  // Local reasoning models (Qwen3 via Ollama) inline their thinking; strip it
+  // so JSON extraction sees only the answer.
+  return content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 }
 
 // Anthropic Messages API: system is a top-level field (not a message), auth via
@@ -135,8 +152,32 @@ async function callAnthropic(p: Provider, messages: Msg[], model: string, opts: 
   return (data.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("") ?? "";
 }
 
+// Ollama's native /api/chat, because its OpenAI-compat endpoint routes ALL
+// of a reasoning model's output into a separate `reasoning` field (measured:
+// content "", finish "length" — the whole budget spent thinking). Native
+// `think: false` disables the thinking phase outright; OLLAMA_THINK=1 re-enables.
+async function callOllama(p: Provider, messages: Msg[], model: string, opts: ChatOpts): Promise<string> {
+  const res = await fetch(`${p.baseURL}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: false,
+      think: process.env.OLLAMA_THINK === "1",
+      options: { temperature: opts.temperature ?? 0.5, num_predict: opts.maxTokens ?? 900 },
+    }),
+    signal: AbortSignal.timeout(180_000), // local models are slow, not broken
+  });
+  if (!res.ok) throw new Error(`ollama HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = await res.json();
+  const content: string = data?.message?.content ?? "";
+  return content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+}
+
 async function callProvider(p: Provider, messages: Msg[], opts: ChatOpts): Promise<string> {
   const model = opts.tier === "fast" ? p.fastModel : p.strongModel;
+  if (p.kind === "ollama") return callOllama(p, messages, model, opts);
   return p.kind === "anthropic"
     ? callAnthropic(p, messages, model, opts)
     : callOpenAI(p, messages, model, opts);

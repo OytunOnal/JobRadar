@@ -14,6 +14,9 @@ import { indeed } from "./sources/indeed";
 import { freehire } from "./sources/freehire";
 import { arbeitsagentur } from "./sources/arbeitsagentur";
 import { eures } from "./sources/eures";
+import { sweden } from "./sources/sweden";
+import { denmark } from "./sources/denmark";
+import { switzerland } from "./sources/switzerland";
 import { companySources } from "./sources/companies";
 import { analyzeFit } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
@@ -54,6 +57,9 @@ const aggregators: Source[] = [
   freehire,       // keyless aggregator; first-party ATS links feed harvest too
   arbeitsagentur, // German national job board, keyless; German titles matter
   eures,          // EU official portal: werk.nl/SEPE/IEFP/France Travail content
+  sweden,         // Arbetsförmedlingen JobTech API, keyless
+  denmark,        // Jobnet BFF API, keyless (Cloudflare-tolerant)
+  switzerland,    // SECO Job-Room API, keyless; de+fr titles
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor

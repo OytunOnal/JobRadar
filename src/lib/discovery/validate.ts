@@ -30,6 +30,14 @@ export function titleizeToken(token: string): string {
 
 // Company name from the probe body where the API offers one. `body` is parsed
 // JSON when the response parses, else the raw text (Personio's XML).
+const JOB_COUNTERS: Record<string, (body: any) => number | undefined> = {
+  workable: (b) => (Array.isArray(b?.jobs) ? b.jobs.length : undefined),
+  recruitee: (b) => (Array.isArray(b?.offers) ? b.offers.length : undefined),
+  smartrecruiters: (b) => (typeof b?.totalFound === "number" ? b.totalFound : undefined),
+  personio: (b) =>
+    typeof b === "string" ? (b.match(/<position>/g) ?? []).length : undefined,
+};
+
 const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> = {
   greenhouse: (b) => b?.name,
   workable: (b) => b?.name,
@@ -42,6 +50,10 @@ const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> 
 export interface ProbeOutcome {
   result: "active" | "dead" | "error";
   companyName?: string | null;
+  // Live posting count when the probe body carries one (workable/recruitee/
+  // smartrecruiters/personio). undefined = the probe can't tell (greenhouse
+  // probes the board root, which has no job list).
+  jobCount?: number;
 }
 
 export async function probeBoard(
@@ -88,7 +100,11 @@ export async function probeBoard(
 
   const alive = platform.probeAlive ? platform.probeAlive(res.status, body) : res.status === 200;
   if (!alive) return { result: "dead" };
-  return { result: "active", companyName: NAME_EXTRACTORS[platformId]?.(body) ?? null };
+  return {
+    result: "active",
+    companyName: NAME_EXTRACTORS[platformId]?.(body) ?? null,
+    jobCount: JOB_COUNTERS[platformId]?.(body),
+  };
 }
 
 export interface ValidationReport {

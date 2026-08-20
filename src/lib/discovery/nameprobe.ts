@@ -58,6 +58,21 @@ export interface NameProbeHit {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Greenhouse's validation probe hits the board ROOT (no job list), so the
+// live-posting requirement needs one extra call for greenhouse hits only.
+async function greenhouseJobCount(token: string): Promise<number> {
+  try {
+    const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${token}/jobs`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    return Array.isArray(data?.jobs) ? data.jobs.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 // Probe one company across the verifiable platforms; first VERIFIED hit wins.
 export async function probeCompany(
   companyName: string,
@@ -70,6 +85,13 @@ export async function probeCompany(
       await sleep(250);
       if (outcome.result !== "active" || !outcome.companyName) continue;
       if (!namesMatch(companyName, outcome.companyName)) continue; // gh:peak guard
+      // Empty boards are squatted/trial accounts, not hiring channels
+      // (measured: "workable:jpmorgan" answers with a name and 0 jobs).
+      let jobCount = outcome.jobCount;
+      if (jobCount === undefined && platform === "greenhouse") {
+        jobCount = await greenhouseJobCount(token);
+      }
+      if (!jobCount || jobCount < 1) continue;
       return { platform, token, companyName: outcome.companyName };
     }
   }

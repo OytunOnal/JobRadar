@@ -34,7 +34,7 @@ test("namesMatch: the gh:peak guard", () => {
 
 // ── probe orchestration with a scripted prober ───────────────────────────────
 
-function scripted(responses: Record<string, { result: string; companyName?: string | null }>) {
+function scripted(responses: Record<string, { result: string; companyName?: string | null; jobCount?: number }>) {
   const calls: string[] = [];
   const fn = (async (platform: string, token: string) => {
     calls.push(`${platform}:${token}`);
@@ -47,7 +47,7 @@ test("first VERIFIED hit wins; live-but-wrong-name slugs are rejected", async ()
   const { fn, calls } = scripted({
     // greenhouse slug is live but belongs to someone else — must be skipped:
     "greenhouse:dreamgames": { result: "active", companyName: "Dream Physical Therapy" },
-    "workable:dreamgames": { result: "active", companyName: "Dream Games Ltd" },
+    "workable:dreamgames": { result: "active", companyName: "Dream Games Ltd", jobCount: 14 },
   });
   const hit = await probeCompany("Dream Games", fn);
   assert.equal(hit?.platform, "workable");
@@ -68,4 +68,11 @@ test("nameless probe results can never verify", async () => {
     "greenhouse:azumo": { result: "active", companyName: null },
   });
   assert.equal(await probeCompany("Azumo", fn), null);
+});
+
+test("name-matching but EMPTY boards are squats, not hits", async () => {
+  const { fn } = scripted({
+    "workable:jpmorgan": { result: "active", companyName: "jpmorgan", jobCount: 0 },
+  });
+  assert.equal(await probeCompany("JPMorgan", fn), null);
 });

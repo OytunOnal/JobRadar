@@ -1,14 +1,20 @@
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Landing.Jobs — Portugal-centric European tech board with a relocation
-// focus. Keyless JSON API; the page/sort params are IGNORED server-side
-// (verified live: page 2 returns the same 50 ids), so this is one request
-// for the API's fixed ~50-job window. Old-but-open postings are filtered by
-// ingest's own age guard; the fresh handful is the weekly contribution.
+// focus. Keyless JSON API. Pagination is OFFSET-based: `page` and `sort` are
+// ignored server-side, `limit` caps at 50, but `offset` works (verified
+// live: offset=50 returns disjoint ids). We walk offsets until a short page.
+// Old-but-open postings are filtered by ingest's own age guard.
 // relocation_paid is the board's own flag → structured visa signal.
+//
+// Config: LANDINGJOBS_MAX_PAGES (10, x50/page)
 
-const API_URL = "https://landing.jobs/api/v1/jobs?limit=100";
+const API_URL = "https://landing.jobs/api/v1/jobs";
 const UA = "JobRadar/0.1 (personal job search)";
+const LIMIT = 50; // server cap; larger values are clamped to 50
+const MAX_PAGES = Number(process.env.LANDINGJOBS_MAX_PAGES) || 10;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function mapJob(j: any): RawJob | null {
   if (!j?.id || !j?.title || !j?.url) return null;
@@ -41,19 +47,35 @@ export function mapJob(j: any): RawJob | null {
   };
 }
 
-export const landingjobs: Source = {
-  name: "landingjobs",
-  async fetch(): Promise<RawJob[]> {
+export async function fetchLandingjobs(fetchImpl: typeof fetch = fetch): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let data: any;
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetchImpl(`${API_URL}?limit=${LIMIT}&offset=${page * LIMIT}`, {
         headers: { "User-Agent": UA, Accept: "application/json" },
         signal: AbortSignal.timeout(20_000),
       });
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (Array.isArray(data) ? data : []).map(mapJob).filter((j): j is RawJob => j !== null);
+      if (!res.ok) break; // partial result beats none
+      data = await res.json();
     } catch {
-      return [];
+      break;
     }
-  },
+    const items: any[] = Array.isArray(data) ? data : [];
+    for (const item of items) {
+      const job = mapJob(item);
+      if (!job || seen.has(job.externalId)) continue;
+      seen.add(job.externalId);
+      out.push(job);
+    }
+    if (items.length < LIMIT) break; // short page = done
+    await sleep(300);
+  }
+  return out;
+}
+
+export const landingjobs: Source = {
+  name: "landingjobs",
+  fetch: () => fetchLandingjobs(),
 };

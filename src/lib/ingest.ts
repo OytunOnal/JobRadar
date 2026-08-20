@@ -38,6 +38,7 @@ import { isJunkJobUrl, sourceTrust } from "./domains";
 import { findDuplicate } from "./dedup";
 import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
+import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -131,6 +132,7 @@ export interface IngestReport {
   delisted: number;
   nameProbe?: NameProbeReport;
   deepProbe?: DeepProbeReport;
+  liveness?: LivenessReport;
   locations?: LocResolveReport;
   errors: string[];
   harvest?: HarvestReport;
@@ -354,6 +356,14 @@ export async function runIngest(): Promise<IngestReport> {
     } catch (e: any) {
       report.errors.push(`deep-probe: ${String(e.message).slice(0, 160)}`);
     }
+  }
+
+  // Liveness probing: aggregator jobs have no diffable feed, so aging ones
+  // get their URLs probed for closure banners (isolated like the harvests).
+  try {
+    report.liveness = await runLivenessSweep();
+  } catch (e: any) {
+    report.errors.push(`liveness: ${String(e.message).slice(0, 160)}`);
   }
 
   // Batched LLM location resolution for strings the gazetteer+cache missed.

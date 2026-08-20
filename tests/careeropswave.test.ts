@@ -5,6 +5,7 @@ import { buildSearchBody, mapResult } from "../src/lib/sources/vdab";
 import { mapJustJoin, mapNoFluff } from "../src/lib/sources/poland";
 import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
+import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
 
 // ── WTTJ ─────────────────────────────────────────────────────────────────────
 
@@ -142,4 +143,25 @@ test("a16z mapSpeedrun: stealth fallback company, comp string", () => {
   assert.equal(job.company, "SPEEDRUN portfolio (stealth)");
   assert.equal(job.workMode, "onsite");
   assert.equal(job.salaryText, "150000–200000 USD/year");
+});
+
+// ── Liveness ─────────────────────────────────────────────────────────────────
+
+test("liveness: typographic punctuation normalized before matching", () => {
+  // WTTJ's French banner uses U+2019, not an ASCII apostrophe — the exact
+  // silent-miss career-ops documented.
+  assert.equal(classifyLiveness(200, "Cette offre n’est plus disponible."), "expired");
+  assert.equal(normalizeForMatch("café “quoted”"), 'cafe "quoted"');
+});
+
+test("liveness: hard statuses, banners, and the honest defaults", () => {
+  assert.equal(classifyLiveness(404, ""), "expired");
+  assert.equal(classifyLiveness(410, ""), "expired");
+  assert.equal(classifyLiveness(200, "Die Stelle ist bereits besetzt."), "expired");
+  assert.equal(classifyLiveness(200, "This position has been filled."), "expired");
+  // "application form has been filled out" must NOT read as closure:
+  assert.equal(classifyLiveness(200, "Submit once the application form for this role has been filled out."), "active");
+  assert.equal(classifyLiveness(200, "<h1>Senior Engineer</h1><button>Apply</button>"), "active");
+  assert.equal(classifyLiveness(403, ""), "uncertain"); // walls prove nothing
+  assert.equal(classifyLiveness(500, ""), "uncertain");
 });

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mapJob as freehireMap, buildSearchUrl as freehireUrl } from "../src/lib/sources/freehire";
 import { parseCard, cardToRawJob, buildSearchUrl as baUrl } from "../src/lib/sources/arbeitsagentur";
-import { buildPayload, mapJv, titlesFor } from "../src/lib/sources/eures";
+import { buildPayload, defaultCountries, mapJv, titlesFor } from "../src/lib/sources/eures";
 
 // ── freehire ─────────────────────────────────────────────────────────────────
 
@@ -110,4 +110,13 @@ test("EURES mapJv: portal detail URL, epoch dates, HTML stripped", () => {
   assert.equal(job.description, "Met je kennis");
   assert.equal(job.postedAt?.getTime(), 1785201200980);
   assert.equal(mapJv({ title: "no id" }, "nl"), null);
+});
+
+test("EURES default sweep covers every member country", () => {
+  const c = defaultCountries();
+  for (const must of ["de", "nl", "es", "pt", "fr", "pl", "at", "no", "is", "ch"]) {
+    assert.ok(c.includes(must), `missing ${must}`);
+  }
+  assert.ok(c.length >= 29);
+  assert.ok(!c.includes("gb")); // the UK left EURES post-Brexit
 });

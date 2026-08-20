@@ -1,4 +1,4 @@
-import { COUNTRY_LANGUAGE, COUNTRY_NAMES } from "../geo";
+import { COUNTRY_LANGUAGE, COUNTRY_NAMES, REGIONS } from "../geo";
 import { profileSearchGroups, type SearchGroup } from "../profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
@@ -16,10 +16,13 @@ import { stripHtml, type RawJob, type Source } from "./types";
 //   - search results already carry the full (HTML) description — no per-job
 //     detail calls needed.
 //
-// Germany is deliberately NOT in the default country list: the native
-// Arbeitsagentur source serves the same postings with salary data.
+// Default sweep: every EURES member (EU + no/is/ch) — the profile's
+// acceptRegions already accepts Europe-wide onsite roles, and per-country
+// searches are the only way to beat the 50-most-recent page cap. German
+// postings overlap the native Arbeitsagentur source; the dedup funnel keeps
+// the richer BA copy.
 //
-// Config: EURES_COUNTRIES (";"-sep ISO codes, default "nl;es;pt;fr")
+// Config: EURES_COUNTRIES (";"-sep ISO codes to narrow the sweep)
 //         EURES_LIMIT (50/search)
 
 const SEARCH_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search";
@@ -28,9 +31,15 @@ const LIMIT = Number(process.env.EURES_LIMIT) || 50;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// EU members + the non-EU EURES members (Norway, Iceland, Switzerland).
+export function defaultCountries(): string[] {
+  return [...new Set([...REGIONS.eu, "no", "is", "ch"])];
+}
+
 function countries(): string[] {
-  return (process.env.EURES_COUNTRIES || "nl;es;pt;fr")
-    .split(";").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const env = process.env.EURES_COUNTRIES;
+  if (env) return env.split(";").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return defaultCountries();
 }
 
 export function buildPayload(title: string, country: string): object {

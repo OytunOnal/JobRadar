@@ -72,6 +72,24 @@ async function dueEstimate(): Promise<number> {
   });
 }
 
+// The power-outage lesson: with the network down every fetch fails in
+// milliseconds and the sweep rips through the pool stamping boards as
+// failed attempts. Never start (or continue) a slice without connectivity.
+async function waitForNetwork(): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch("https://www.google.com/generate_204", {
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (res.status < 500) return;
+    } catch {
+      /* unreachable */
+    }
+    if (attempt === 0) log("ağ erişimi yok — bağlantı gelene dek bekleniyor (60sn aralıkla)…");
+    await new Promise((r) => setTimeout(r, 60_000));
+  }
+}
+
 const poolNow = await dueEstimate();
 let state = loadState();
 if (!state || poolNow > state.poolAtStart) {
@@ -88,6 +106,7 @@ log(`=== Board-pool sweep ${state.slicesDone > 0 ? "RESUMING" : "starting"} — 
 
 let slice = REQUESTED_SLICE;
 for (let i = 0; i < MAX_SLICES; i++) {
+  await waitForNetwork();
   const t = Date.now();
   const r = await runIngest({ boardsOnly: true, boardLimit: slice });
   const boards = Object.keys(r.perSource).filter((k) => k.startsWith("board:")).length;
@@ -111,6 +130,19 @@ for (let i = 0; i < MAX_SLICES; i++) {
 
   if (r.errors.length > 0) {
     for (const e of r.errors.slice(0, 3)) log(`  hata örneği: ${e.slice(0, 110)}`);
+  }
+  // A near-total-failure slice means the net (or a proxy of it) died mid-run:
+  // those boards were stamped wrongly — un-stamp them and wait for the net.
+  if (boards > 0 && r.errors.length >= boards * 0.9) {
+    const windowStart = new Date(t - 60_000);
+    const undone = await prisma.atsBoard.updateMany({
+      where: { lastFetchedAt: { gte: windowStart } },
+      data: { lastFetchedAt: null, fetchIntervalDays: 1, hitRate: 0 },
+    });
+    log(`  dilim ~tamamen hatalı — ağ kesintisi varsayıldı: ${undone.count} board geri sıfırlandı, bağlantı bekleniyor`);
+    state.boards -= boards; // progress honesty: those weren't really swept
+    writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+    await waitForNetwork();
   }
   if (boards === 0) {
     log(`=== Sweep COMPLETE: ${state.boards} boards, +${state.stored} new jobs, ${state.updated} updated, ${state.delisted} delisted ===`);

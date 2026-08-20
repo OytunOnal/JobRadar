@@ -215,10 +215,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   const sourceStates = new Map(
     (await prisma.sourceState.findMany()).map((s) => [s.name, s.lastFetchedAt]),
   );
-  for (const src of sources) {
+
+  const fetchOne = async (src: Source): Promise<void> => {
     if (isOnCooldown(src.name, sourceStates.get(src.name) ?? null)) {
       report.perSource[src.name] = -1; // sentinel: skipped on cooldown
-      continue;
+      return;
     }
     try {
       const jobs = await src.fetch();
@@ -243,6 +244,43 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     } catch (e: any) {
       report.errors.push(`${src.name}: ${e.message}`);
       report.perSource[src.name] = 0;
+    }
+  };
+
+  if (opts.boardsOnly) {
+    // Sweep mode: boards are independent companies, so ordering carries no
+    // dedupe priority — fetch them through a RAM-adaptive worker pool. The
+    // concurrency target follows the heap: comfortable → full width, tight →
+    // half, critical → drain to 1 and let GC catch up. Mostly-distinct hosts
+    // keep this polite; the shared API hosts (Greenhouse etc.) see at most
+    // pool-width concurrent requests.
+    const base = Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16);
+    const limitNow = (): number => {
+      const heapMB = process.memoryUsage().heapUsed / 1_048_576;
+      if (heapMB > 1200) return 1;
+      if (heapMB > 800) return Math.max(2, Math.floor(base / 2));
+      return base;
+    };
+    let idx = 0;
+    let active = 0;
+    await new Promise<void>((resolve) => {
+      const pump = (): void => {
+        while (idx < sources.length && active < limitNow()) {
+          const src = sources[idx++];
+          active++;
+          void fetchOne(src).finally(() => {
+            active--;
+            pump();
+          });
+        }
+        if (idx >= sources.length && active === 0) resolve();
+      };
+      pump();
+    });
+  } else {
+    // Normal ingest: sequential — source order decides who wins dedupe.
+    for (const src of sources) {
+      await fetchOne(src);
     }
   }
   report.fetched = all.length;

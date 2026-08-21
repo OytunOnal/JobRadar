@@ -234,7 +234,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     (await prisma.sourceState.findMany()).map((s) => [s.name, s.lastFetchedAt]),
   );
 
-  const fetchOne = async (src: Source): Promise<void> => {
+  // sink: where this source's jobs land. The parallel normal-ingest path
+  // passes a per-source bucket so results can be reassembled in PRIORITY
+  // order after concurrent fetching — dedupe order is about assembly, not
+  // fetch timing.
+  const fetchOne = async (src: Source, sink: RawJob[] = all): Promise<void> => {
     if (isOnCooldown(src.name, sourceStates.get(src.name) ?? null)) {
       report.perSource[src.name] = -1; // sentinel: skipped on cooldown
       return;
@@ -249,7 +253,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         });
       }
       report.perSource[src.name] = jobs.length;
-      all.push(...jobs);
+      sink.push(...jobs);
       // Adaptive frequency: tell the board how it did against the keyword
       // threshold, so no-hit boards get fetched less often over time.
       if (src.name.startsWith("board:")) {
@@ -327,21 +331,59 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       pump();
     });
   } else {
-    // Normal ingest: sequential — source order decides who wins dedupe.
-    for (const src of sources) {
-      await fetchOne(src);
-    }
+    // Normal ingest: PARALLEL fetch, sequential priority. Source order only
+    // matters at dedupe time, so each source fetches into its own bucket
+    // concurrently and the buckets are concatenated in the original priority
+    // order afterwards — same dedupe outcome, wall time ~= slowest source
+    // instead of the sum. Heap-aware like the sweep pool; shared-host
+    // platforms keep a politeness cap.
+    const buckets: RawJob[][] = sources.map(() => []);
+    const CAP: Record<string, number> = { join: 2, workable: 2, recruitee: 2 };
+    const hostKey = (name: string): string => name.split(":")[0];
+    const conc = Math.min(Number(process.env.INGEST_CONCURRENCY) || 6, 12);
+    const limitNow = (): number => {
+      const heapMB = process.memoryUsage().heapUsed / 1_048_576;
+      if (heapMB > 1200) return 1;
+      if (heapMB > 800) return Math.max(2, Math.floor(conc / 2));
+      return conc;
+    };
+    const pending = sources.map((_, i) => i);
+    const inFlight = new Map<string, number>();
+    let active = 0;
+    await new Promise<void>((resolve) => {
+      const pump = (): void => {
+        while (active < limitNow()) {
+          const qi = pending.findIndex((i) => {
+            const h = hostKey(sources[i].name);
+            return (inFlight.get(h) ?? 0) < (CAP[h] ?? conc);
+          });
+          if (qi === -1) break;
+          const i = pending.splice(qi, 1)[0];
+          const h = hostKey(sources[i].name);
+          inFlight.set(h, (inFlight.get(h) ?? 0) + 1);
+          active++;
+          void fetchOne(sources[i], buckets[i]).finally(() => {
+            inFlight.set(h, (inFlight.get(h) ?? 0) - 1);
+            active--;
+            pump();
+          });
+        }
+        if (pending.length === 0 && active === 0) resolve();
+      };
+      pump();
+    });
     // One retry pass for sources that failed (timeouts included): transient
     // hiccups get a second chance in the same run; a second failure stays in
     // report.errors for investigation.
-    const failed = sources.filter(
-      (s) => report.perSource[s.name] === 0 &&
-        report.errors.some((e) => e.startsWith(`${s.name}:`)),
-    );
-    if (failed.length > 0) {
-      report.errors.push(`retrying ${failed.length} failed sources once`);
-      for (const src of failed) await fetchOne(src);
+    for (let i = 0; i < sources.length; i++) {
+      const s = sources[i];
+      if (report.perSource[s.name] === 0 && report.errors.some((e) => e.startsWith(`${s.name}:`))) {
+        await fetchOne(s, buckets[i]);
+      }
     }
+    // Priority-ordered assembly — this is where "source order wins dedupe"
+    // actually happens.
+    for (const b of buckets) all.push(...b);
   }
   report.fetched = all.length;
 

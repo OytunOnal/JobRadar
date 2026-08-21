@@ -417,7 +417,9 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       scoreReason: s.reason,
       scoredBy: s.scoredBy,
       disqualified: rejected,
-      postedAt: job.postedAt ?? null,
+      // Sources parse dates from wild formats; one NaN Date must degrade to
+      // "date unknown", never kill the whole run (it took down a sweep slice).
+      postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
     };
 
     if (job.location && data.country === null && resolveCountry(job.location) === null) {

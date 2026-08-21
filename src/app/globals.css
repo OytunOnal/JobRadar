@@ -177,3 +177,14 @@ header.top {
   .actions .btn { width: auto; }
   .search input { width: 100%; }
 }
+
+/* ── Tracking pages (applications / dismissed) ─────────────────────────── */
+nav.pages { display: flex; gap: 6px; align-items: center; }
+.grouphead { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted, #888); margin: 22px 0 8px; }
+.followups { border: 1px solid var(--line-strong, #444); border-radius: 8px; padding: 10px 12px; margin: 14px 0 6px; }
+.followups h2 { font-size: 14px; margin: 0 0 8px; }
+.trackrow .noteform { display: flex; gap: 6px; margin-top: 6px; }
+.trackrow .noteform input { flex: 1; min-width: 0; background: transparent; border: 1px solid var(--line, #333); border-radius: 6px; padding: 4px 8px; color: inherit; font: inherit; font-size: 12px; }
+.empty { color: var(--muted, #888); padding: 30px 0; text-align: center; }
+.starred { border: 1px solid var(--line, #333); border-radius: 8px; padding: 6px 12px 10px; margin: 14px 0 6px; }
+.fitnum-inline { font-weight: 700; font-size: 12px; margin-right: 4px; }

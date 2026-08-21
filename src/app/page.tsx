@@ -50,7 +50,7 @@ export default async function Page({
     (sp.track ?? "").split(",").map((s) => s.trim()).filter((s) => TRACK_KEYS.includes(s)),
   );
   const track = [...trackSet].sort().join(",");
-  const status = sp.status ?? "active";
+  const status = "active"; // Radar is discovery-only; /applied and /dismissed have their own pages
   const verdict = sp.verdict ?? "all";
   // loc is a comma list of work modes (e.g. "remote,hybrid"); empty = all.
   const locSet = new Set(
@@ -76,8 +76,8 @@ export default async function Page({
   const where: any = { duplicateOfId: null };
   const and: any[] = [];
   if (trackSet.size > 0) where.track = { in: [...trackSet] };
-  if (status === "active") where.status = { in: ["new", "interested", "applied", "interview"] };
-  else if (status !== "all") where.status = status;
+  where.status = "new"; // interested jobs render in their own strip above the list
+  where.delistedAt = null; // closed roles have no discovery value
   if (verdict !== "all") where.fitVerdict = verdict;
   if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
@@ -168,6 +168,13 @@ export default async function Page({
     prisma.job.groupBy({ by: ["fitVerdict"], _count: true }),
   ]);
 
+  // Starred ("interested") jobs — a compact always-visible shortlist above the
+  // discovery list, unaffected by the filters.
+  const starred = await prisma.job.findMany({
+    where: { status: "interested", delistedAt: null, duplicateOfId: null },
+    orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
+  });
+
   const sc = Object.fromEntries(statusCounts.map((c) => [c.status, c._count]));
   const vc = Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count]));
   const total = statusCounts.reduce((a, c) => a + c._count, 0);
@@ -208,6 +215,11 @@ export default async function Page({
           {loc && <input type="hidden" name="loc" value={loc} />}
           <input name="q" defaultValue={q} placeholder="Search title or company" aria-label="Search jobs" />
         </form>
+        <nav className="pages">
+          <a className="chip active" href="/">radar</a>
+          <a className="chip" href="/applied">applications</a>
+          <a className="chip" href="/dismissed">dismissed</a>
+        </nav>
         <form action={triggerIngest}>
           <button className="btn primary" type="submit">Scan for new jobs</button>
         </form>
@@ -217,8 +229,7 @@ export default async function Page({
         <span><b>{total}</b> tracked</span>
         <span className="s-strong"><b>{vc["strong"] ?? 0}</b> strong</span>
         <span className="s-possible"><b>{vc["possible"] ?? 0}</b> possible</span>
-        <span><b>{sc["applied"] ?? 0}</b> applied</span>
-        <span><b>{sc["interview"] ?? 0}</b> interview</span>
+        <a href="/applied"><b>{(sc["applied"] ?? 0) + (sc["interview"] ?? 0) + (sc["offer"] ?? 0)}</b> in progress</a>
       </div>
 
       <div className="filterbar">
@@ -299,18 +310,46 @@ export default async function Page({
           })}
         </div>
         <div className="fgroup">
-          <span className="flabel">status</span>
-          {STATUSES.map((s) => (
-            <a key={s} href={href({ status: s })} className={`chip ${status === s ? "active" : ""}`}>{s}</a>
-          ))}
-        </div>
-        <div className="fgroup">
           <span className="flabel">age</span>
           {AGES.map((a) => (
             <a key={a} href={href({ age: a })} className={`chip ${age === a ? "active" : ""}`}>{a}</a>
           ))}
         </div>
       </div>
+
+      {starred.length > 0 && (
+        <section className="starred">
+          <h2 className="grouphead">★ Interested ({starred.length})</h2>
+          {starred.map((j) => (
+            <article className="job trackrow" key={j.id}>
+              <div className="jobmain">
+                <p className="title">
+                  {j.fitScore != null && <span className={`fitnum-inline v-${j.fitVerdict}`}>{j.fitScore}</span>}{" "}
+                  <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
+                </p>
+                <div className="meta">
+                  {j.company}
+                  {j.location ? ` · ${j.location}` : ""}
+                  {j.sponsorReg && <span className="badge s-strong"> sponsor✓</span>}
+                  {j.visa === "yes" && <span className="badge s-strong"> visa</span>}
+                </div>
+              </div>
+              <div className="actions">
+                <form action={setStatus}>
+                  <input type="hidden" name="id" value={j.id} />
+                  <input type="hidden" name="status" value="applied" />
+                  <button className="btn act" type="submit">Mark applied</button>
+                </form>
+                <form action={setStatus}>
+                  <input type="hidden" name="id" value={j.id} />
+                  <input type="hidden" name="status" value="new" />
+                  <button className="btn quiet" type="submit">Unstar</button>
+                </form>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
 
       {jobs.length === 0 ? (
         <div className="empty">

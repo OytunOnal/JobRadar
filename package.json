@@ -26,7 +26,8 @@
     "locations:fill": "tsx --env-file=.env scripts/locations-fill.ts",
     "fit:fill": "tsx --env-file=.env scripts/fit-fill.ts",
     "fit:review": "tsx --env-file=.env scripts/fit-review.ts",
-    "fit:rereview": "tsx --env-file=.env scripts/fit-rereview.ts"
+    "fit:rereview": "tsx --env-file=.env scripts/fit-rereview.ts",
+    "desc:fill": "tsx --env-file=.env scripts/desc-fill.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

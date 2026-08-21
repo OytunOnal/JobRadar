@@ -21,3 +21,6 @@ sweep-state.json
 sweep.log
 fit-fill.log
 fit-review.log
+desc-fill.log
+eliminated-sample.txt
+eliminated-v2.txt

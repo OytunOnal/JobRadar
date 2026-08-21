@@ -38,7 +38,9 @@ const where = WIDE
   ? {
       fitScore: null, delistedAt: null, duplicateOfId: null,
       status: { in: ["new", "interested"] },
-      score: { gt: 50 },
+      // 40+: a single title hit scores 40, and title-only sources cap
+      // around it — the 50 bar was hiding half the eligible pool.
+      score: { gte: 40 },
       postedAt: { gte: freshCut },
       OR: [{ country: { in: TARGETS } }, { workMode: "remote" }],
     }
@@ -54,9 +56,10 @@ log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyr
 
 let done = 0;
 let failStreak = 0;
+const skipped: string[] = []; // title-only rows wait for desc:fill
 while (done < LIMIT) {
   const batch = await prisma.job.findMany({
-    where,
+    where: { ...where, id: { notIn: skipped } },
     orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
     take: 25,
   });
@@ -66,6 +69,12 @@ while (done < LIMIT) {
   }
   for (const j of batch) {
     if (done >= LIMIT) break;
+    // Title-only rows have nothing for the model to read — desc:fill feeds
+    // them; skip in-memory only, so they re-enter once a description lands.
+    if ((j.description ?? "").length < j.title.length + 60) {
+      skipped.push(j.id);
+      continue;
+    }
     try {
       const fit = await analyzeFit(j);
       if (!fit) {

@@ -74,6 +74,13 @@ export const companies: Company[] = [
   { name: "Remote.com", provider: "greenhouse", token: "remotecom", tags: ["tech", "remote-first"] },
   { name: "Monzo", provider: "greenhouse", token: "monzo", tags: ["tech", "fintech"] },
   { name: "N26", provider: "greenhouse", token: "n26", tags: ["tech", "fintech", "eu"] },
+
+  // --- Enterprise ATS wave 2 seeds (all probe-verified live 2026-08-21) ---
+  { name: "Mercedes-Benz", provider: "beesite", token: "mercedes-benz-beesite-production-gjb", tags: ["enterprise", "de", "automotive"] },
+  { name: "MAN Truck & Bus", provider: "successfactors", token: "jobs.man.eu", tags: ["enterprise", "de", "automotive"] },
+  { name: "TRATON Group", provider: "successfactors", token: "jobs.traton.com", tags: ["enterprise", "de", "automotive"] },
+  { name: "Bayer", provider: "eightfold", token: "bayer", tags: ["enterprise", "de", "pharma"] },
+  { name: "Rippling", provider: "rippling", token: "rippling", tags: ["tech", "hr"] },
 ];
 
 // One Source per company. A failing company doesn't sink the batch (ingest

@@ -451,6 +451,75 @@ const oraclePlatform: AtsPlatform = {
   fetcher: "oracle",
 };
 
+const eightfoldPlatform: AtsPlatform = {
+  id: "eightfold",
+  // <tenant>.eightfold.ai; branded CNAMEs front the same host. Live-verified
+  // quirk: tenants that haven't enabled the public career-site API answer
+  // 403 "Not authorized for PCSX" — dead for our purposes, hence the
+  // positions-based probeAlive.
+  patterns: [
+    {
+      kind: "subdomain",
+      suffixes: ["eightfold.ai"],
+      denyLabels: new Set([...COMMON_DENY_LABELS, "app", "apply", "developer"]),
+    },
+  ],
+  crawlDomains: ["*.eightfold.ai"],
+  probeUrl: (token) => `https://${token}.eightfold.ai/api/apply/v2/jobs?start=0&num=1`,
+  probeAlive: (status, body) =>
+    status === 200 && Array.isArray((body as any)?.positions) && (body as any).positions.length > 0,
+  fetcher: "eightfold",
+};
+
+const jibePlatform: AtsPlatform = {
+  id: "jibe",
+  // <slug>.jibeapply.com — iCIMS' career-site layer, clean public JSON with
+  // full descriptions. Unknown slugs fail DNS (no wildcard).
+  patterns: [
+    { kind: "subdomain", suffixes: ["jibeapply.com"], denyLabels: COMMON_DENY_LABELS },
+  ],
+  crawlDomains: ["*.jibeapply.com"],
+  probeUrl: (token) => `https://${token}.jibeapply.com/api/jobs?page=1`,
+  fetcher: "jibe",
+};
+
+const beesitePlatform: AtsPlatform = {
+  id: "beesite",
+  // <tenant>.app.beesite.de backends (milch & zucker); the branded career
+  // sites reference this host in their HTML, which is how harvest finds it.
+  patterns: [
+    { kind: "subdomain", suffixes: ["app.beesite.de"], denyLabels: COMMON_DENY_LABELS },
+  ],
+  crawlDomains: ["*.app.beesite.de"],
+  probeUrl: (token) =>
+    `https://${token}.app.beesite.de/search?data=${encodeURIComponent(
+      JSON.stringify({
+        LanguageCode: "EN",
+        SearchParameters: { FirstItem: 1, CountItem: 1, MatchedObjectDescriptor: ["PositionID"] },
+        SearchCriteria: [],
+      }),
+    )}`,
+  probeAlive: (status, body) =>
+    status === 200 && Number((body as any)?.SearchResult?.SearchResultCountAll ?? 0) > 0,
+  fetcher: "beesite",
+};
+
+const ripplingPlatform: AtsPlatform = {
+  id: "rippling",
+  // ats.rippling.com/<slug>/jobs — path-tokened. Unknown slugs 404 on the
+  // board API (RESOURCE_NOT_FOUND), so the default status probe is sound.
+  patterns: [
+    {
+      kind: "path",
+      hosts: ["ats.rippling.com"],
+      denySegments: COMMON_DENY_SEGMENTS,
+    },
+  ],
+  crawlDomains: ["ats.rippling.com"],
+  probeUrl: (token) => `https://api.rippling.com/platform/api/ats/v1/board/${token}/jobs`,
+  fetcher: "rippling",
+};
+
 export const platforms: readonly AtsPlatform[] = [
   {
     id: "greenhouse",
@@ -478,6 +547,10 @@ export const platforms: readonly AtsPlatform[] = [
   teamtailorPlatform,
   joinPlatform,
   oraclePlatform,
+  eightfoldPlatform,
+  jibePlatform,
+  beesitePlatform,
+  ripplingPlatform,
 ];
 
 export function getPlatform(id: string): AtsPlatform | undefined {

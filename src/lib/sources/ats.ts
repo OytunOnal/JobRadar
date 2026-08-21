@@ -415,6 +415,195 @@ export async function oracle(token: string, company: string): Promise<RawJob[]> 
   return out;
 }
 
+// BeeSite (milch & zucker) — German enterprise boards (Mercedes-Benz).
+// Token = backend subdomain of app.beesite.de; job URLs point at the branded
+// career site. Live-verified 2026-08-21: 2,951 postings on Mercedes.
+export async function beesite(token: string, company: string): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  const COUNT = 200;
+  for (let first = 1; first <= 6000; first += COUNT) {
+    const data = {
+      LanguageCode: "EN",
+      SearchParameters: {
+        FirstItem: first,
+        CountItem: COUNT,
+        Sort: [{ Criterion: "PublicationStartDate", Direction: "DESC" }],
+        MatchedObjectDescriptor: [
+          "PositionID", "PositionTitle", "PositionURI",
+          "PositionLocation.CityName", "PositionLocation.CountryName",
+          "PublicationStartDate",
+        ],
+      },
+      SearchCriteria: [],
+    };
+    const res = await getJSON(
+      `https://${token}.app.beesite.de/search?data=${encodeURIComponent(JSON.stringify(data))}`,
+    );
+    const items: any[] = res?.SearchResult?.SearchResultItems ?? [];
+    for (const it of items) {
+      const d = it?.MatchedObjectDescriptor;
+      if (!d?.PositionID || !d?.PositionTitle) continue;
+      const locs = (Array.isArray(d.PositionLocation) ? d.PositionLocation : [d.PositionLocation])
+        .filter(Boolean)
+        .map((l: any) => [l.CityName, l.CountryName].filter(Boolean).join(", "))
+        .filter(Boolean)
+        .join("; ");
+      out.push({
+        source: `beesite:${token}`,
+        externalId: String(d.PositionID),
+        url: String(d.PositionURI ?? ""),
+        title: String(d.PositionTitle).trim(),
+        company,
+        location: locs,
+        remote: /remote|home\s*office/i.test(`${d.PositionTitle} ${locs}`),
+        description: String(d.PositionTitle), // list carries no body
+        postedAt: d.PublicationStartDate ? new Date(d.PublicationStartDate) : undefined,
+      });
+    }
+    const total = Number(res?.SearchResult?.SearchResultCountAll ?? 0);
+    if (first + COUNT > total || items.length === 0) break;
+  }
+  return out;
+}
+
+// SAP SuccessFactors, Career Site Builder generation. Token = the branded
+// career-site HOST (jobs.man.eu). Results are LOCALE-GATED (live-verified:
+// MAN de_DE=601 vs en_US=8) — the site's /search/ page advertises its locales;
+// query each and dedup by id, English first so English titles win.
+export async function successfactors(token: string, company: string): Promise<RawJob[]> {
+  const origin = `https://${token}`;
+  let locales: string[] = [];
+  try {
+    const html = await getText(`${origin}/search/`);
+    locales = [...new Set([...html.matchAll(/locale=([a-z]{2}_[A-Z]{2})/g)].map((m) => m[1]))];
+  } catch {
+    /* fall through to defaults */
+  }
+  if (locales.length === 0) locales = ["en_US", "de_DE"];
+  locales.sort((a, b) => Number(b.startsWith("en")) - Number(a.startsWith("en")));
+
+  const seen = new Set<string>();
+  const out: RawJob[] = [];
+  for (const locale of locales) {
+    for (let page = 0; page < 100; page++) {
+      const res = await postJSON(`${origin}/services/recruiting/v1/jobs`, {
+        keywords: "", locale, location: "", pageNumber: page, sortBy: "recent",
+      });
+      const rows: any[] = res?.jobSearchResult ?? [];
+      for (const row of rows) {
+        const j = row?.response ?? row;
+        if (!j?.id || seen.has(String(j.id))) continue;
+        seen.add(String(j.id));
+        const loc = (j.jobLocationShort ?? []).filter(Boolean).join("; ");
+        out.push({
+          source: `sf:${token}`,
+          externalId: String(j.id),
+          url: `${origin}/job/${j.unifiedUrlTitle ?? j.id}/${j.id}-${locale}`,
+          title: String(j.unifiedStandardTitle ?? "").trim(),
+          company,
+          location: loc,
+          remote: /remote|home\s*office/i.test(`${j.unifiedStandardTitle} ${loc}`),
+          description: String(j.unifiedStandardTitle ?? ""), // list carries no body
+          postedAt: j.unifiedStandardStart ? new Date(j.unifiedStandardStart) : undefined,
+        });
+      }
+      const total = Number(res?.totalJobs ?? 0);
+      if (rows.length === 0 || (page + 1) * 10 >= total) break;
+    }
+  }
+  return out;
+}
+
+// Eightfold.ai. Token = tenant subdomain (bayer). Server caps pages at 10
+// rows regardless of num (live-verified), so big boards cost count/10 calls —
+// capped here. 403 "Not authorized for PCSX" = tenant hasn't enabled the
+// public career-site API (not bot detection); such boards are unservable.
+export async function eightfold(token: string, company: string): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  for (let start = 0; start < 1500; start += 10) {
+    const data = await getJSON(
+      `https://${token}.eightfold.ai/api/apply/v2/jobs?start=${start}&num=10`,
+    );
+    const rows: any[] = data?.positions ?? [];
+    for (const j of rows) {
+      if (!j?.id || !j?.name) continue;
+      const locs = [j.location, ...(j.locations ?? [])].filter(Boolean);
+      out.push({
+        source: `eightfold:${token}`,
+        externalId: String(j.id),
+        url: String(j.canonicalPositionUrl ?? `https://${token}.eightfold.ai/careers/job/${j.id}`),
+        title: String(j.name).trim(),
+        company,
+        location: [...new Set(locs)].slice(0, 4).join("; "),
+        remote: locs.some((l: string) => /remote/i.test(l)),
+        description: stripHtml(String(j.job_description ?? "")) || String(j.name),
+        postedAt: j.t_create ? new Date(Number(j.t_create) * 1000) : undefined, // unix SECONDS
+      });
+    }
+    const total = Number(data?.count ?? 0);
+    if (rows.length === 0 || start + 10 >= total) break;
+  }
+  return out;
+}
+
+// JibeApply (iCIMS' career-site layer). Token = subdomain (nfiindustries).
+// Clean public JSON with FULL descriptions — also the practical route into
+// iCIMS tenants, whose own portals sit behind an AWS WAF.
+export async function jibe(token: string, company: string): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  for (let page = 1; page <= 150; page++) {
+    const data = await getJSON(`https://${token}.jibeapply.com/api/jobs?page=${page}`);
+    const rows: any[] = data?.jobs ?? [];
+    for (const row of rows) {
+      const j = row?.data ?? row;
+      if (!j?.title) continue;
+      out.push({
+        source: `jibe:${token}`,
+        externalId: String(j.req_id ?? j.slug ?? ""),
+        url: String(j.apply_url ?? `https://${token}.jibeapply.com/jobs/${j.slug ?? ""}`),
+        title: String(j.title).trim(),
+        company,
+        location: String(j.full_location ?? j.location_name ?? ""),
+        remote: /remote/i.test(`${j.title} ${j.full_location ?? ""}`),
+        description: stripHtml(String(j.description ?? "")) || String(j.title),
+        postedAt: j.posted_date ? new Date(j.posted_date) : undefined,
+      });
+    }
+    const total = Number(data?.totalCount ?? 0);
+    if (rows.length === 0 || page * 10 >= total) break;
+  }
+  return out;
+}
+
+// Rippling ATS. Token = board slug. One row PER LOCATION with the same uuid
+// (live-verified) — rows are merged here. No posted date anywhere.
+export async function rippling(token: string, company: string): Promise<RawJob[]> {
+  const data = await getJSON(`https://api.rippling.com/platform/api/ats/v1/board/${token}/jobs`);
+  const rows: any[] = Array.isArray(data) ? data : [];
+  const byId = new Map<string, RawJob>();
+  for (const j of rows) {
+    if (!j?.uuid || !j?.name) continue;
+    const loc = j.workLocation?.label ?? "";
+    const prev = byId.get(String(j.uuid));
+    if (prev) {
+      if (loc && !prev.location.includes(loc)) prev.location += `; ${loc}`;
+      continue;
+    }
+    byId.set(String(j.uuid), {
+      source: `rippling:${token}`,
+      externalId: String(j.uuid),
+      url: String(j.url ?? `https://ats.rippling.com/${token}/jobs/${j.uuid}`),
+      title: String(j.name).trim(),
+      company,
+      location: loc,
+      remote: /remote/i.test(`${j.name} ${loc}`),
+      description: String(j.name), // body lives on the detail endpoint
+      postedAt: undefined,
+    });
+  }
+  return [...byId.values()];
+}
+
 // Uniform shape: fetchers that are single-instance (Greenhouse, Ashby,
 // SmartRecruiters, Workable, Recruitee, Personio, Workday) simply ignore the
 // region argument.
@@ -435,5 +624,10 @@ export const atsFetchers = {
   join,
   pinpoint,
   oracle,
+  beesite,
+  successfactors,
+  eightfold,
+  jibe,
+  rippling,
 } as const satisfies Record<string, AtsFetcher>;
 export type AtsProvider = keyof typeof atsFetchers;

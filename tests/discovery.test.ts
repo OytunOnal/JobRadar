@@ -435,3 +435,31 @@ test("oracle: probe URL embeds the site in the finder; liveness needs a non-empt
   assert.equal(p.probeAlive!(200, { items: [{ requisitionList: [{ Id: 1 }] }] }), true);
   assert.equal(p.probeAlive!(404, { items: [{ requisitionList: [{ Id: 1 }] }] }), false);
 });
+
+// ── Wave-2 platforms: Eightfold, Jibe, BeeSite, Rippling ─────────────────────
+
+test("eightfold/jibe/beesite: subdomain tokens extract; infra labels denied", () => {
+  assert.equal(hit("https://bayer.eightfold.ai/careers/job/563").platform, "eightfold");
+  assert.equal(hit("https://bayer.eightfold.ai/careers").token, "bayer");
+  assert.equal(extractSlug("https://app.eightfold.ai/x"), null);
+  assert.equal(hit("https://nfiindustries.jibeapply.com/jobs/123").token, "nfiindustries");
+  assert.equal(hit("https://mercedes-benz-beesite-production-gjb.app.beesite.de/search?data=x").token,
+    "mercedes-benz-beesite-production-gjb");
+});
+
+test("rippling: path token from ats.rippling.com", () => {
+  const h = hit("https://ats.rippling.com/mixpanel/jobs/abc-123");
+  assert.equal(h.platform, "rippling");
+  assert.equal(h.token, "mixpanel");
+  assert.equal(extractSlug("https://ats.rippling.com/"), null);
+});
+
+test("eightfold/beesite: liveness needs jobs in the body, not just a 200", () => {
+  const e = getPlatform("eightfold")!;
+  assert.equal(e.probeAlive!(200, { positions: [] }), false);
+  assert.equal(e.probeAlive!(200, { positions: [{ id: 1 }] }), true);
+  assert.equal(e.probeAlive!(403, { positions: [{ id: 1 }] }), false); // PCSX-disabled tenant
+  const b = getPlatform("beesite")!;
+  assert.equal(b.probeAlive!(200, { SearchResult: { SearchResultCountAll: 0 } }), false);
+  assert.equal(b.probeAlive!(200, { SearchResult: { SearchResultCountAll: 2951 } }), true);
+});

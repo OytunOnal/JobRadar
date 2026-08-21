@@ -15,7 +15,7 @@ export default async function DismissedPage() {
   });
 
   return (
-    <main>
+    <main className="wrap">
       <header className="top">
         <div className="brand">
           <div>

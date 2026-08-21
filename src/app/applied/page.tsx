@@ -107,7 +107,7 @@ export default async function AppliedPage() {
   };
 
   return (
-    <main>
+    <main className="wrap">
       <header className="top">
         <div className="brand">
           <div>

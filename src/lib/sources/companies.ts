@@ -81,6 +81,10 @@ export const companies: Company[] = [
   { name: "TRATON Group", provider: "successfactors", token: "jobs.traton.com", tags: ["enterprise", "de", "automotive"] },
   { name: "Bayer", provider: "eightfold", token: "bayer", tags: ["enterprise", "de", "pharma"] },
   { name: "Rippling", provider: "rippling", token: "rippling", tags: ["tech", "hr"] },
+  { name: "Allianz", provider: "phenom", token: "careers.allianz.com", tags: ["enterprise", "de", "insurance"] },
+  { name: "Munich Re", provider: "radancy", token: "careers.munichre.com/en", tags: ["enterprise", "de", "insurance"] },
+  { name: "OHB", provider: "csod", token: "career-ohb@4", tags: ["enterprise", "de", "space"] },
+  { name: "RENK Group", provider: "softgarden", token: "renk-group", tags: ["enterprise", "de", "defense"] },
 ];
 
 // One Source per company. A failing company doesn't sink the batch (ingest

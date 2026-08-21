@@ -604,6 +604,348 @@ export async function rippling(token: string, company: string): Promise<RawJob[]
   return [...byId.values()];
 }
 
+// Phenom. Every tenant on its own branded domain — token = that host
+// (careers.allianz.com). Public /widgets POST, no auth. Curated-only: no
+// common host to pattern-match in discovery.
+export async function phenom(token: string, company: string): Promise<RawJob[]> {
+  const out: RawJob[] = [];
+  const SIZE = 100;
+  for (let from = 0; from < 3000; from += SIZE) {
+    const res = await postJSON(`https://${token}/widgets`, {
+      lang: "en_global", deviceType: "desktop", country: "global",
+      pageName: "search-results", ddoKey: "refineSearch", sortBy: "",
+      subsearch: "", from, jobs: true, counts: true,
+      all_fields: ["category", "country", "city"], size: SIZE, clearAll: false,
+      jdsource: "facets", isSliderEnable: false, pageId: "page10",
+      siteType: "external", keywords: "", global: true,
+      selected_fields: {}, locationData: {},
+    });
+    const rs = res?.refineSearch;
+    const rows: any[] = rs?.data?.jobs ?? [];
+    for (const j of rows) {
+      if (!j?.reqId && !j?.jobId) continue;
+      const locs = [j.city, ...(j.multi_location ?? [])].filter(Boolean);
+      out.push({
+        source: `phenom:${token}`,
+        externalId: String(j.reqId ?? j.jobId),
+        url: String(j.applyUrl ?? ""),
+        title: String(j.title ?? "").trim(),
+        company,
+        location: [...new Set(locs)].slice(0, 4).join("; "),
+        remote: Boolean(j.remote) || /remote/i.test(String(j.type ?? "")),
+        description: String(j.descriptionTeaser ?? "") || String(j.title ?? ""),
+        postedAt: j.postedDate ? new Date(j.postedDate) : undefined,
+      });
+    }
+    const total = Number(rs?.totalHits ?? 0);
+    if (rows.length === 0 || from + SIZE >= total) break;
+  }
+  return out;
+}
+
+// Gem. Token = board id (jobs.gem.com/<boardId>). Public GraphQL batch
+// endpoint. CAUTION (live-verified): unknown boards answer 200 with an empty
+// list — indistinguishable from an empty board.
+export async function gem(token: string, company: string): Promise<RawJob[]> {
+  const res = await fetch(`https://jobs.gem.com/api/public/graphql/batch?board=${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", batch: "true" },
+    body: JSON.stringify([
+      {
+        operationName: "JobBoardList",
+        variables: { boardId: token },
+        query:
+          "query JobBoardList($boardId: String!) { oatsExternalJobPostings(boardId: $boardId) { jobPostings { id extId title locations { name city isoCountry isRemote } job { locationType employmentType } } } }",
+      },
+    ]),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`gem:${token} -> HTTP ${res.status}`);
+  const data = await res.json();
+  const rows: any[] = data?.[0]?.data?.oatsExternalJobPostings?.jobPostings ?? [];
+  return rows
+    .filter((j: any) => j?.extId && j?.title)
+    .map((j: any) => {
+      const locs = (j.locations ?? [])
+        .map((l: any) => l?.name ?? [l?.city, l?.isoCountry].filter(Boolean).join(", "))
+        .filter(Boolean);
+      return {
+        source: `gem:${token}`,
+        externalId: String(j.extId),
+        url: `https://jobs.gem.com/${token}/${j.extId}`,
+        title: String(j.title).trim(),
+        company,
+        location: [...new Set(locs)].slice(0, 4).join("; ") as string,
+        remote: (j.locations ?? []).some((l: any) => l?.isRemote) ||
+          /remote/i.test(String(j.job?.locationType ?? "")),
+        description: String(j.title), // body sits behind the detail query
+        postedAt: undefined, // only on the detail query
+      };
+    });
+}
+
+// Comeet. Token = "<company>/<uid>" from www.comeet.com/jobs/<company>/<uid>.
+// The hosted page embeds the per-tenant API token; bootstrap it, then hit the
+// documented careers API.
+export async function comeet(token: string, company: string): Promise<RawJob[]> {
+  const [slug, uid] = token.split("/");
+  if (!slug || !uid) return [];
+  const html = await getText(`https://www.comeet.com/jobs/${slug}/${uid}`);
+  const tok = html.match(/"token"\s*:\s*"([A-F0-9]+)"/i)?.[1];
+  if (!tok) throw new Error(`comeet:${token} -> no embedded API token`);
+  const rows = await getJSON(
+    `https://www.comeet.co/careers-api/2.0/company/${encodeURIComponent(uid)}/positions?token=${tok}&details=true`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter((j: any) => j?.uid && j?.name)
+    .map((j: any) => {
+      const loc = j.location ?? {};
+      const locStr = loc.name ?? [loc.city, loc.country].filter(Boolean).join(", ");
+      return {
+        source: `comeet:${token}`,
+        externalId: String(j.uid),
+        url: String(j.url_comeet_hosted_page ?? j.url_active_page ?? ""),
+        title: String(j.name).trim(),
+        company,
+        location: locStr,
+        remote: Boolean(loc.is_remote) || /remote/i.test(String(j.workplace_type ?? "")),
+        description:
+          stripHtml([j.details?.description, j.details?.requirements].filter(Boolean).join("\n")) ||
+          String(j.name),
+        postedAt: j.time_updated ? new Date(j.time_updated) : undefined,
+      };
+    });
+}
+
+// Getro VC-portfolio networks. Token = the board's host (jobs.b2venture.vc);
+// the network id is bootstrapped from the page's __NEXT_DATA__. Jobs link to
+// each employer's OWN ATS — high-value harvest input, modest as a source.
+export async function getro(token: string, company: string): Promise<RawJob[]> {
+  const html = await getText(`https://${token}/jobs`);
+  const netId = html.match(/"network"\s*:\s*\{\s*"id"\s*:\s*"?(\d+)"?/)?.[1];
+  if (!netId) throw new Error(`getro:${token} -> no network id in __NEXT_DATA__`);
+  const out: RawJob[] = [];
+  for (let page = 0; page < 100; page++) {
+    const res = await postJSON(`https://api.getro.com/api/v2/collections/${netId}/search/jobs`, {
+      hitsPerPage: 20, page, filters: { page }, query: "",
+    });
+    const rows: any[] = res?.results?.jobs ?? [];
+    for (const j of rows) {
+      if (!j?.id || !j?.title) continue;
+      out.push({
+        source: `getro:${token}`,
+        externalId: String(j.id),
+        url: String(j.url ?? ""),
+        title: String(j.title).trim(),
+        company: String(j.organization?.name ?? company),
+        location: (j.locations ?? []).filter(Boolean).slice(0, 4).join("; "),
+        remote: /remote/i.test(String(j.work_mode ?? "")),
+        description: String(j.title),
+        postedAt: j.created_at ? new Date(Number(j.created_at) * 1000) : undefined, // unix sec
+      });
+    }
+    const total = Number(res?.results?.count ?? 0);
+    if (rows.length === 0 || (page + 1) * 20 >= total) break;
+  }
+  return out;
+}
+
+// Avature. Token = "<host>/<locale>/<site>" (careers.avature.net/en_US/main).
+// The SearchJobs RSS feed is the simplest stable surface.
+export async function avature(token: string, company: string): Promise<RawJob[]> {
+  const xml = await getText(`https://${token}/SearchJobs/feed/?jobRecordsPerPage=500`);
+  const items = xml.split(/<item>/i).slice(1);
+  return items
+    .map((chunk) => {
+      const pick = (tag: string) =>
+        chunk.match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, "i"))?.[1]?.trim() ?? "";
+      const link = pick("link") || pick("guid");
+      const title = stripHtml(pick("title"));
+      const desc = stripHtml(pick("description"));
+      const id = link.match(/\/(\d+)(?:\?|$)/)?.[1] ?? link;
+      return { link, title, desc, id };
+    })
+    .filter((r) => r.title && r.link)
+    .map((r) => ({
+      source: `avature:${token}`,
+      externalId: String(r.id),
+      url: r.link,
+      title: r.title,
+      company,
+      location: r.desc.split(" - ")[0] ?? "", // "Argentina - 7221" convention
+      remote: /remote/i.test(`${r.title} ${r.desc}`),
+      description: r.desc || r.title,
+      postedAt: undefined,
+    }));
+}
+
+// Radancy (TalentBrew). Token = "<host>/<langPrefix>" (careers.munichre.com/en).
+// JSON envelope with an HTML fragment payload. Two live-verified hard rules:
+// SearchResultsModuleName must be sent (else silently empty), and
+// SearchFiltersModuleName must NOT be (else a multi-MB facet blob attaches).
+export async function radancy(token: string, company: string): Promise<RawJob[]> {
+  const [host, ...langParts] = token.split("/");
+  const lang = langParts.join("/");
+  const base = `https://${host}${lang ? `/${lang}` : ""}`;
+  const out: RawJob[] = [];
+  for (let page = 1; page <= 40; page++) {
+    const res = await getJSON(
+      `${base}/search-jobs/results?ActiveFacetID=0&CurrentPage=${page}&RecordsPerPage=100&Distance=50` +
+        `&RadiusUnitType=0&Keywords=&Location=&ShowRadius=False&IsPagination=True&CustomFacetName=` +
+        `&FacetTerm=&FacetType=0&SearchResultsModuleName=Search+Results&SortCriteria=0&SortDirection=0&SearchType=5`,
+    );
+    const frag: string = res?.results ?? "";
+    const totalPages = Number(frag.match(/data-total-pages="(\d+)"/)?.[1] ?? 1);
+    for (const m of frag.matchAll(/<a[^>]+href="([^"]+\/job\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+      const href = m[1];
+      const inner = stripHtml(m[2]).trim();
+      if (!inner) continue;
+      const url = href.startsWith("http") ? href : `https://${host}${href}`;
+      const id = href.match(/\/(\d+)\/?$/)?.[1] ?? url;
+      out.push({
+        source: `radancy:${token}`,
+        externalId: String(id),
+        url,
+        title: inner.split("\n")[0].trim(),
+        company,
+        location: "", // fragment list-level location markup varies per tenant
+        remote: /remote/i.test(inner),
+        description: inner,
+        postedAt: undefined,
+      });
+    }
+    if (page >= totalPages) break;
+  }
+  // The anchor regex can catch duplicate links to the same job — dedupe by id.
+  const byId = new Map(out.map((j) => [j.externalId, j]));
+  return [...byId.values()];
+}
+
+// Cornerstone (CSOD). Token = "<sub>@<siteId>" (career-ohb@4); corp name
+// defaults to the subdomain. Two-step: scrape the anonymous JWT (+ cookies)
+// off the career-site home page, then POST the search API with both.
+export async function csod(token: string, company: string): Promise<RawJob[]> {
+  const m = token.match(/^([^@]+)@(\d+)$/);
+  if (!m) return [];
+  const [, sub, siteId] = m;
+  const origin = `https://${sub}.csod.com`;
+  const homeRes = await fetch(`${origin}/ux/ats/careersite/${siteId}/home?c=${sub}`, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; JobRadar/0.1)" },
+    signal: AbortSignal.timeout(30_000),
+  });
+  const html = await homeRes.text();
+  const jwt = html.match(/"token"\s*:\s*"([A-Za-z0-9._-]+)"/)?.[1];
+  if (!jwt) throw new Error(`csod:${token} -> no anonymous token on home page`);
+  const cookies = homeRes.headers.get("set-cookie") ?? "";
+  const out: RawJob[] = [];
+  for (let page = 1; page <= 60; page++) {
+    const res = await fetch(`${origin}/services/x/career-site/v1/search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+        Cookie: cookies.split(",").map((c) => c.split(";")[0]).join("; "),
+        "User-Agent": "Mozilla/5.0 (compatible; JobRadar/0.1)",
+      },
+      body: JSON.stringify({
+        careerSiteId: Number(siteId), careerSitePageId: Number(siteId),
+        pageNumber: page, pageSize: 50, cultureId: 1, cultureName: "en-US",
+        searchText: "", states: [], countryCodes: [], cities: [], placeID: "",
+        radius: null, postingsWithinDays: null, customFieldCheckboxKeys: [],
+        customFieldDropdowns: [], customFieldRadios: [],
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) throw new Error(`csod:${token} search -> HTTP ${res.status}`);
+    const data = await res.json();
+    const rows: any[] = data?.data?.requisitions ?? [];
+    for (const j of rows) {
+      if (!j?.requisitionId) continue;
+      const locs = (j.locations ?? [])
+        .map((l: any) => [l.city, l.state, l.country].filter(Boolean).join(", "))
+        .filter(Boolean)
+        .join("; ");
+      out.push({
+        source: `csod:${token}`,
+        externalId: String(j.requisitionId),
+        url: `${origin}/ux/ats/careersite/${siteId}/home/requisition/${j.requisitionId}?c=${sub}`,
+        title: String(j.displayJobTitle ?? "").trim(),
+        company,
+        location: locs,
+        remote: /remote/i.test(`${j.displayJobTitle} ${locs}`),
+        description: String(j.displayJobTitle ?? ""),
+        postedAt: j.postingEffectiveDate ? new Date(j.postingEffectiveDate) : undefined,
+      });
+    }
+    const total = Number(data?.data?.totalCount ?? 0);
+    if (rows.length === 0 || page * 50 >= total) break;
+  }
+  return out;
+}
+
+// Jobvite. Token = board slug. Bootstrap the companyEId off the hosted board
+// (the fr=true&nl=1 params are load-bearing — bare URLs 302 to branded
+// sites), then pull the full XML feed. app.jobvite.com rate-limits hard
+// (429 from the 2nd rapid request) — one feed call per run is fine.
+export async function jobvite(token: string, company: string): Promise<RawJob[]> {
+  const html = await getText(`https://jobs.jobvite.com/${token}?fr=true&nl=1`);
+  const eid = html.match(/companyEId\s*[:=]\s*['"]([A-Za-z0-9_-]{4,40})['"]/)?.[1];
+  if (!eid) throw new Error(`jobvite:${token} -> no companyEId on board page`);
+  const xml = await getText(`https://app.jobvite.com/CompanyJobs/Xml.aspx?c=${eid}`);
+  const items = xml.split(/<job>/i).slice(1);
+  return items
+    .map((chunk) => {
+      const pick = (tag: string) =>
+        chunk.match(new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, "i"))?.[1]?.trim() ?? "";
+      return {
+        id: pick("id"), title: stripHtml(pick("title")), region: pick("region"),
+        location: stripHtml(pick("location")), date: pick("date"),
+        url: pick("detail-url") || pick("apply-url"),
+        desc: stripHtml(pick("description")),
+      };
+    })
+    .filter((r) => r.id && r.title)
+    .map((r) => ({
+      source: `jobvite:${token}`,
+      externalId: r.id,
+      url: r.url,
+      title: r.title,
+      company,
+      location: [r.location, r.region].filter(Boolean).join(", "),
+      remote: /remote/i.test(`${r.title} ${r.location} ${r.region}`),
+      description: r.desc || r.title,
+      postedAt: r.date ? new Date(r.date) : undefined,
+    }));
+}
+
+// Softgarden. Token = tenant subdomain. The REST jobslist API is auth-gated
+// (401 without a channel key) — the server-rendered widgets page is the
+// public surface: one page, all postings, no pagination.
+export async function softgarden(token: string, company: string): Promise<RawJob[]> {
+  const html = await getText(`https://${token}.softgarden.io/en/widgets/jobs`);
+  const out: RawJob[] = [];
+  const seen = new Set<string>();
+  for (const m of html.matchAll(/<a[^>]+href="[^"]*\/job\/(\d+)\/([^"?]*)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const [, id, slug, inner] = m;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const title = stripHtml(inner).trim().split("\n")[0];
+    if (!title) continue;
+    out.push({
+      source: `softgarden:${token}`,
+      externalId: id,
+      url: `https://${token}.softgarden.io/job/${id}/${slug}`,
+      title,
+      company,
+      location: "",
+      remote: /remote|home\s*office/i.test(title),
+      description: title,
+      postedAt: undefined,
+    });
+  }
+  return out;
+}
+
 // Uniform shape: fetchers that are single-instance (Greenhouse, Ashby,
 // SmartRecruiters, Workable, Recruitee, Personio, Workday) simply ignore the
 // region argument.
@@ -629,5 +971,14 @@ export const atsFetchers = {
   eightfold,
   jibe,
   rippling,
+  phenom,
+  gem,
+  comeet,
+  getro,
+  avature,
+  radancy,
+  csod,
+  jobvite,
+  softgarden,
 } as const satisfies Record<string, AtsFetcher>;
 export type AtsProvider = keyof typeof atsFetchers;

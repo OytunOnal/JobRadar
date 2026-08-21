@@ -520,6 +520,81 @@ const ripplingPlatform: AtsPlatform = {
   fetcher: "rippling",
 };
 
+const jobvitePlatform: AtsPlatform = {
+  id: "jobvite",
+  // jobs.jobvite.com/<slug>. Probe = the hosted board page with the
+  // load-bearing fr=true&nl=1 params; dead/retired slugs 302 away, so the
+  // validation runner's redirect:"manual" reads them as dead.
+  patterns: [
+    { kind: "path", hosts: ["jobs.jobvite.com"], denySegments: COMMON_DENY_SEGMENTS },
+  ],
+  crawlDomains: ["jobs.jobvite.com"],
+  probeUrl: (token) => `https://jobs.jobvite.com/${token}?fr=true&nl=1`,
+  fetcher: "jobvite",
+};
+
+const softgardenPlatform: AtsPlatform = {
+  id: "softgarden",
+  // <tenant>.softgarden.io; the server-rendered widgets page is the public
+  // surface (the REST jobslist API is channel-key-gated).
+  patterns: [
+    { kind: "subdomain", suffixes: ["softgarden.io"], denyLabels: COMMON_DENY_LABELS },
+  ],
+  crawlDomains: ["*.softgarden.io"],
+  probeUrl: (token) => `https://${token}.softgarden.io/en/widgets/jobs`,
+  fetcher: "softgarden",
+};
+
+const comeetPlatform: AtsPlatform = {
+  id: "comeet",
+  // www.comeet.com/jobs/<company>/<uid> — token is the two-segment
+  // "<company>/<uid>" pair (the uid looks like "61.003"); the fetcher
+  // bootstraps the embedded API token off this page.
+  patterns: [
+    {
+      kind: "custom",
+      hostPattern: /(^|\.)comeet\.com$/,
+      match: (url) => {
+        const segs = url.pathname.split("/").filter(Boolean);
+        if (segs[0] !== "jobs" || !segs[1] || !segs[2]) return null;
+        if (!/^\d+\.[0-9A-Za-z]+$/.test(segs[2])) return null;
+        return `${segs[1]}/${segs[2]}`;
+      },
+    },
+  ],
+  crawlDomains: ["comeet.com/jobs", "www.comeet.com/jobs"],
+  tokenRule: /^[a-z0-9][a-z0-9._-]*\/\d+\.[0-9a-z]+$/,
+  probeUrl: (token) => `https://www.comeet.com/jobs/${token}`,
+  fetcher: "comeet",
+};
+
+const csodPlatform: AtsPlatform = {
+  id: "csod",
+  // <sub>.csod.com/ux/ats/careersite/<siteId>/... — token "<sub>@<siteId>".
+  // The search API needs a JWT bootstrapped off the home page, so the
+  // lightweight probe is just the home page itself.
+  patterns: [
+    {
+      kind: "custom",
+      hostPattern: /\.csod\.com$/,
+      match: (url) => {
+        const sub = url.hostname.match(/^([a-z0-9-]+)\.csod\.com$/i)?.[1];
+        if (!sub) return null;
+        const m = url.pathname.match(/\/ux\/ats\/careersite\/(\d+)(\/|$)/i);
+        if (!m) return null;
+        return `${sub}@${m[1]}`;
+      },
+    },
+  ],
+  crawlDomains: ["*.csod.com"],
+  tokenRule: /^[a-z0-9][a-z0-9-]*@\d+$/,
+  probeUrl: (token) => {
+    const m = token.match(/^([^@]+)@(\d+)$/);
+    return m ? `https://${m[1]}.csod.com/ux/ats/careersite/${m[2]}/home?c=${m[1]}` : "";
+  },
+  fetcher: "csod",
+};
+
 export const platforms: readonly AtsPlatform[] = [
   {
     id: "greenhouse",
@@ -551,6 +626,10 @@ export const platforms: readonly AtsPlatform[] = [
   jibePlatform,
   beesitePlatform,
   ripplingPlatform,
+  jobvitePlatform,
+  softgardenPlatform,
+  comeetPlatform,
+  csodPlatform,
 ];
 
 export function getPlatform(id: string): AtsPlatform | undefined {

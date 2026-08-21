@@ -463,3 +463,25 @@ test("eightfold/beesite: liveness needs jobs in the body, not just a 200", () =>
   assert.equal(b.probeAlive!(200, { SearchResult: { SearchResultCountAll: 0 } }), false);
   assert.equal(b.probeAlive!(200, { SearchResult: { SearchResultCountAll: 2951 } }), true);
 });
+
+test("jobvite/softgarden: wave-2b subdomain and path tokens", () => {
+  assert.equal(hit("https://jobs.jobvite.com/imprivata/job/oUexlfwB").token, "imprivata");
+  assert.equal(hit("https://renk-group.softgarden.io/en/vacancies").token, "renk-group");
+});
+
+test("comeet: two-segment token from hosted job pages", () => {
+  const h = hit("https://www.comeet.com/jobs/team8/61.003/bluespine-ai-engineer/B1.D4F");
+  assert.equal(h.platform, "comeet");
+  assert.equal(h.token, "team8/61.003");
+  assert.equal(extractSlug("https://www.comeet.com/jobs/team8"), null); // uid missing
+  assert.equal(extractSlug("https://www.comeet.com/about/team8/61.003"), null);
+});
+
+test("csod: structured sub@siteId token from career-site paths", () => {
+  const h = hit("https://career-ohb.csod.com/ux/ats/careersite/4/home?c=career-ohb");
+  assert.equal(h.platform, "csod");
+  assert.equal(h.token, "career-ohb@4");
+  assert.equal(hit("https://career-ohb.csod.com/ux/ats/careersite/4/home/requisition/210?c=x").token,
+    "career-ohb@4");
+  assert.equal(extractSlug("https://career-ohb.csod.com/ux/other/path"), null);
+});

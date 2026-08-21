@@ -84,7 +84,8 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
     key: "marketing",
     label: "Marketing / Growth / Content",
     titleKeywords: [
-      "marketing", "growth", "seo ", "content writer", "copywriter", "content manager", "market research",
+      "marketing", "growth marketing", "growth manager", "head of growth", "seo ",
+      "content writer", "copywriter", "content manager", "market research",
       "social media", "community manager", "brand manager", "communications", "pr manager",
     ],
   },

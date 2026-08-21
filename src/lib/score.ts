@@ -14,6 +14,16 @@ function countHits(haystack: string, needles: readonly string[]): string[] {
   return needles.filter((n) => haystack.includes(n.toLowerCase()));
 }
 
+// Word-boundary matching for NEGATIVES: substring matching let "sales" kill
+// "Salesforce developer". Signals stay substring-based on purpose — they need
+// to hit inside German compounds ("Softwareentwicklung").
+function countWordHits(haystack: string, needles: readonly string[]): string[] {
+  return needles.filter((n) => {
+    const esc = n.toLowerCase().trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^a-zà-ü])${esc}(?:$|[^a-zà-ü])`).test(haystack);
+  });
+}
+
 function regionOk(job: RawJob): boolean {
   if (job.remote) return true;
   const loc = (job.location ?? "").toLowerCase();
@@ -23,7 +33,11 @@ function regionOk(job: RawJob): boolean {
   // Resolve the country and let region grants in the list ("europe", "emea")
   // or country names decide.
   const country = resolveCountry(loc);
-  return country !== null && countryPassesAccept(country, profile.acceptRegions);
+  // Unresolvable is NOT a rejection — "Darmstadt" (not in the gazetteer's hub
+  // list) killed German postings from a German board. Only a resolved country
+  // outside the accept list rejects.
+  if (country === null) return true;
+  return countryPassesAccept(country, profile.acceptRegions);
 }
 
 // Deterministic keyword scorer. Picks the best-matching track and scores by how
@@ -33,8 +47,10 @@ export function scoreJob(job: RawJob): Scored {
   const text = `${job.title}\n${job.description}`.toLowerCase();
   const title = job.title.toLowerCase();
 
-  // Hard disqualifiers first.
-  const negHit = countHits(text, profile.negative);
+  // Hard disqualifiers first — TITLE only: the description mentioning
+  // "recruiter"/"internship" in boilerplate must not kill a real posting
+  // (measured live: Data Engineer postings died to contact-info sentences).
+  const negHit = countWordHits(title, profile.negative);
   if (negHit.length > 0) {
     return {
       score: 0,
@@ -55,7 +71,7 @@ export function scoreJob(job: RawJob): Scored {
       : t.titleKeywords;
     return countHits(title, vocab).length > 0;
   });
-  const roleNeg = countHits(title, profile.roleNegatives);
+  const roleNeg = countWordHits(title, profile.roleNegatives);
   if (roleNeg.length > 0 && !specificTitleMatch) {
     return {
       score: 0,

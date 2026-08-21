@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { isWallJobUrl } from "./domains";
+import { atsFetchers, type AtsProvider } from "./sources/ats";
 
 // Liveness probing for aggregator-sourced jobs. The delist sweep diffs a
 // direct source's feed against its stored rows — but jobs from LinkedIn, HN,
@@ -17,7 +18,13 @@ import { isWallJobUrl } from "./domains";
 //     the source"), which also keeps it out of the next sweep's window.
 //   - Wall domains (login-gated) are skipped — a wall says nothing.
 //
+// Direct-source jobs (source "ashby:x") have a SECOND lane: their board's
+// feed is re-fetched and diffed — one request sweeps the whole board. This
+// closes the gap where a posting dies between board rotations (live case:
+// an ashby job 404'd ~18h after its board's last fetch and sat visible).
+//
 // Config: LIVENESS_MAX (40/run)  LIVENESS_MIN_AGE_DAYS (10)
+//         LIVENESS_BOARDS (15/run)  LIVENESS_BOARD_AGE_DAYS (2)
 
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
 const LIVENESS_MAX = Number(process.env.LIVENESS_MAX) || 40;
@@ -82,13 +89,74 @@ export interface LivenessReport {
   checked: number;
   expired: number;
   refreshed: number;
+  boardsRefreshed: number;
+}
+
+// Job.source prefix → ats fetcher id (greenhouse writes "gh:", SmartRecruiters
+// "sr:"; the rest match their fetcher names).
+export const SOURCE_PREFIX_TO_FETCHER: Record<string, AtsProvider> = {
+  gh: "greenhouse", sr: "smartrecruiters",
+  lever: "lever", ashby: "ashby", workable: "workable", recruitee: "recruitee",
+  personio: "personio", workday: "workday", teamtailor: "teamtailor",
+  bamboohr: "bamboohr", breezy: "breezy", join: "join", pinpoint: "pinpoint",
+};
+
+const BOARDS_MAX = Number(process.env.LIVENESS_BOARDS) || 15;
+const BOARD_AGE_DAYS = Number(process.env.LIVENESS_BOARD_AGE_DAYS) || 2;
+
+// Lane 2: refresh the stalest direct-source boards and diff their feeds.
+async function refreshStaleBoards(report: LivenessReport): Promise<void> {
+  const cutoff = new Date(Date.now() - BOARD_AGE_DAYS * 86_400_000);
+  const stale = await prisma.job.groupBy({
+    by: ["source"],
+    where: { delistedAt: null, source: { contains: ":" }, lastSeenAt: { lt: cutoff } },
+    _min: { lastSeenAt: true },
+  });
+  const boards = stale
+    .sort((a, b) => (a._min.lastSeenAt?.getTime() ?? 0) - (b._min.lastSeenAt?.getTime() ?? 0))
+    .slice(0, BOARDS_MAX);
+
+  for (const b of boards) {
+    const [prefix, ...restTok] = b.source.split(":");
+    const fetcherId = SOURCE_PREFIX_TO_FETCHER[prefix];
+    const token = restTok.join(":");
+    if (!fetcherId || !token) continue;
+    // Fetcher ids equal platform ids across the registry.
+    const boardRow = await prisma.atsBoard.findFirst({
+      where: { platform: fetcherId, token },
+      select: { region: true, companyName: true },
+    });
+    let live;
+    try {
+      live = await atsFetchers[fetcherId](token, boardRow?.companyName ?? token, boardRow?.region ?? "");
+    } catch {
+      continue; // a failing feed proves nothing — leave the jobs alone
+    }
+    report.boardsRefreshed++;
+    const liveIds = new Set(live.map((j) => j.externalId));
+    const stored = await prisma.job.findMany({
+      where: { source: b.source, delistedAt: null },
+      select: { id: true, externalId: true },
+    });
+    for (const row of stored) {
+      if (liveIds.has(row.externalId)) {
+        await prisma.job.update({ where: { id: row.id }, data: { lastSeenAt: new Date() } });
+        report.refreshed++;
+      } else {
+        await prisma.job.update({ where: { id: row.id }, data: { delistedAt: new Date() } });
+        report.expired++;
+      }
+    }
+    await sleep(400);
+  }
 }
 
 export async function runLivenessSweep(
   budget = LIVENESS_MAX,
   fetchImpl: typeof fetch = fetch,
 ): Promise<LivenessReport> {
-  const report: LivenessReport = { checked: 0, expired: 0, refreshed: 0 };
+  const report: LivenessReport = { checked: 0, expired: 0, refreshed: 0, boardsRefreshed: 0 };
+  await refreshStaleBoards(report);
   const cutoff = new Date(Date.now() - MIN_AGE_DAYS * 86_400_000);
   // Aggregator jobs only (direct sources have the feed-diff sweep), stalest
   // lastSeenAt first — those have gone longest without any listing evidence.

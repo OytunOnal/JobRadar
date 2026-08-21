@@ -1,0 +1,21 @@
+{
+  "frozen": "2026-08-21 — written before any eval results were seen; do not edit while the embedding evaluation is running (tuning query texts against the test set invalidates the test)",
+  "facets": [
+    "AI engineer building LLM-powered systems: multi-agent orchestration with LangGraph, tool use, RAG, structured outputs, and production deployment of language models",
+    "Full-stack TypeScript engineer working with Next.js, React and Node.js, building and shipping complete web applications",
+    "Python backend developer building FastAPI services, data pipelines and server-side systems, comfortable across the full stack",
+    "Unity game developer with C#, shipping mobile games, gameplay programming, UI implementation and performance optimization",
+    "C# / .NET software engineer with a decade of production experience designing and maintaining applications",
+    "Technical product manager or game producer coordinating engineering, art and design teams to ship software on schedule",
+    "AI evaluation engineer designing test harnesses for LLM systems: golden sets, LLM-as-judge scoring, regression suites and model quality benchmarks"
+  ],
+  "pseudoAds": [
+    "AI Engineer / LLM Engineer. We are looking for an engineer to build and ship LLM-powered features: multi-agent pipelines, retrieval-augmented generation, tool calling and structured outputs. You will design evaluation harnesses to measure model quality, work with providers like Anthropic, OpenAI and Gemini as well as self-hosted open models, and own features end to end from prototype to production. Experience with LangGraph or similar orchestration frameworks, Python and a modern web stack is a strong plus. Visa sponsorship available.",
+    "Senior Full-Stack Engineer (TypeScript). Join our product team building web applications with Next.js, React and Node.js. You will own features across the stack: database schema (PostgreSQL, Prisma), API design, server-side rendering and polished frontends. We value engineers who ship complete, tested, documented work and can operate independently. Relocation support and visa sponsorship offered.",
+    "Python Developer / Backend Engineer. We need a backend engineer to build FastAPI services, background job pipelines and integrations with third-party APIs. You will work with PostgreSQL, Redis and Docker, write tests with pytest, and deploy through CI/CD. Full-stack ability with a JavaScript frontend framework is welcome. International candidates encouraged; we sponsor work permits.",
+    "Unity Developer (C#). Mobile game studio seeks an experienced Unity developer for gameplay programming, UI systems and performance optimization across iOS and Android. You have shipped multiple titles, profile and optimize for low-end devices, and collaborate closely with artists and designers. Experience with casual and hybrid-casual games is a plus. Visa sponsorship and relocation package available.",
+    "Software Engineer (C# / .NET). We build our platform on C# and .NET. You will design and maintain services, write clean object-oriented code following SOLID principles, and work in an agile team with code review and CI. A decade of production C# experience across different domains is exactly the profile we want. We support international hires with visa sponsorship.",
+    "Technical Product Manager / Producer. We are hiring a technically fluent product manager to coordinate engineering, design and art toward scheduled releases. You have hands-on software development background, can read code and estimate scope credibly, run agile ceremonies, and communicate clearly with stakeholders and external clients. Game production experience is a strong plus.",
+    "AI Quality / Evaluation Engineer. Help us measure and improve our AI systems. You will build evaluation pipelines: golden datasets, LLM-as-judge scoring, seeded-defect tests, A/B replays and regression suites that gate releases. Strong Python, careful experimental methodology and honest reporting of negative results matter more than any specific framework. Visa sponsorship available."
+  ]
+}

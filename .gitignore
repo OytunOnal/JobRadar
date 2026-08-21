@@ -24,3 +24,5 @@ fit-review.log
 desc-fill.log
 eliminated-sample.txt
 eliminated-v2.txt
+data/embed-cache/
+embed-eval-results.md

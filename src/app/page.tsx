@@ -384,11 +384,22 @@ export default async function Page({
           <article className="job" key={j.id}>
             <div className="fitcell">
               {j.fitScore != null ? (
-                <>
-                  <div className={`fitnum v-${j.fitVerdict}`}>{j.fitScore}</div>
-                  <div className="gauge"><span className={`v-${j.fitVerdict}`} style={{ width: `${j.fitScore}%` }} /></div>
-                  <div className={`vlabel v-${j.fitVerdict}`}>{j.fitVerdict}</div>
-                </>
+                (j.fitBy ?? "").startsWith("qwen27b") ? (
+                  <>
+                    <div className={`fitnum v-${j.fitVerdict}`}>{j.fitScore}</div>
+                    <div className="gauge"><span className={`v-${j.fitVerdict}`} style={{ width: `${j.fitScore}%` }} /></div>
+                    <div className={`vlabel v-${j.fitVerdict}`}>{j.fitVerdict}</div>
+                  </>
+                ) : (
+                  // Pre-27B triage score (8B/free-cloud era, measured ~29%
+                  // optimistic): shown muted with a "pre" label until the
+                  // 27B pass upgrades it. Ordering is untouched by design.
+                  <div title="Ön triyaj puanı (8B dönemi) — 27B incelemesi bekliyor">
+                    <div className="fitnum prescore">{j.fitScore}</div>
+                    <div className="gauge"><span className="prescore" style={{ width: `${j.fitScore}%` }} /></div>
+                    <div className="vlabel prescore">{j.fitVerdict} · pre</div>
+                  </div>
+                )
               ) : (
                 <>
                   <div className="fitnum unscored">{j.score}</div>

@@ -331,6 +331,17 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     for (const src of sources) {
       await fetchOne(src);
     }
+    // One retry pass for sources that failed (timeouts included): transient
+    // hiccups get a second chance in the same run; a second failure stays in
+    // report.errors for investigation.
+    const failed = sources.filter(
+      (s) => report.perSource[s.name] === 0 &&
+        report.errors.some((e) => e.startsWith(`${s.name}:`)),
+    );
+    if (failed.length > 0) {
+      report.errors.push(`retrying ${failed.length} failed sources once`);
+      for (const src of failed) await fetchOne(src);
+    }
   }
   report.fetched = all.length;
 

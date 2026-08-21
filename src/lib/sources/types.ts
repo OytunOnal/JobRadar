@@ -39,8 +39,17 @@ export type Source = {
 
 const UA = "JobRadar/0.1 (personal job search)";
 
+// Global timeout on every base helper: one hung host (connection accepted,
+// response never sent) was enough to stall a sequential ~70-source ingest
+// indefinitely. A timeout turns the hang into a per-source error the runner
+// already knows how to report — and retry.
+const FETCH_TIMEOUT_MS = 30_000;
+
 export async function getJSON(url: string): Promise<any> {
-  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "application/json" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
   return res.json();
 }
@@ -54,6 +63,7 @@ export async function postJSON(url: string, payload: unknown): Promise<any> {
       Accept: "application/json",
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
   return res.json();
@@ -69,6 +79,7 @@ export async function getText(
   const res = await fetch(url, {
     headers: { "User-Agent": UA },
     redirect: opts.redirect ?? "follow",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (res.status !== 200) throw new Error(`${url} -> HTTP ${res.status}`);
   return res.text();

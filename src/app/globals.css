@@ -217,3 +217,6 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .reasonpop .btn { text-align: left; }
+/* Pre-27B triage scores: visibly provisional, never as loud as a real verdict */
+.fitnum.prescore, .vlabel.prescore { color: var(--muted); }
+.gauge .prescore { background: var(--muted); opacity: 0.45; }

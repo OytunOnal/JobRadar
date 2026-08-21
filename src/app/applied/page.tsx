@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { ageLabel } from "@/lib/freshness";
 import { saveNote, setFollowUp, setStatus } from "../actions";
 
 export const dynamic = "force-dynamic";

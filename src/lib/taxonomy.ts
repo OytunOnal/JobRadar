@@ -24,6 +24,17 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "developer", "engineer", "programmer", "architect", "swe", "sde",
       "full stack", "fullstack", "full-stack", "backend", "back-end", "back end",
       "frontend", "front-end", "front end", "devops", "sre", "coder", "dev ",
+      // European market spellings — the role-signal gate was English-only and
+      // silently eliminated "Softwareentwickler"/"Desarrollador"/"Programista"
+      // titles from the national sources (verified live, 5 of 8 test titles).
+      "entwickler", "ingenieur", "informatiker", // de
+      "ontwikkelaar", // nl
+      "développeur", "developpeur", "ingénieur", "ingenieur logiciel", // fr
+      "desarrollador", "programador", "ingeniero", // es (+pt programador)
+      "engenheiro", // pt
+      "programista", "inżynier", "inzynier", // pl
+      "sviluppatore", "ingegnere", // it
+      "utvecklare", "udvikler", "utvikler", "kehittäjä", // sv/da/no/fi
     ],
   },
   {
@@ -77,6 +88,7 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "sales", "account executive", "account manager", "business development",
       "partnerships", "customer success", "pre-sales", "solutions consultant",
       "solutions architect", "solution engineer",
+      "vertrieb", "verkauf", "verkoop", "ventas", "sprzedaż", "vendite", // de/nl/es/pl/it
     ],
   },
   {

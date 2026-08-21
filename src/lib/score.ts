@@ -79,7 +79,14 @@ export function scoreJob(job: RawJob): Scored {
   let best = { track: "other" as Track, score: 0, reason: "No track match", titleHit: false };
 
   for (const t of profile.tracks) {
-    const titleHits = countHits(title, t.titleKeywords);
+    // searchVariants carry the track's LOCAL-language titles
+    // ("spieleentwickler", "programista gier") — they are title vocabulary,
+    // not just search strings; without them local-titled postings could only
+    // ever reach the body-only cap.
+    const titleVocab = t.searchVariants
+      ? [...t.titleKeywords, ...Object.values(t.searchVariants).flat()]
+      : t.titleKeywords;
+    const titleHits = countHits(title, titleVocab);
     const bodyHits = countHits(text, t.bodyKeywords);
 
     // Title match is the primary signal; body only supports it.

@@ -28,6 +28,7 @@ console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`Swept (closed): ${report.delisted}`);
 if (report.nameProbe) console.log(`Name probes:    ${report.nameProbe.found}/${report.nameProbe.checked} companies mapped to their ATS`);
 if (report.deepProbe) console.log(`Deep probes:    ${report.deepProbe.found}/${report.deepProbe.checked} misses rescued via careers-page scan (${report.deepProbe.sitesResolved} sites resolved)`);
+if (Object.keys(report.eliminated ?? {}).length > 0) console.log("Eliminated:     ", report.eliminated);
 if (report.liveness) console.log(`Liveness:       ${report.liveness.checked} aging aggregator jobs probed — ${report.liveness.expired} expired, ${report.liveness.refreshed} confirmed listed`);
 if (report.sponsors) console.log(`Sponsor regs:   refreshed ${Object.entries(report.sponsors.perCountry).map(([c, n]) => `${c}:${n}`).join(" ")}${report.sponsors.errors.length ? ` (errors: ${report.sponsors.errors.length})` : ""}`);
 if (report.locations) console.log(`Locations:      ${report.locations.llmResolved}/${report.locations.llmAsked} unknown strings resolved by LLM (cached forever)`);

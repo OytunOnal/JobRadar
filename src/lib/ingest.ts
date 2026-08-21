@@ -146,6 +146,9 @@ export interface IngestReport {
   perSource: Record<string, number>;
   tooOld: number;
   junkDomain: number;
+  // Per-gate elimination counts (negative/roleNegative/noSignal/region/
+  // noMatch/belowThreshold) — the false-negative audit surface.
+  eliminated: Record<string, number>;
   semanticDupes: number;
   delisted: number;
   nameProbe?: NameProbeReport;
@@ -183,6 +186,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     perSource: {},
     tooOld: 0,
     junkDomain: 0,
+  eliminated: {},
     semanticDupes: 0,
     delisted: 0,
     errors: [],
@@ -348,7 +352,16 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       continue;
     }
     const s = scoreJob(job);
-    if (s.disqualified || s.score < STORE_THRESHOLD) continue;
+    if (s.disqualified || s.score < STORE_THRESHOLD) {
+      const gate = s.disqualified
+        ? (s.reason.startsWith("Excluded") ? "negative"
+          : s.reason.startsWith("Non-eng") ? "roleNegative"
+          : s.reason.startsWith("No engineering") ? "noSignal"
+          : s.reason.startsWith("Region") ? "region" : "noMatch")
+        : "belowThreshold";
+      report.eliminated[gate] = (report.eliminated[gate] ?? 0) + 1;
+      continue;
+    }
     report.scored++;
 
     const key = dedupeKey(job);

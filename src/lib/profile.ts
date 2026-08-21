@@ -26,6 +26,10 @@ export interface TrackDef {
   label: string;
   titleKeywords: string[];
   bodyKeywords: string[];
+  // Per-track seniority appetite override — the user's level differs per
+  // field (a 10y Unity dev welcomes "lead" there but is junior-mid in a
+  // newer field). Absent fields fall back to the profile-global lists.
+  seniority?: { boost?: string[]; avoid?: string[] };
   // Search-side title variants per language ("organize by function, not job
   // title" — the same work ships under many names, and German/Dutch/French/
   // Spanish postings use local titles English queries never see). Populated
@@ -150,6 +154,16 @@ export const profile = {
   // generated profile supplies persona-appropriate defaults.
   searchQueries: generated?.searchQueries ?? null,
 } as const;
+
+// Resolve the seniority appetite for a track: track override wins, global
+// lists fall back per-field (a track may override only `avoid`).
+export function seniorityFor(track: string | null | undefined): { boost: string[]; avoid: string[] } {
+  const t = track ? profile.tracks.find((x) => x.key === track) : undefined;
+  return {
+    boost: t?.seniority?.boost ?? [...profile.seniorityBoost],
+    avoid: t?.seniority?.avoid ?? [...profile.seniorityAvoid],
+  };
+}
 
 export function profileSearchGroups(max = 4): SearchGroup[] {
   return profile.tracks

@@ -64,6 +64,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
     "",
     "languages: ISO 639-1 codes of languages the candidate can WORK in, judged from the CV (education country, work history, stated skills). English almost always included.",
     "seniority: title words reflecting the level the candidate targets. boost = levels to prioritize (e.g. [\"senior\",\"lead\"] for an experienced IC, [\"junior\",\"graduate\"] for a new grad). avoid = levels that would be a mismatch (e.g. [\"principal\",\"head of\",\"engineering manager\"] for an IC not seeking management; [] when unclear).",
+    "Seniority can also be set PER TRACK (a track may carry its own {\"seniority\": {\"boost\": [...], \"avoid\": [...]}}) when the candidate's level differs per field — e.g. 10 years in one specialty (lead-level there) but 1-2 years in another (mid-level there). Track-level overrides the global lists for jobs on that track.",
     "",
     "CV:",
     "<CV>",

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { scoreJob, seniorityAdjust } from "../src/lib/score";
+import { seniorityFor } from "../src/lib/profile";
 import type { RawJob } from "../src/lib/sources/types";
 
 function mkJob(over: Partial<RawJob>): RawJob {
@@ -93,4 +94,14 @@ test("extraRoleNegatives concat point exists and unity-ios survives specific-tra
   assert.equal(ios.disqualified, true);
   const unityIos = scoreJob({ ...base, title: "Unity iOS Developer", description: "unity c# mobile game" });
   assert.equal(unityIos.disqualified, false);
+});
+
+test("seniorityFor: track override wins, absent track falls back to globals", () => {
+  // Template profile (tests are hermetic): no track overrides exist, so any
+  // track resolves to the global lists — the resolution CONTRACT is what we
+  // pin here; per-user values live in the gitignored generated profile.
+  const g = seniorityFor(null);
+  assert.deepEqual(g.boost, ["senior", "lead", "staff"]);
+  assert.deepEqual(seniorityFor("unity"), g);
+  assert.deepEqual(seniorityFor("nonexistent-track"), g);
 });

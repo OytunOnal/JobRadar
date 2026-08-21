@@ -1,5 +1,5 @@
 import { countryPassesAccept, resolveCountry } from "./geo";
-import { profile, type Track } from "./profile";
+import { profile, seniorityFor, type Track } from "./profile";
 import type { RawJob } from "./sources/types";
 
 export interface Scored {
@@ -144,9 +144,14 @@ export function scoreJob(job: RawJob): Scored {
 
     // Bonuses (only meaningful once there's a real match)
     if (job.remote) s += 8;
-    s += seniorityAdjust(title, profile.seniorityBoost, profile.seniorityAvoid);
 
+    // Seniority adjust comes AFTER the 100 cap: a strong-titled "Staff AI
+    // Engineer" saturates the base score, and a pre-cap penalty would be
+    // swallowed by the clamp — the demotion must survive on top scorers,
+    // which are exactly the ones the fit queue reads first.
     s = Math.min(100, s);
+    const appetite = seniorityFor(t.key);
+    s = Math.max(0, Math.min(100, s + seniorityAdjust(title, appetite.boost, appetite.avoid)));
 
     // Prefer a higher score; break ties toward a title match and earlier track.
     const better = s > best.score || (s === best.score && titleMatched && !best.titleHit);

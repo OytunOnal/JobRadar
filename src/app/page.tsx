@@ -198,6 +198,11 @@ export default async function Page({
     return s ? `/?${s}` : "/";
   };
 
+  // Carry the active filter set to the tracking pages so their "radar" link
+  // can restore it — filters must survive a round-trip through /applied.
+  const radarQS = href({ page: String(page) }).split("?")[1] ?? "";
+  const fromQS = radarQS ? `?from=${encodeURIComponent(radarQS)}` : "";
+
   return (
     <div className="wrap">
       <header className="top">
@@ -217,8 +222,8 @@ export default async function Page({
         </form>
         <nav className="pages">
           <a className="chip active" href="/">radar</a>
-          <a className="chip" href="/applied">applications</a>
-          <a className="chip" href="/dismissed">dismissed</a>
+          <a className="chip" href={`/applied${fromQS}`}>applications</a>
+          <a className="chip" href={`/dismissed${fromQS}`}>dismissed</a>
         </nav>
         <form action={triggerIngest}>
           <button className="btn primary" type="submit">Scan for new jobs</button>
@@ -229,7 +234,7 @@ export default async function Page({
         <span><b>{total}</b> tracked</span>
         <span className="s-strong"><b>{vc["strong"] ?? 0}</b> strong</span>
         <span className="s-possible"><b>{vc["possible"] ?? 0}</b> possible</span>
-        <a href="/applied"><b>{(sc["applied"] ?? 0) + (sc["interview"] ?? 0) + (sc["offer"] ?? 0)}</b> in progress</a>
+        <a href={`/applied${fromQS}`}><b>{(sc["applied"] ?? 0) + (sc["interview"] ?? 0) + (sc["offer"] ?? 0)}</b> in progress</a>
       </div>
 
       <div className="filterbar">

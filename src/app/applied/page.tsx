@@ -22,7 +22,16 @@ function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
 
-export default async function AppliedPage() {
+export default async function AppliedPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
+  // "from" carries the radar's filter query string so the round-trip
+  // radar → here → radar lands back on the same filtered view.
+  const from = (await searchParams).from ?? "";
+  const radarHref = from ? `/?${from}` : "/";
+  const fromQS = from ? `?from=${encodeURIComponent(from)}` : "";
   const jobs = await prisma.job.findMany({
     where: { status: { in: STAGES } },
     orderBy: [{ appliedAt: "desc" }],
@@ -116,9 +125,9 @@ export default async function AppliedPage() {
           </div>
         </div>
         <nav className="pages">
-          <a className="chip" href="/">radar</a>
-          <a className="chip active" href="/applied">applications</a>
-          <a className="chip" href="/dismissed">dismissed</a>
+          <a className="chip" href={radarHref}>radar</a>
+          <a className="chip active" href={`/applied${fromQS}`}>applications</a>
+          <a className="chip" href={`/dismissed${fromQS}`}>dismissed</a>
         </nav>
       </header>
 

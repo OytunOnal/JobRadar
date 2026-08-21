@@ -7,7 +7,16 @@ export const dynamic = "force-dynamic";
 // dismissing on the radar is deliberately confirmation-free because this page
 // is the undo.
 
-export default async function DismissedPage() {
+export default async function DismissedPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
+  // "from" carries the radar's filter query string so the round-trip
+  // radar → here → radar lands back on the same filtered view.
+  const from = (await searchParams).from ?? "";
+  const radarHref = from ? `/?${from}` : "/";
+  const fromQS = from ? `?from=${encodeURIComponent(from)}` : "";
   const jobs = await prisma.job.findMany({
     where: { status: "ignored" },
     orderBy: [{ lastSeenAt: "desc" }],
@@ -24,9 +33,9 @@ export default async function DismissedPage() {
           </div>
         </div>
         <nav className="pages">
-          <a className="chip" href="/">radar</a>
-          <a className="chip" href="/applied">applications</a>
-          <a className="chip active" href="/dismissed">dismissed</a>
+          <a className="chip" href={radarHref}>radar</a>
+          <a className="chip" href={`/applied${fromQS}`}>applications</a>
+          <a className="chip active" href={`/dismissed${fromQS}`}>dismissed</a>
         </nav>
       </header>
 

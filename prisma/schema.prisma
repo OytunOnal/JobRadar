@@ -111,6 +111,10 @@ model Job {
   appliedAt   DateTime?
   followUpAt  DateTime?
   note        String?
+  // Why the user dismissed it (status "ignored") — doubles as labeled feedback
+  // for tuning the scorer (e.g. many "language" dismissals => detect language
+  // requirements automatically).
+  dismissReason String?
 
   // Set when the LLM semantic dedup confirms this row is the same opportunity
   // as an existing one (repost / reworded / per-city listing). The row stays so

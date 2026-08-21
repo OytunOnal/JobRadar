@@ -169,3 +169,7 @@ tests grounded in real corpus data.
 ## License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Data credits
+
+- Company seed list from [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs) (CC BY-NC-SA 4.0) — used as a non-commercial discovery seed; boards are re-verified live before ingest.

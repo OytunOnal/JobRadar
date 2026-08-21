@@ -24,6 +24,7 @@ import { berlinstartupjobs } from "./sources/berlinstartupjobs";
 import { manfred } from "./sources/manfred";
 import { netempregos } from "./sources/netempregos";
 import { wttj } from "./sources/wttj";
+import { greenjobsde } from "./sources/greenjobsde";
 import { vdab } from "./sources/vdab";
 import { justjoin, nofluffjobs } from "./sources/poland";
 import { thehub } from "./sources/thehub";
@@ -103,6 +104,7 @@ export const aggregators: Source[] = [
   a16zspeedrun,   // a16z SPEEDRUN portfolio (games/AI)
   workingnomads,  // remote board via its public Elasticsearch endpoint
   jobindexdk,     // Denmark's biggest private board, RSS per query
+  greenjobsde,    // German sustainability board via Atom feed (awesome-sustainability-jobs)
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor

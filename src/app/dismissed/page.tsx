@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { DISMISS_REASONS, reasonLabel } from "@/lib/dismiss-reasons";
 import { setStatus } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -39,28 +40,37 @@ export default async function DismissedPage({
         </nav>
       </header>
 
-      {jobs.map((j) => (
-        <article className="job trackrow" key={j.id}>
-          <div className="jobmain">
-            <p className="title">
-              <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
-            </p>
-            <div className="meta">
-              {j.company}
-              {j.location ? ` · ${j.location}` : ""}
-              {" · "}
-              <span className="src">{j.source}</span>
-            </div>
-          </div>
-          <div className="actions">
-            <form action={setStatus}>
-              <input type="hidden" name="id" value={j.id} />
-              <input type="hidden" name="status" value="new" />
-              <button className="btn" type="submit">Restore</button>
-            </form>
-          </div>
-        </article>
-      ))}
+      {[...DISMISS_REASONS.map((r) => r.key), null].map((key) => {
+        const group = jobs.filter((j) => (j.dismissReason ?? null) === key);
+        if (group.length === 0) return null;
+        return (
+          <section key={key ?? "none"}>
+            <h2 className="grouphead">{reasonLabel(key)} ({group.length})</h2>
+            {group.map((j) => (
+              <article className="job trackrow" key={j.id}>
+                <div className="jobmain">
+                  <p className="title">
+                    <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
+                  </p>
+                  <div className="meta">
+                    {j.company}
+                    {j.location ? ` · ${j.location}` : ""}
+                    {" · "}
+                    <span className="src">{j.source}</span>
+                  </div>
+                </div>
+                <div className="actions">
+                  <form action={setStatus}>
+                    <input type="hidden" name="id" value={j.id} />
+                    <input type="hidden" name="status" value="new" />
+                    <button className="btn" type="submit">Restore</button>
+                  </form>
+                </div>
+              </article>
+            ))}
+          </section>
+        );
+      })}
       {jobs.length === 0 && <p className="empty">Nothing dismissed.</p>}
     </main>
   );

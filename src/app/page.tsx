@@ -8,6 +8,7 @@ import {
 } from "@/lib/freshness";
 import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./actions";
+import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
 
 export const dynamic = "force-dynamic";
 
@@ -445,11 +446,24 @@ export default async function Page({
                 <input type="hidden" name="id" value={j.id} />
                 <button className="btn" type="submit">Draft letter</button>
               </form>
-              <form action={setStatus}>
-                <input type="hidden" name="id" value={j.id} />
-                <input type="hidden" name="status" value="ignored" />
-                <button className="btn quiet" type="submit">Dismiss</button>
-              </form>
+              <details className="dismissmenu">
+                <summary>Dismiss</summary>
+                <div className="reasonpop">
+                  {DISMISS_REASONS.map((r) => (
+                    <form action={setStatus} key={r.key}>
+                      <input type="hidden" name="id" value={j.id} />
+                      <input type="hidden" name="status" value="ignored" />
+                      <input type="hidden" name="reason" value={r.key} />
+                      <button className="btn quiet" type="submit">{r.label}</button>
+                    </form>
+                  ))}
+                  <form action={setStatus}>
+                    <input type="hidden" name="id" value={j.id} />
+                    <input type="hidden" name="status" value="ignored" />
+                    <button className="btn quiet" type="submit">Just dismiss</button>
+                  </form>
+                </div>
+              </details>
             </div>
           </article>
           );

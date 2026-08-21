@@ -198,3 +198,22 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .empty { color: var(--muted, #888); padding: 30px 0; text-align: center; }
 .starred { border: 1px solid var(--line, #333); border-radius: 8px; padding: 6px 12px 10px; margin: 14px 0 6px; }
 .fitnum-inline { font-weight: 700; font-size: 12px; margin-right: 4px; }
+
+/* Dismiss-with-reason popover — pure <details>, no client JS. */
+.dismissmenu { position: relative; }
+.dismissmenu summary {
+  list-style: none; cursor: pointer; text-align: center;
+  border: 1px solid transparent; color: var(--faint);
+  border-radius: 8px; padding: 6px 12px; font-size: 12.5px;
+}
+.dismissmenu summary::-webkit-details-marker { display: none; }
+.dismissmenu summary:hover { color: var(--muted); border-color: var(--line); }
+.dismissmenu[open] summary { color: var(--muted); border-color: var(--line); }
+.reasonpop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 10px; padding: 6px; min-width: 210px;
+  display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.reasonpop .btn { text-align: left; }

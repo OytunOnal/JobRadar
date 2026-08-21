@@ -11,7 +11,7 @@ const FOLLOW_UP_DAYS = 10; // Europe answers slowly — first nudge after 10 day
 export async function setStatus(formData: FormData) {
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
-  const extra: { appliedAt?: Date; followUpAt?: Date | null } = {};
+  const extra: { appliedAt?: Date; followUpAt?: Date | null; dismissReason?: string | null } = {};
   if (status === "applied") {
     const cur = await prisma.job.findUnique({ where: { id }, select: { appliedAt: true } });
     if (!cur?.appliedAt) {
@@ -21,6 +21,14 @@ export async function setStatus(formData: FormData) {
   }
   // Terminal states don't need nudging.
   if (status === "rejected" || status === "ghosted" || status === "offer") extra.followUpAt = null;
+  // Dismissing records why (labeled feedback for scorer tuning); leaving the
+  // dismissed state clears it.
+  if (status === "ignored") {
+    const reason = String(formData.get("reason") ?? "");
+    extra.dismissReason = reason || null;
+  } else {
+    extra.dismissReason = null;
+  }
   await prisma.job.update({ where: { id }, data: { status, ...extra } });
   revalidatePath("/");
   revalidatePath("/applied");

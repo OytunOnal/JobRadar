@@ -54,37 +54,52 @@ const where = WIDE
 
 // Blended queue: visa-positive tier first, then the measured 40/60
 // keyword/embedding rank blend (see src/lib/embed.ts). Jobs without a vector
-// ride their keyword rank. The order is computed once per run — new arrivals
-// join the next run.
-const candidates = await prisma.job.findMany({
-  where,
-  select: { id: true, score: true, sponsorReg: true, visa: true, embedding: true },
-});
+// ride their keyword rank. The queue is REBUILT every RESNAPSHOT analyses:
+// during a big pull, visa-positive jobs arriving mid-run must jump ahead of
+// an old snapshot's tail, not wait for the next process restart.
 let cv: number[] | null = null;
 try {
   cv = await cvVector();
 } catch {
   log("(embedding modeli erişilemez — kuyruk salt keyword sırasıyla)");
 }
-const scored = candidates.map((c) => ({
-  id: c.id,
-  score: c.score,
-  visaTier: c.sponsorReg || c.visa === "yes" ? 1 : 0,
-  sim: cv && c.embedding ? cosine(fromBuffer(c.embedding), cv) : null,
-}));
-const queue = [
-  ...blendOrder(scored.filter((s) => s.visaTier === 1)),
-  ...blendOrder(scored.filter((s) => s.visaTier === 0)),
-].map((s) => s.id);
 
+const skipped: string[] = []; // title-only rows wait for desc:fill
+
+async function buildQueue(): Promise<string[]> {
+  const candidates = await prisma.job.findMany({
+    where: { ...where, id: { notIn: skipped } },
+    select: { id: true, score: true, sponsorReg: true, visa: true, embedding: true },
+  });
+  const scored = candidates.map((c) => ({
+    id: c.id,
+    score: c.score,
+    visaTier: c.sponsorReg || c.visa === "yes" ? 1 : 0,
+    sim: cv && c.embedding ? cosine(fromBuffer(c.embedding), cv) : null,
+  }));
+  return [
+    ...blendOrder(scored.filter((s) => s.visaTier === 1)),
+    ...blendOrder(scored.filter((s) => s.visaTier === 0)),
+  ].map((s) => s.id);
+}
+
+const RESNAPSHOT = 100;
+let queue = await buildQueue();
+log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${queue.length} ilan (harmanlı sıra${cv ? "" : " YOK"}, ${RESNAPSHOT} analizde bir tazelenir) ===`);
 const total = queue.length;
-log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${total} ilan (harmanlı sıra${cv ? "" : " YOK"}) ===`);
 
 let done = 0;
 let failStreak = 0;
-const skipped: string[] = []; // title-only rows wait for desc:fill
 let cursor = 0;
-while (done < LIMIT && cursor < queue.length) {
+let sinceSnapshot = 0;
+while (done < LIMIT) {
+  if (sinceSnapshot >= RESNAPSHOT || cursor >= queue.length) {
+    queue = await buildQueue();
+    cursor = 0;
+    sinceSnapshot = 0;
+    if (queue.length === 0) break;
+    log(`  kuyruk tazelendi: ${queue.length} ilan`);
+  }
   const ids = queue.slice(cursor, cursor + 25);
   cursor += ids.length;
   const rows = await prisma.job.findMany({ where: { id: { in: ids }, fitScore: null } });
@@ -117,6 +132,7 @@ while (done < LIMIT && cursor < queue.length) {
           },
         });
         done++;
+        sinceSnapshot++;
         if (done % 25 === 0) log(`  ${done}/${total} analiz edildi (son: ${j.company.slice(0, 24)} — ${fit.fitScore})`);
       }
     } catch (e: any) {

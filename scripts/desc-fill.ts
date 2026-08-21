@@ -119,10 +119,14 @@ for (const r of queue) {
     };
     const s = scoreJob(raw);
     const newScore = s.disqualified ? 0 : s.score;
+    // slice(0, 8000) can cut a surrogate pair in half — the lone half is
+    // unserializable and killed the run mid-queue. Drop a trailing orphan.
+    let stored = desc.slice(0, 8000);
+    if (/[\uD800-\uDBFF]$/.test(stored)) stored = stored.slice(0, -1);
     await prisma.job.update({
       where: { id: r.id },
       data: {
-        description: desc.slice(0, 8000),
+        description: stored,
         score: newScore,
         track: s.track,
         scoreReason: s.reason,

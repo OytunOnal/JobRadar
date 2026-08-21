@@ -25,6 +25,9 @@ import { manfred } from "./sources/manfred";
 import { netempregos } from "./sources/netempregos";
 import { wttj } from "./sources/wttj";
 import { greenjobsde } from "./sources/greenjobsde";
+import { germantechjobs } from "./sources/germantechjobs";
+import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "./sources/apiboards";
+import { rssSources } from "./sources/rssfeeds";
 import { vdab } from "./sources/vdab";
 import { justjoin, nofluffjobs } from "./sources/poland";
 import { thehub } from "./sources/thehub";
@@ -105,6 +108,13 @@ export const aggregators: Source[] = [
   workingnomads,  // remote board via its public Elasticsearch endpoint
   jobindexdk,     // Denmark's biggest private board, RSS per query
   greenjobsde,    // German sustainability board via Atom feed (awesome-sustainability-jobs)
+  germantechjobs, // structured visa flags, SwissDevJobs engine — Germany focus
+  themuse,        // The Muse public API — recency-walked, category-filtered
+  duunitori,      // Finland's biggest board, keyless search API
+  warpjobs,       // LLM inference / ML-systems niche, visa flag
+  aidevjobs,      // aidevboard.com AI jobs API
+  wejob,          // francophone Switzerland JSON API
+  ...rssSources,  // 65 curated RSS/Atom job feeds (see rssfeeds.ts)
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor

@@ -46,7 +46,7 @@ import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
-import { deriveWorkMode, type RawJob, type Source } from "./sources/types";
+import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "./locresolve";
@@ -117,7 +117,9 @@ export const aggregators: Source[] = [
   ...rssSources,  // 65 curated RSS/Atom job feeds (see rssfeeds.ts)
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
-  linkedin, // free guest API primary; LINKEDIN_VIA_APIFY=1 for the paid actor
+  // linkedin removed from the automatic set (user decision 2026-08-21): it
+  // will return as a manually-triggered button; the connector stays in
+  // sources/linkedin.ts, and the SourceState cooldown still guards it.
   indeed,   // needs APIFY_API_TOKEN; kaix actor, DACH countries by default
 ];
 
@@ -364,7 +366,13 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       continue;
     }
     const s = scoreJob(job);
-    if (s.disqualified || s.score < STORE_THRESHOLD) {
+    // Store-all: gate-rejected jobs are STORED with disqualified=true instead
+    // of dropped — a scorer fix becomes a local re-score, and "high embedding
+    // similarity but disqualified" doubles as a gate-mistake detector. The
+    // report still counts them under their gate so sweep summaries read the
+    // same as before.
+    const rejected = s.disqualified || s.score < STORE_THRESHOLD;
+    if (rejected) {
       const gate = s.disqualified
         ? (s.reason.startsWith("Excluded") ? "negative"
           : s.reason.startsWith("Non-eng") ? "roleNegative"
@@ -372,9 +380,9 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           : s.reason.startsWith("Region") ? "region" : "noMatch")
         : "belowThreshold";
       report.eliminated[gate] = (report.eliminated[gate] ?? 0) + 1;
-      continue;
+    } else {
+      report.scored++;
     }
-    report.scored++;
 
     const key = dedupeKey(job);
     const ck = contentKey(job);
@@ -403,11 +411,12 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
-      description: job.description.slice(0, 8000),
-      score: s.score,
+      description: safeSlice(job.description, 8000),
+      score: rejected ? 0 : s.score,
       track: s.track,
       scoreReason: s.reason,
       scoredBy: s.scoredBy,
+      disqualified: rejected,
       postedAt: job.postedAt ?? null,
     };
 
@@ -438,6 +447,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           country: data.country,
           visa: data.visa,
           contentKey: ck,
+          // A re-score can flip the gate verdict in either direction.
+          disqualified: data.disqualified,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
           delistedAt: null, // it's back (or never left)
@@ -568,7 +579,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // dashboard can rank by real fit, not just keyword score. No-ops without a key.
   if (llmEnabled()) {
     const toAnalyze = await prisma.job.findMany({
-      where: { fitScore: null, status: { in: ["new", "interested"] }, duplicateOfId: null },
+      where: { fitScore: null, status: { in: ["new", "interested"] }, duplicateOfId: null, disqualified: false },
       orderBy: { score: "desc" },
       take: AUTO_FIT_TOP_N,
     });

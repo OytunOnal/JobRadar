@@ -116,6 +116,13 @@ model Job {
   // requirements automatically).
   dismissReason String?
 
+  // Store-all: gate-rejected jobs are kept (flagged) instead of dropped, so
+  // scorer fixes are a local re-score away and gate mistakes stay auditable.
+  disqualified Boolean @default(false)
+  // qwen3-embedding:0.6b vector of title+description (Float32 buffer); feeds
+  // the blended fit-queue priority and the future rescue lane.
+  embedding    Bytes?
+
   // Set when the LLM semantic dedup confirms this row is the same opportunity
   // as an existing one (repost / reworded / per-city listing). The row stays so
   // identity dedupe recognizes the source id, but it never renders on the board.

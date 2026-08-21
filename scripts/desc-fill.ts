@@ -96,6 +96,9 @@ const rows = await prisma.job.findMany({
   where: {
     delistedAt: null,
     duplicateOfId: null,
+    // Store-all: never spend detail fetches on gate-rejected rows; if a
+    // scorer fix requalifies them, they re-enter this queue on the next run.
+    disqualified: false,
     OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })),
   },
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],

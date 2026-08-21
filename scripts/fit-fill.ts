@@ -1,5 +1,6 @@
 import { analyzeFit } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
+import { blendOrder, cosine, cvVector, fromBuffer } from "../src/lib/embed";
 
 // Paced fit-analysis backlog filler over the FREE provider chain. Wave 1 (the
 // user's pick): score > 50 AND visa-positive — the company is in a public
@@ -36,7 +37,7 @@ function log(line: string): void {
 const freshCut = new Date(Date.now() - 45 * 86_400_000);
 const where = WIDE
   ? {
-      fitScore: null, delistedAt: null, duplicateOfId: null,
+      fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
       status: { in: ["new", "interested"] },
       // 40+: a single title hit scores 40, and title-only sources cap
       // around it — the 50 bar was hiding half the eligible pool.
@@ -45,28 +46,51 @@ const where = WIDE
       OR: [{ country: { in: TARGETS } }, { workMode: "remote" }],
     }
   : {
-      fitScore: null, delistedAt: null, duplicateOfId: null,
+      fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
       status: { in: ["new", "interested"] },
       score: { gt: 50 },
       OR: [{ sponsorReg: true }, { visa: "yes" }],
     };
 
-const total = await prisma.job.count({ where });
-log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${total} ilan ===`);
+// Blended queue: visa-positive tier first, then the measured 40/60
+// keyword/embedding rank blend (see src/lib/embed.ts). Jobs without a vector
+// ride their keyword rank. The order is computed once per run — new arrivals
+// join the next run.
+const candidates = await prisma.job.findMany({
+  where,
+  select: { id: true, score: true, sponsorReg: true, visa: true, embedding: true },
+});
+let cv: number[] | null = null;
+try {
+  cv = await cvVector();
+} catch {
+  log("(embedding modeli erişilemez — kuyruk salt keyword sırasıyla)");
+}
+const scored = candidates.map((c) => ({
+  id: c.id,
+  score: c.score,
+  visaTier: c.sponsorReg || c.visa === "yes" ? 1 : 0,
+  sim: cv && c.embedding ? cosine(fromBuffer(c.embedding), cv) : null,
+}));
+const queue = [
+  ...blendOrder(scored.filter((s) => s.visaTier === 1)),
+  ...blendOrder(scored.filter((s) => s.visaTier === 0)),
+].map((s) => s.id);
+
+const total = queue.length;
+log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${total} ilan (harmanlı sıra${cv ? "" : " YOK"}) ===`);
 
 let done = 0;
 let failStreak = 0;
 const skipped: string[] = []; // title-only rows wait for desc:fill
-while (done < LIMIT) {
-  const batch = await prisma.job.findMany({
-    where: { ...where, id: { notIn: skipped } },
-    orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
-    take: 25,
-  });
-  if (batch.length === 0) {
-    log("Kuyruk boş — dalga tamamlandı.");
-    break;
-  }
+let cursor = 0;
+while (done < LIMIT && cursor < queue.length) {
+  const ids = queue.slice(cursor, cursor + 25);
+  cursor += ids.length;
+  const rows = await prisma.job.findMany({ where: { id: { in: ids }, fitScore: null } });
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const batch = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => Boolean(r));
+  if (batch.length === 0) continue;
   for (const j of batch) {
     if (done >= LIMIT) break;
     // Title-only rows have nothing for the model to read — desc:fill feeds

@@ -88,3 +88,11 @@ export function stripHtml(html: string | undefined | null): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+// Cut a string without leaving half a surrogate pair at the boundary — a lone
+// half is unserializable and killed a desc-fill run mid-queue.
+export function safeSlice(s: string, max: number): string {
+  let out = s.slice(0, max);
+  if (/[\uD800-\uDBFF]$/.test(out)) out = out.slice(0, -1);
+  return out;
+}

@@ -79,6 +79,7 @@ export default async function Page({
   if (trackSet.size > 0) where.track = { in: [...trackSet] };
   where.status = "new"; // interested jobs render in their own strip above the list
   where.delistedAt = null; // closed roles have no discovery value
+  where.disqualified = false; // store-all keeps gate-rejects in the DB, never on the radar
   if (verdict !== "all") where.fitVerdict = verdict;
   if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
@@ -172,7 +173,7 @@ export default async function Page({
   // Starred ("interested") jobs — a compact always-visible shortlist above the
   // discovery list, unaffected by the filters.
   const starred = await prisma.job.findMany({
-    where: { status: "interested", delistedAt: null, duplicateOfId: null },
+    where: { status: "interested", delistedAt: null, duplicateOfId: null, disqualified: false },
     orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
   });
 

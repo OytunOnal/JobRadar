@@ -390,6 +390,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // Track content keys seen within this run so the same role from two sources
   // doesn't get stored twice.
   const seenContent = new Set<string>();
+  let storeFailures = 0;
 
   // Harvest inputs: every aggregator URL gets a free tier-1 scan (junk and
   // disqualified jobs included — their URLs still reveal ATS identities);
@@ -483,6 +484,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       }
     }
 
+    // Per-job isolation: a single poison row (invalid date, lone surrogate,
+    // whatever tomorrow brings) must cost ONE job, never a 53k-board run —
+    // this is the third crash class caught here, so guard the class.
+    try {
+
     // Exact same-source match, or the same role stored under a different source.
     const existing =
       (await prisma.job.findUnique({ where: { dedupeKey: key } })) ??
@@ -516,7 +522,15 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: created.description, source: created.source });
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
+
+    } catch (e: any) {
+      storeFailures++;
+      if (storeFailures <= 5) {
+        report.errors.push(`store ${job.source}/${job.externalId}: ${String(e.message).slice(0, 140)}`);
+      }
+    }
   }
+  if (storeFailures > 5) report.errors.push(`store: ${storeFailures - 5} more row failures suppressed`);
 
   // Sweep: a direct source was fetched and returned jobs, yet some stored
   // rows of that source were absent from the feed — those roles are closed.

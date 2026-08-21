@@ -94,8 +94,12 @@ export const profile = {
   // Instant disqualifiers — unrelated fields the broad feeds drag in.
   negative: [
     "nurse", "patient care", "registered nurse", "sales representative", "account executive",
-    "recruiter", "customer support", "teacher", "driver", "warehouse", "accountant",
-    "financial advisor", "real estate", "clinical", "therapist", "marketing manager",
+    "recruiter", "customer support", "teacher", "accountant",
+    "financial advisor", "real estate", "therapist", "marketing manager",
+    // NOT here: "warehouse"/"driver"/"clinical" — they collided with Data
+    // Warehouse architects, Driver Software Engineers and clinical-data
+    // engineering; their true targets carry no engineering title word and
+    // die at the role-signal gate regardless.
     // Seniority noise for this senior-focused profile: student/intern postings.
     "werkstudent", "praktikum", "praktikant", "working student", "internship",
   ],

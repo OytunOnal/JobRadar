@@ -40,6 +40,12 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       // German activity-noun compounds (Softwareentwicklung ≠ -entwickler).
       "tech lead", "technical lead", "member of technical staff",
       "softwareentwicklung", "webentwicklung", "spieleentwicklung", "it-spezialist",
+      // Third audit round (real eliminated titles): development-phrases,
+      // German/Portuguese profession names, tech-consulting compounds.
+      "application development", "software development", "web development",
+      "anwendungsentwicklung", "fachinformatiker", "informática", "informático",
+      "ai specialist", "ai consultant", "ml consultant", "ai/ml",
+      "data consultant", "software consultant", "it consultant", "it-consultant",
     ],
   },
   {
@@ -56,6 +62,9 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "business intelligence", "statistician",
       // Bare forms — "AI Researcher" and "Staff Scientist" died at the gate.
       "researcher", "scientist",
+      // "AI Integration Analyst" and Dutch "Data Analist" died too. Bare
+      // analyst also covers Datenanalyst/Data-Analyst compounds via substring.
+      "analyst", "analist",
     ],
   },
   {
@@ -65,6 +74,9 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "product manager", "product owner", "product lead", "head of product",
       "cpo", "product director", "program manager", "project manager",
       "delivery manager", "scrum master", "producer",
+      // German one-word compounds and activity nouns died at the gate.
+      "produktmanager", "projektmanager", "projektleiter", "projektleitung",
+      "chef de projet", "kierownik projektu",
     ],
   },
   {
@@ -118,6 +130,7 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
     titleKeywords: [
       "finance", "accountant", "accounting", "controller", "counsel", "legal",
       "payroll", "treasury", "auditor", "compliance",
+      "financial analyst", "fp&a", "buchhalter", "steuerberater", "steuerfachangestellte",
     ],
   },
   {

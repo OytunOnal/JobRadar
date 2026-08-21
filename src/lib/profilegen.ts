@@ -23,6 +23,12 @@ export interface GeneratedProfile {
   families: string[];
   tracks: TrackDef[];
   searchQueries: string[];
+  // Personal preference fields (optional — older generated files lack them).
+  // These keep user-specific judgment OUT of shared code: seniority appetite
+  // and spoken languages differ per user, so they live in the profile.
+  languages?: string[]; // ISO codes the candidate works in, e.g. ["en","tr"]
+  seniority?: { boost: string[]; avoid: string[] }; // title words to lift/demote
+  extraRoleNegatives?: string[]; // user-specific role exclusions (e.g. "ios developer")
 }
 
 export const GENERATED_PATH = "config/profile.generated.json";
@@ -40,7 +46,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
       : "Infer the target roles from the CV.",
     "",
     "Return STRICT JSON only, exactly this shape:",
-    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "...": ["..."]}}], "searchQueries": ["..."]}',
+    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "...": ["..."]}}], "searchQueries": ["..."], "languages": ["<iso codes>"], "seniority": {"boost": ["..."], "avoid": ["..."]}}',
     "",
     "families: 1-3 keys from this fixed list (which professional families the candidate belongs to / targets):",
     familyList,
@@ -55,6 +61,9 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
     "- searchVariants: search-engine query strings for this track. en: 2-3 DIFFERENT common job-title names for the same function (the same work ships under many titles). Other keys are European language codes: de, nl, fr, es, it, pl, pt, cs, sk, ro, hu, el, sv, da, no, fi, bg, hr, sl, lt, lv, et — 1-2 job titles per language, written the way a company in that market actually titles postings (e.g. de: \"softwareentwickler\", pl: \"programista\" — never word-for-word translations). INCLUDE a language only where local-language titles are common for this role in that market; OMIT markets where English titles dominate (e.g. Nordics for engineering).",
     "",
     "searchQueries: 3-6 short search strings for job aggregators (e.g. \"senior product manager remote\").",
+    "",
+    "languages: ISO 639-1 codes of languages the candidate can WORK in, judged from the CV (education country, work history, stated skills). English almost always included.",
+    "seniority: title words reflecting the level the candidate targets. boost = levels to prioritize (e.g. [\"senior\",\"lead\"] for an experienced IC, [\"junior\",\"graduate\"] for a new grad). avoid = levels that would be a mismatch (e.g. [\"principal\",\"head of\",\"engineering manager\"] for an IC not seeking management; [] when unclear).",
     "",
     "CV:",
     "<CV>",

@@ -7,8 +7,9 @@ import {
   FRESH_MAX_DAYS,
 } from "@/lib/freshness";
 import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
-import { setStatus, triggerIngest, draftCover, analyzeFitAction } from "./actions";
+import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
+import { detectLanguageRequirements, LANG_NAMES } from "@/lib/langreq";
 
 export const dynamic = "force-dynamic";
 
@@ -176,6 +177,17 @@ export default async function Page({
     where: { status: "interested", delistedAt: null, duplicateOfId: null, disqualified: false },
     orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
   });
+
+  // Companies with an application in progress — their remaining postings get
+  // a badge and a one-click "hide the rest" (born from 14 manual Mistral
+  // dismissals).
+  const appliedCompanies = new Set(
+    (await prisma.job.findMany({
+      where: { status: { in: PURSUED } },
+      select: { company: true },
+      distinct: ["company"],
+    })).map((r) => r.company),
+  );
 
   const sc = Object.fromEntries(statusCounts.map((c) => [c.status, c._count]));
   const vc = Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count]));
@@ -366,6 +378,8 @@ export default async function Page({
       ) : (
         jobs.map((j) => {
           const freshness = classifyFreshness(j, new Date(), poolNewest ?? undefined);
+          const langBarriers = detectLanguageRequirements(j.description ?? "").filter((c) => !profile.languages.includes(c));
+          const appliedHere = appliedCompanies.has(j.company);
           return (
           <article className="job" key={j.id}>
             <div className="fitcell">
@@ -398,6 +412,16 @@ export default async function Page({
                 {j.sponsorReg && (
                   <span className="badge s-strong" title="Company appears in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE)">
                     sponsor✓
+                  </span>
+                )}
+                {langBarriers.length > 0 && (
+                  <span className="badge age-evergreen" title="The description appears to require a language outside your profile — verify before applying.">
+                    requires {langBarriers.map((c) => LANG_NAMES[c] ?? c).join("/")}
+                  </span>
+                )}
+                {appliedHere && (
+                  <span className="badge s-strong" title="You have an application in progress at this company.">
+                    applied@co
                   </span>
                 )}
                 {j.fitCategory && j.fitCategory !== "NONE" && j.fitCategory !== "OTHER" && (
@@ -463,6 +487,12 @@ export default async function Page({
                     <input type="hidden" name="status" value="ignored" />
                     <button className="btn quiet" type="submit">Just dismiss</button>
                   </form>
+                  {appliedHere && (
+                    <form action={dismissCompanyRest}>
+                      <input type="hidden" name="company" value={j.company} />
+                      <button className="btn act" type="submit">Hide all from {j.company.slice(0, 20)}</button>
+                    </form>
+                  )}
                 </div>
               </details>
             </div>

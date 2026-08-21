@@ -35,6 +35,20 @@ export async function setStatus(formData: FormData) {
   revalidatePath("/dismissed");
 }
 
+// One click instead of N: after applying at a company, hide its remaining
+// discoverable postings (dismissal data: one Mistral application cost 14
+// manual dismissals). Only touches new/interested — pipeline stays intact.
+export async function dismissCompanyRest(formData: FormData) {
+  const company = String(formData.get("company"));
+  if (!company) return;
+  await prisma.job.updateMany({
+    where: { company, status: { in: ["new", "interested"] } },
+    data: { status: "ignored", dismissReason: "company-applied" },
+  });
+  revalidatePath("/");
+  revalidatePath("/dismissed");
+}
+
 export async function setFollowUp(formData: FormData) {
   const id = String(formData.get("id"));
   const days = String(formData.get("days")); // "3" | "7" | "clear"

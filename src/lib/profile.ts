@@ -119,7 +119,19 @@ export const profile = {
       ],
 
   // Roles from every UNSELECTED family — the mirror of roleSignals.
-  roleNegatives: generated
+  // Languages the candidate can work in (ISO codes). Detection of a posting's
+  // language REQUIREMENTS is universal (lib/langreq.ts); whether a requirement
+  // is a barrier is judged against this list.
+  languages: generated?.languages ?? ["en"],
+
+  // Seniority appetite — title words to lift or demote in keyword scoring and
+  // to state in the fit prompt. Per-user by design: a new grad boosts
+  // "junior", an IC avoids "head of". Template default mirrors the old
+  // hardcoded behavior so template users see no change.
+  seniorityBoost: generated?.seniority?.boost ?? ["senior", "lead", "staff"],
+  seniorityAvoid: generated?.seniority?.avoid ?? [],
+
+  roleNegatives: (generated
     ? deriveRoleNegatives(generated.families)
     : [
         "business development", "marketing", "counsel", "legal", "events lead", "event lead",
@@ -128,7 +140,11 @@ export const profile = {
         "designer", "art director", "producer", "analyst", "accountant", "finance",
         "operations manager", "office manager", "executive assistant", "solutions architect",
         "growth", "community", "developer relations", "devrel", "developer advocate", "evangelist",
-      ],
+      ]
+  // User-specific role exclusions ride roleNegatives (NOT the hard negatives)
+  // on purpose: the specific-track title override still applies, so e.g. a
+  // "Unity iOS Developer" posting survives an "ios developer" exclusion.
+  ).concat(generated?.extraRoleNegatives ?? []),
 
   // Aggregator search strings (JSearch/Adzuna). Env vars still win; the
   // generated profile supplies persona-appropriate defaults.

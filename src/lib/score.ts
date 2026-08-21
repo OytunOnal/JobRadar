@@ -24,6 +24,21 @@ function countWordHits(haystack: string, needles: readonly string[]): string[] {
   });
 }
 
+// Seniority appetite comes from the PROFILE, not a hardcoded regex —
+// dismissal data showed a blanket senior/lead/staff boost promoted exactly
+// the staff/principal roles one user rejects, while another user's appetite
+// (junior/graduate, or leadership) differs entirely.
+export function seniorityAdjust(
+  title: string,
+  boost: readonly string[],
+  avoid: readonly string[],
+): number {
+  let d = 0;
+  if (countWordHits(title, boost).length > 0) d += 8;
+  if (countWordHits(title, avoid).length > 0) d -= 8;
+  return d;
+}
+
 function regionOk(job: RawJob): boolean {
   if (job.remote) return true;
   const loc = (job.location ?? "").toLowerCase();
@@ -129,7 +144,7 @@ export function scoreJob(job: RawJob): Scored {
 
     // Bonuses (only meaningful once there's a real match)
     if (job.remote) s += 8;
-    if (/\bsenior\b|\blead\b|\bstaff\b/.test(title)) s += 8;
+    s += seniorityAdjust(title, profile.seniorityBoost, profile.seniorityAvoid);
 
     s = Math.min(100, s);
 

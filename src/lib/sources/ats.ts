@@ -365,6 +365,56 @@ export async function pinpoint(token: string, company: string): Promise<RawJob[]
   return out;
 }
 
+// Oracle Cloud Recruiting (ORC). Token is structured like Workday's:
+// "<hostPrefix>@<siteNumber>" — e.g. "eeho.fa.us2@CX_45001" for
+// eeho.fa.us2.oraclecloud.com. The CE REST API is public JSON, paginated via
+// limit/offset INSIDE the finder string. Live-verified quirk: an unknown
+// siteNumber does NOT error — the API silently falls back to the default
+// site — so liveness means "requisitionList is non-empty", never status 200.
+export async function oracle(token: string, company: string): Promise<RawJob[]> {
+  const m = token.match(/^([a-z0-9.-]+)@(.+)$/i);
+  if (!m) return [];
+  const host = `${m[1]}.oraclecloud.com`;
+  const site = m[2];
+  const out: RawJob[] = [];
+  const LIMIT = 200;
+  for (let offset = 0; offset < 3000; offset += LIMIT) {
+    const url =
+      `https://${host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true` +
+      `&expand=requisitionList.secondaryLocations` +
+      `&finder=findReqs;siteNumber=${encodeURIComponent(site)},limit=${LIMIT},offset=${offset},sortBy=POSTING_DATES_DESC`;
+    const data = await getJSON(url);
+    const item = data?.items?.[0];
+    const reqs: any[] = Array.isArray(item?.requisitionList) ? item.requisitionList : [];
+    for (const j of reqs) {
+      if (!j?.Id || !j?.Title) continue;
+      const secondary = (j.secondaryLocations ?? [])
+        .map((s: any) => s?.Name)
+        .filter(Boolean)
+        .join("; ");
+      out.push({
+        source: `oracle:${token}`,
+        externalId: String(j.Id),
+        url: `https://${host}/hcmUI/CandidateExperience/en/sites/${site}/job/${j.Id}`,
+        title: String(j.Title).trim(),
+        company,
+        location: [j.PrimaryLocation, secondary].filter(Boolean).join("; "),
+        remote: /remote/i.test(`${j.WorkplaceType ?? ""} ${j.PrimaryLocation ?? ""}`),
+        // ShortDescriptionStr is a real summary (not a title echo); the full
+        // body lives behind the details endpoint (desc-fill territory).
+        description: [j.ShortDescriptionStr, j.ExternalQualificationsStr, j.ExternalResponsibilitiesStr]
+          .filter(Boolean)
+          .map((s: any) => stripHtml(String(s)))
+          .join("\n") || String(j.Title),
+        postedAt: j.PostedDate ? new Date(j.PostedDate) : undefined,
+      });
+    }
+    const total = Number(item?.TotalJobsCount ?? 0);
+    if (offset + LIMIT >= total || reqs.length === 0) break;
+  }
+  return out;
+}
+
 // Uniform shape: fetchers that are single-instance (Greenhouse, Ashby,
 // SmartRecruiters, Workable, Recruitee, Personio, Workday) simply ignore the
 // region argument.
@@ -384,5 +434,6 @@ export const atsFetchers = {
   breezy,
   join,
   pinpoint,
+  oracle,
 } as const satisfies Record<string, AtsFetcher>;
 export type AtsProvider = keyof typeof atsFetchers;

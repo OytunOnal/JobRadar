@@ -408,6 +408,49 @@ const pinpointPlatform: AtsPlatform = {
   fetcher: "pinpoint",
 };
 
+const oraclePlatform: AtsPlatform = {
+  id: "oracle",
+  // Oracle Cloud Recruiting. Structured token "<hostPrefix>@<site>" — e.g.
+  // eeho.fa.us2@CX_45001. URL shape:
+  //   <prefix>.oraclecloud.com/hcmUI/CandidateExperience/<locale>/sites/<site>/...
+  // Live-verified 2026-08-21 on Oracle's own board (2,136 postings): the CE
+  // REST list API is public JSON, no auth. QUIRK: an unknown siteNumber does
+  // NOT 404 — the API silently serves the tenant's default site — so
+  // probeAlive requires a non-empty requisitionList, and a wrong site token
+  // yields duplicate (not wrong) jobs, which contentKey dedup absorbs.
+  patterns: [
+    {
+      kind: "custom",
+      hostPattern: /\.oraclecloud\.com$/,
+      match: (url) => {
+        const m = url.hostname.match(/^([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.oraclecloud\.com$/i);
+        if (!m) return null;
+        const segs = url.pathname.split("/").filter(Boolean);
+        const si = segs.findIndex((s) => s.toLowerCase() === "sites");
+        if (si === -1 || !segs[si + 1]) return null;
+        if (segs[0]?.toLowerCase() !== "hcmui") return null;
+        return `${m[1]}@${segs[si + 1]}`;
+      },
+    },
+  ],
+  crawlDomains: ["*.oraclecloud.com"],
+  tokenRule: /^[a-z0-9][a-z0-9.-]*@[a-z0-9_-]+$/,
+  probeUrl: (token) => {
+    const m = token.match(/^([^@]+)@(.+)$/);
+    if (!m) return "";
+    return (
+      `https://${m[1]}.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true` +
+      `&finder=findReqs;siteNumber=${encodeURIComponent(m[2])},limit=1,offset=0`
+    );
+  },
+  probeAlive: (status, body) => {
+    if (status !== 200 || typeof body !== "object" || body === null) return false;
+    const item = (body as any).items?.[0];
+    return Array.isArray(item?.requisitionList) && item.requisitionList.length > 0;
+  },
+  fetcher: "oracle",
+};
+
 export const platforms: readonly AtsPlatform[] = [
   {
     id: "greenhouse",
@@ -434,6 +477,7 @@ export const platforms: readonly AtsPlatform[] = [
   pinpointPlatform,
   teamtailorPlatform,
   joinPlatform,
+  oraclePlatform,
 ];
 
 export function getPlatform(id: string): AtsPlatform | undefined {

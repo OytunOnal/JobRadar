@@ -408,3 +408,30 @@ test("lever: probe URL is region-aware (namespaces verified separate)", () => {
 test("no host is claimed by two platforms", () => {
   assert.deepEqual(hostCollisions(), []);
 });
+
+// ── Oracle Cloud Recruiting ──────────────────────────────────────────────────
+
+test("oracle: structured token from CandidateExperience URLs (live-verified shape)", () => {
+  const h = hit("https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_45001/job/343709");
+  assert.equal(h.platform, "oracle");
+  assert.equal(h.token, "eeho.fa.us2@cx_45001");
+  // Requisition list page and localized site
+  assert.equal(hit("https://hcpd.fa.em2.oraclecloud.com/hcmUI/CandidateExperience/de/sites/CX_1/requisitions").token,
+    "hcpd.fa.em2@cx_1");
+});
+
+test("oracle: non-career oraclecloud paths yield nothing", () => {
+  assert.equal(extractSlug("https://eeho.fa.us2.oraclecloud.com/"), null);
+  assert.equal(extractSlug("https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/x"), null);
+  assert.equal(extractSlug("https://docs.oraclecloud.com/en/sites/foo"), null); // no hcmUI prefix
+});
+
+test("oracle: probe URL embeds the site in the finder; liveness needs a non-empty list", () => {
+  const p = getPlatform("oracle")!;
+  assert.ok(p.probeUrl("eeho.fa.us2@cx_45001", "").includes("siteNumber=cx_45001"));
+  // Unknown sites still answer 200 with the default site's jobs (verified
+  // live) — an empty requisitionList is the only dead signal.
+  assert.equal(p.probeAlive!(200, { items: [{ requisitionList: [] }] }), false);
+  assert.equal(p.probeAlive!(200, { items: [{ requisitionList: [{ Id: 1 }] }] }), true);
+  assert.equal(p.probeAlive!(404, { items: [{ requisitionList: [{ Id: 1 }] }] }), false);
+});

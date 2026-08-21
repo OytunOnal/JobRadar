@@ -586,7 +586,7 @@ export async function rippling(token: string, company: string): Promise<RawJob[]
     const loc = j.workLocation?.label ?? "";
     const prev = byId.get(String(j.uuid));
     if (prev) {
-      if (loc && !prev.location.includes(loc)) prev.location += `; ${loc}`;
+      if (loc && !(prev.location ?? "").includes(loc)) prev.location = [prev.location, loc].filter(Boolean).join("; ");
       continue;
     }
     byId.set(String(j.uuid), {

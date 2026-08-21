@@ -35,6 +35,11 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "programista", "inżynier", "inzynier", // pl
       "sviluppatore", "ingegnere", // it
       "utvecklare", "udvikler", "utvikler", "kehittäjä", // sv/da/no/fi
+      // Senior/AI-lab titles the audit caught dying at the gate: Tech Lead,
+      // Member of Technical Staff (the standard AI-lab engineer title), and
+      // German activity-noun compounds (Softwareentwicklung ≠ -entwickler).
+      "tech lead", "technical lead", "member of technical staff",
+      "softwareentwicklung", "webentwicklung", "spieleentwicklung", "it-spezialist",
     ],
   },
   {
@@ -49,6 +54,8 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
       "data scientist", "data analyst", "data engineer", "machine learning",
       "ml scientist", "research scientist", "analytics engineer", "bi analyst",
       "business intelligence", "statistician",
+      // Bare forms — "AI Researcher" and "Staff Scientist" died at the gate.
+      "researcher", "scientist",
     ],
   },
   {
@@ -77,7 +84,7 @@ export const ROLE_FAMILIES: readonly RoleFamily[] = [
     key: "marketing",
     label: "Marketing / Growth / Content",
     titleKeywords: [
-      "marketing", "growth", "seo ", "content writer", "copywriter", "content manager",
+      "marketing", "growth", "seo ", "content writer", "copywriter", "content manager", "market research",
       "social media", "community manager", "brand manager", "communications", "pr manager",
     ],
   },

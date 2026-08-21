@@ -45,8 +45,18 @@ export function scoreJob(job: RawJob): Scored {
     };
   }
   // Non-engineering role in the title (business dev, marketing, designer, ...).
+  // EXCEPTION: a title-level match on one of the user's SPECIFIC tracks beats
+  // a family negative — "LLM QA Engineer" belongs to the eval track even
+  // though "qa " sits in the (unselected) QA family.
+  const specificTitleMatch = profile.tracks.some((t) => {
+    if (t.key.startsWith("general-")) return false;
+    const vocab = t.searchVariants
+      ? [...t.titleKeywords, ...Object.values(t.searchVariants).flat()]
+      : t.titleKeywords;
+    return countHits(title, vocab).length > 0;
+  });
   const roleNeg = countHits(title, profile.roleNegatives);
-  if (roleNeg.length > 0) {
+  if (roleNeg.length > 0 && !specificTitleMatch) {
     return {
       score: 0,
       track: "other",

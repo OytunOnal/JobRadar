@@ -96,6 +96,8 @@ export const profile = {
     "nurse", "patient care", "registered nurse", "sales representative", "account executive",
     "recruiter", "customer support", "teacher", "driver", "warehouse", "accountant",
     "financial advisor", "real estate", "clinical", "therapist", "marketing manager",
+    // Seniority noise for this senior-focused profile: student/intern postings.
+    "werkstudent", "praktikum", "praktikant", "working student", "internship",
   ],
 
   // A job must announce one of these role signals in its TITLE. This is what

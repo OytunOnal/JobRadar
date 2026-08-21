@@ -1,7 +1,9 @@
 // Deep second-pass fit review on the LOCAL 27B model. The 8B/cloud first pass
 // is a fast triage and reads optimistic; the 27B pass catches hidden blockers
 // (location logistics, language, seniority) on the jobs that actually matter.
-// Reviews fitScore >= 50, highest first (the 70+ apply list before the 50-69
+// Reviews fitScore >= 40, highest first — aligned with the "possible"
+// verdict floor (and the keyword gate's 40), so lower-band pre-scores get
+// their 27B look too (the 70+ apply list before the 40-69
 // maybes), overwrites the fit fields, stamps fitBy so reruns skip reviewed
 // rows, and logs every old->new delta to fit-review.log with a big-drop
 // summary at the end.
@@ -27,7 +29,7 @@ function log(line: string): void {
 }
 
 const where = {
-  fitScore: { gte: 50 },
+  fitScore: { gte: 40 },
   fitBy: null,
   delistedAt: null,
   duplicateOfId: null,
@@ -35,7 +37,7 @@ const where = {
 };
 
 const total = await prisma.job.count({ where });
-log(`=== fit:review (${process.env.OLLAMA_MODEL}) — kuyrukta ${total} ilan (fit>=50, incelenmemiş) ===`);
+log(`=== fit:review (${process.env.OLLAMA_MODEL}) — kuyrukta ${total} ilan (fit>=40, incelenmemiş) ===`);
 
 let done = 0;
 let failStreak = 0;

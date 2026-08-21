@@ -68,6 +68,16 @@ const EXPIRED_PATTERNS: RegExp[] = [
   /oferta ya no esta disponible/i,
   /oferta (?:ha )?(?:expirado|caducado|finalizado)/i,
   /(?:vaga|oferta) (?:ja )?nao esta (?:mais )?disponivel/i,
+  // Danish (jobnet.dk serves its not-found as a 200 page: "Vi beklager, men
+  // siden eksisterer ikke"). Diacritics are normalized away upstream, so
+  // "udløbet" is matched loosely.
+  /siden eksisterer ikke/i,
+  /annoncen er udl.bet/i,
+  /stillingen er (?:besat|nedlagt)/i,
+  /jobbet er ikke l.ngere tilg.ngeligt/i,
+  // Swedish
+  /annonsen (?:ar|er) inte l.ngre tillg.nglig/i,
+  /tj.nsten (?:ar|er) tillsatt/i,
 ];
 
 export type Liveness = "expired" | "active" | "uncertain";

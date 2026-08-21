@@ -110,6 +110,9 @@ while (done < LIMIT && cursor < queue.length) {
           data: {
             fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
             fitCategory: fit.category, ghostRisk: fit.ghostRisk,
+            // Single-tier regime (user decision 2026-08-21): the 27B judges
+            // directly — no 8B triage, no separate review pass to await.
+            fitBy: "qwen27b",
             ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
           },
         });

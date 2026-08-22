@@ -2,169 +2,167 @@
 
 [![CI](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml)
 
-A personal job-discovery and application-tracking tool. JobRadar **discovers
-tens of thousands of companies' official ATS boards**, pulls their listings
-first-hand, scores each one against **your** CV with an LLM, and shows the
-fresh, real matches on a dashboard — so you stop tab-hopping across job boards
-and stop wading through SEO reposts, ghost postings, and years-old evergreen ads.
+A local-first job-discovery engine and application tracker. JobRadar discovers
+**~50,000 companies' official ATS boards**, pulls their listings first-hand
+(**500k+ postings** in the current pool), scores each one against **your** CV
+with a locally-run LLM, and ranks the fresh, real matches on a dashboard — so
+you stop tab-hopping across job boards and stop wading through SEO reposts,
+ghost postings, and years-old evergreen ads.
 
-It runs locally, uses **your own** API keys (bring-your-own-key), and keeps your
-CV and personal data on your machine (never committed).
+It runs on your machine, uses your own API keys where keys are needed at all
+(most sources are keyless), and keeps your CV and personal data local — never
+committed, never uploaded.
 
 ![JobRadar dashboard — jobs ranked by LLM fit, with verdict gauges, filters, and per-job cover-letter drafts](docs/screenshot.png)
 
 > Built as a personal tool + portfolio project. Not affiliated with any job board.
+> The interesting part is the engineering: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+> for the layered data model and the measured decisions behind the ranking stack.
 
 ## What it does
 
-- **Discovers companies at scale.** A platform-agnostic discovery layer knows 12
-  ATS platforms (Greenhouse, Lever — US & EU, Ashby, SmartRecruiters, Workable,
-  Recruitee, Personio, Workday, BambooHR, Breezy, Teamtailor, Join). It finds
-  company boards three ways:
-  - **harvest** — every aggregator job URL that flows through ingest is mined
-    for the company's real ATS identity (direct match → redirect chain →
-    landing-page HTML/embed scan);
-  - **bulk crawl** — Common Crawl and Wayback Machine CDX sweeps over the
-    platforms' domains (one run yields 60k+ board candidates);
-  - **seeding** — your hand-curated company list validates like everything else,
-    so stale or hijacked board tokens get caught instead of silently feeding you
-    the wrong company's jobs.
-  Candidates are **probe-validated** against each platform's API (dead boards
-  rechecked monthly), and active boards feed ingest directly — with adaptive
-  fetch frequency, so boards that never match your profile back off to monthly
-  while relevant ones stay daily.
-- **Aggregates** the classics too: remote boards (Arbeitnow, Remotive, RemoteOK,
-  Jobicy, Himalayas, WeWorkRemotely), **LinkedIn** (free public guest API,
-  tiered city/country/EU-remote searches), and — with free API keys — Adzuna,
-  JSearch/Google-for-Jobs, and Indeed (Apify). Aggregators double as discovery sensors: even a junk
-  listing can reveal a company's ATS, upgrading it to a first-party source.
-- **Fights junk on every layer:**
-  - SEO-farm domains are dropped outright; source trust (own ATS > curated
-    boards > mass aggregators) breaks ranking ties;
-  - **freshness** is derived from two signals — the source's claimed date *and*
-    whether we still see the listing — so 2019-vintage evergreen postings and
-    silently closed roles are hidden from the default view;
-  - the LLM fit pass also flags **ghost postings** (talent-pool/mass-recruiting
-    ads that aren't a real opening).
-- **Deduplicates** the same role across sources — the direct-apply ATS listing
-  always wins over the aggregator copy.
-- **Scores** every job two ways: fast free keyword scoring (title-first, assigns
-  a track), then LLM fit analysis against your CV — a 0-100 score, a
-  `strong/possible/weak` verdict, a 2-3 sentence comment naming real strengths
-  **and** gaps, and a reason category when it's weak (visa / language / profile).
-- **Ranks** the board by real fit and lets you track each application
-  (`new → interested → applied → interview → offer/rejected`).
-- **Drafts** a per-job cover letter in your own voice.
+- **Discovers companies at scale.** A platform-agnostic discovery layer speaks
+  **27 ATS platforms** — from startup staples (Greenhouse, Lever US+EU, Ashby,
+  Workable, Recruitee, Personio) through enterprise systems (Workday,
+  SuccessFactors, Oracle Cloud Recruiting, Eightfold, Cornerstone, Phenom,
+  Radancy, Avature, BeeSite, Jibe/iCIMS…). Boards are found four ways —
+  harvesting ATS identities out of aggregator job URLs, bulk Common
+  Crawl/Wayback CDX sweeps, public company datasets, and name-guess probing —
+  then **probe-validated live** against each platform's API. Every platform
+  entry documents its live-verified quirks (case-sensitive APIs, regional
+  namespaces, POST-only probes, redirect traps, locale-gated results).
+- **Aggregates ~70 additional sources**: national employment agencies
+  (Germany, Sweden, Denmark, Switzerland, Flanders, EURES), tech boards with
+  structured visa flags (GermanTechJobs, SwissDevJobs), visa-focused feeds
+  (Hunt UK Visa Sponsors), country boards (Poland, Finland, Malta, Ireland,
+  Portugal, Spain, France), remote boards, HN who-is-hiring, and a
+  65-feed curated RSS layer driven by one generic parser.
+- **Stores everything, hides judgment.** Gate-rejected postings aren't dropped
+  — they're stored with a `disqualified` flag. A scorer fix is a local
+  re-score, never a re-crawl; "what did the filter wrongly kill" is a SQL
+  query, not archaeology. Score and LLM-verdict history are **append-only and
+  version-stamped**, so every ranking change is measurable after the fact.
+- **Knows who sponsors visas.** The complete public sponsor registers of
+  NL (IND), UK (Home Office), DK (SIRI) and IE (DETE) — ~146k companies — are
+  loaded and name-matched, so sponsor-registered employers rank first and wear
+  a badge backed by government data, not vibes.
+- **Scores in layers, each measured:**
+  1. a deterministic multilingual keyword scorer (title-first, gates + track
+     scoring, per-track seniority bands, language-requirement detection);
+  2. a local **embedding layer** (qwen3-embedding:0.6b, whole-CV query) whose
+     model and blend weight were chosen by a frozen-query bake-off — the
+     measured 40/60 keyword/embedding rank blend beats either signal alone;
+  3. a locally-run **27B LLM** as the single fit judge (0-100 score,
+     strong/possible/weak verdict, gap commentary, seniority classification,
+     ghost-posting detection), fed visa-priority-first through the blended queue.
+- **Fights junk on every layer**: SEO-farm domain denylist, source-trust
+  ranking (own ATS > curated board > mass aggregator), dual-signal freshness
+  (claimed date × "do we still see it listed"), closure-banner liveness probes
+  in 10+ languages, semantic dedup of reposts, and LLM ghost-risk flagging.
+- **Tracks your pipeline** on separate pages: a discovery-only radar with
+  one-click dismiss-with-reason (the reasons feed back into scorer tuning), an
+  applications page with follow-up nudges and ghosted detection, and a
+  dismissed page that doubles as undo.
 
 ## How it works
 
 ```
-                         DISCOVERY                                INGEST
-Common Crawl / Wayback ──▶ crawl ─┐                  curated companies ─┐
-aggregator job URLs ─────▶ harvest ├─▶ AtsBoard ──▶ validate ──▶ active boards ├─▶ fetch
-your companies.ts ───────▶ seed ──┘   (candidates)   (probe APIs)              │
-                                                                  aggregators ─┘
-                                                                       │
-                              keyword score ── freshness & junk guards ─┤
-                                                                       ▼
-                                            store + dedupe ──▶ LLM fit (CV vs job)
-                                                                       ▼
-                                                          dashboard (fresh view)
+                    DISCOVERY                                     INGEST
+Common Crawl / Wayback ─▶ crawl ─┐                 curated companies ──┐
+aggregator job URLs ────▶ harvest ├▶ AtsBoard ─▶ validate ─▶ 50k boards ├─▶ fetch (parallel,
+public datasets ────────▶ seed ───┘ (candidates)  (probe APIs)          │    timeout-guarded)
+company-name guesses ───▶ probe ──┘                    ~70 aggregators ─┘        │
+                                                                                ▼
+                                       keyword gates ─▶ store ALL (disqualified flagged)
+                                                                                │
+                          embedding (local) ──▶ 40/60 blended queue, visa tier first
+                                                                                ▼
+                                                     27B LLM fit judge (local Ollama)
+                                                                                ▼
+                                                        dashboard (fresh, ranked view)
 ```
 
-The LLM layer is **multi-provider with automatic fallback** (Anthropic → Cerebras
-→ Groq → Gemini → DeepSeek). Configure whichever you have; if one is rate-limited
-the next takes over. Job descriptions are treated as untrusted input (prompt-
-injection guarded) and trailing EEO/benefits boilerplate is trimmed before the
-model sees them.
+Job descriptions are treated as untrusted input (prompt-injection guarded) and
+trailing EEO/benefits boilerplate is trimmed before the model sees them. A
+cloud multi-provider chain (Anthropic → Groq → Gemini …) exists behind the
+same interface and can replace the local model with one env var.
 
 ## Setup
 
-Requires Node.js 20+.
+Requires Node.js 20+. For local LLM scoring: [Ollama](https://ollama.com) with
+a model you can run (fit judging defaults to cloud keys if you set them instead).
 
 ```bash
 npm install
 
-# 1. Your API key(s) — bring your own. At least one LLM provider enables fit
-#    scoring + cover letters. Without any, JobRadar falls back to keyword scoring.
-cp .env.example .env         # then edit: add ANTHROPIC_API_KEY (and/or others)
+# 1. Keys (optional — most sources are keyless). Any LLM provider key OR a
+#    local Ollama model enables fit scoring + cover letters.
+cp .env.example .env         # then edit
 
 # 2. Your profile — name, location. Kept private (gitignored).
-cp config/user.example.ts config/user.ts   # then fill in your details
+cp config/user.example.ts config/user.ts
 
 # 3. Your CV — hand it your resume and the radar aims itself:
 npm run cv:import -- "path/to/Resume.pdf"   # .pdf, .txt, or .md
-npm run profile:generate   # CV -> role families + scoring tracks (review the JSON it prints)
+npm run profile:generate   # CV -> tracks, seniority bands, languages, search queries
 
-# 4. (optional) Fine-tune — add `targetRoles` (career changers) or explicit `tracks` and
-#    `acceptRegions` overrides in config/user.ts (see the commented examples),
-#    and edit src/lib/sources/companies.ts (companies to watch via their ATS).
-
-# 5. Database (local SQLite)
+# 4. Database (local SQLite)
 npx prisma db push
 
-# 6. (optional but recommended) Fill the company pool from the web archives —
-#    takes ~15 min, finds tens of thousands of boards, then validate a slice:
+# 5. (recommended) Fill the company pool from the web archives (~15 min):
 npm run discovery:crawl
 npm run discovery:validate -- 5000
 
-# 7. Run
-npm run ingest    # fetch + score jobs into the DB (also harvests new boards)
+# 6. Run
+npm run ingest    # fetch + score into the DB (also discovers new boards)
 npm run dev       # dashboard at http://localhost:3000
 ```
-
-Get a free/cheap API key from whichever provider you prefer:
-[Anthropic](https://console.anthropic.com) · [Cerebras](https://cloud.cerebras.ai) ·
-[Groq](https://console.groq.com). Fit scoring uses tiny prompts, so it costs cents.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `npm run ingest` | Fetch jobs from every source (curated + discovered boards + aggregators), score, dedupe, store; harvest new ATS boards from aggregator URLs. Auto-fits the top matches if an LLM key is set. |
-| `npm run discovery:crawl` | Bulk-discover company boards from Common Crawl + Wayback CDX (monthly job; flags: `--platform=`, `--source=`, `--snapshots=`). |
-| `npm run discovery:validate` | Probe candidate boards → active/dead; extracts company names; 30-day rechecks. Optional cap: `-- 5000`. |
-| `npm run discovery:audit` | Full-accounting check of the slug extractor against a URL corpus — any UNEXPLAINED line is a pattern gap. |
-| `npm run cv:import` | Import your resume (`-- path.pdf`); becomes the CV context for scoring, letters, and profile generation. |
-| `npm run profile:generate` | One LLM call: CV -> role families, granular scoring tracks (with a generic-title safety net), aggregator queries. Reviewed JSON, editable, never regenerates silently. |
-| `npm run rescore` | Free keyword re-score of every stored job — run after regenerating your profile so tracks realign. |
-| `npm run fit:batch` | LLM fit-score the **whole board** in one Anthropic batch (50% cheaper, async). Resume with `npm run fit:batch collect <id>`. |
-| `npm run dev` | Start the dashboard. |
-| `npm run db:studio` | Open Prisma Studio to inspect the DB. |
-| `npm test` | Run the unit tests. |
-
-On the dashboard: filter by track/fit/status/**age** (the default *fresh* view
-hides evergreen, stale, and delisted postings), and per job hit **◎ Analyze fit**
-(instant LLM scoring) or **✍ Draft letter**.
+| `npm run ingest` | Parallel fetch from every source, score, dedupe, store-all; harvests new ATS boards from aggregator URLs; writes the dashboard stats snapshot. |
+| `npm run sweep` | Full board-pool sweep (all ~50k boards, sliced, RAM-aware, resumable). |
+| `npm run discovery:crawl` / `discovery:validate` / `discovery:audit` | Bulk board discovery, live probe validation, extractor corpus audit. |
+| `npm run cv:import` / `profile:generate` | Resume → CV context → generated scoring profile (reviewed JSON, never regenerates silently). |
+| `npm run rescore` | Version-aware keyword re-score: only rows not yet scored by the current `SCORER_VERSION`. |
+| `npm run fit:fill` | The LLM fit worker: blended-priority queue (visa tier first), self-resuming, quota-riding. |
+| `npm run embed:fill` | Local embedding backfill for the blended queue. |
+| `npm run desc:fill` | Description backfill for platforms whose list APIs carry no posting body. |
+| `npm run sponsors` | Refresh the public visa-sponsor registers (NL/UK/DK/IE). |
+| `npm run doctor` | Health-check every source connector. |
+| `npm test` | ~235 unit tests grounded in real corpus data. |
 
 ## Configuring for your search
 
-- **`config/user.ts`** — your identity + CV, and (optionally) your own `tracks`
-  and `acceptRegions` to fully retarget the radar — see the commented examples
-  in `config/user.example.ts`. Track keys become the dashboard filter chips.
-- **`src/lib/profile.ts`** — the default tracks/keywords and the shared
-  disqualifier lists (non-engineering roles, noise filters).
-- **`src/lib/sources/companies.ts`** — hand-picked companies to always watch via
-  their ATS. The discovery layer finds the rest on its own.
-- **`src/lib/discovery/platforms.ts`** — the ATS platform registry. Adding a
-  platform is data, not code: URL patterns, a probe endpoint, and (optionally) a
-  fetcher. Every entry documents its live-verified quirks (case-sensitive APIs,
-  regional namespaces, POST-only probes, redirect traps).
+The pipeline is **persona-independent by design**: every personal preference —
+tracks, seniority appetite (globally *and* per track), working languages, role
+exclusions, regions — lives in your generated profile, not in code. A junior
+data analyst and a staff game developer run the same code with different
+profiles. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#persona-independence).
+
+- **`config/user.ts`** — identity + optional overrides (tracks, regions).
+- **`config/profile.generated.json`** — the CV-generated profile (gitignored);
+  review and hand-edit freely, it never regenerates silently.
+- **`src/lib/sources/companies.ts`** — hand-picked companies to always watch.
+- **`src/lib/discovery/platforms.ts`** — the ATS registry; adding a platform
+  is data, not code.
 
 ## Tech
 
-Next.js (App Router) · Prisma + SQLite · TypeScript · multi-provider LLM layer ·
-Anthropic Message Batches · Common Crawl / Wayback CDX. No framework lock-in on
-the sources — each is one small file returning a normalized job shape; ~100 unit
-tests grounded in real corpus data.
+Next.js (App Router) · Prisma + SQLite (layered schema: thin hot rows +
+append-only history tables — main list query measured at 4 ms over 525k rows) ·
+TypeScript · local LLM via Ollama (27B judge, 0.6B embeddings) with a
+multi-provider cloud fallback · Common Crawl / Wayback CDX · ~235 unit tests.
 
 ## Roadmap
 
-- LLM semantic dedup (catching the same role reposted with a new id).
-- Fetchers for the parked platforms (BambooHR, Breezy, Teamtailor, Join).
-- Salary parsing to filter out low bands.
-- Scheduled ingest + digest notifications.
-- Optional Postgres/Supabase + deploy.
+- Rescue lane: mine the disqualified pool by embedding similarity to catch
+  gate mistakes automatically.
+- Scheduled ingest + email digest.
+- Manual LinkedIn trigger button (guest API, deliberately not automated).
+- Optional Postgres/pgvector + deploy.
 
 ## License
 
@@ -173,3 +171,4 @@ MIT — see [LICENSE](./LICENSE).
 ## Data credits
 
 - Company seed list from [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs) (CC BY-NC-SA 4.0) — used as a non-commercial discovery seed; boards are re-verified live before ingest.
+- Company/ATS map from [open-jobs-data](https://github.com/ConorsCode/open-jobs-data) (MIT), used as discovery candidates.

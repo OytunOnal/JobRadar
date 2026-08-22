@@ -68,22 +68,52 @@ async function main() {
   // next embed. The fetch's `vector: null` queue is self-advancing only after
   // the write lands, so the prefetch may overlap one in-flight batch — the
   // ON CONFLICT upsert makes any overlap harmless.
-  let current = await fetchBatch();
-  while (done < BUDGET && current.length > 0) {
-    const embedP = embedTexts(current.map((j) => jobEmbedText(j.title, j.content?.description ?? null)));
-    // Wait for the previous write BEFORE fetching the next batch, so the
-    // null-queue has advanced and we don't refetch the same rows.
+  // Two embed calls in flight: Ollama can process them in parallel server-side
+  // (OLLAMA_NUM_PARALLEL), and even when it can't, the second request's
+  // tokenization/transfer overlaps the first's compute. Cursor-paged fetches
+  // (id > lastId among vectorless rows) keep the two in-flight batches from
+  // ever being the same rows, independent of write timing.
+  // Two phases keep the "candidates first" priority: phase 0 walks
+  // disqualified=false, phase 1 the archive. Within a phase, id-cursor pages.
+  let lastId = "";
+  let phase = 0;
+  const fetchAfter = async (): Promise<Row[]> => {
+    for (;;) {
+      const rows = await prisma.job.findMany({
+        where: {
+          vector: null, delistedAt: null, duplicateOfId: null,
+          disqualified: phase === 1, id: { gt: lastId },
+        },
+        orderBy: { id: "asc" },
+        take: BATCH,
+        select: { id: true, title: true, content: { select: { description: true } } },
+      });
+      if (rows.length > 0) {
+        lastId = rows[rows.length - 1].id;
+        return rows;
+      }
+      if (phase === 1) return [];
+      phase = 1;
+      lastId = "";
+    }
+  };
+
+  let a = await fetchAfter();
+  let b = await fetchAfter();
+  let embedA = a.length ? embedTexts(a.map((j) => jobEmbedText(j.title, j.content?.description ?? null))) : null;
+  while (done < BUDGET && embedA) {
+    const embedB = b.length ? embedTexts(b.map((j) => jobEmbedText(j.title, j.content?.description ?? null))) : null;
+    const vecs = await embedA;
     await pendingWrite;
-    const nextP = fetchBatch();
-    const vecs = await embedP;
-    const rows = current;
-    pendingWrite = writeBatch(rows, vecs);
-    done += rows.length;
+    pendingWrite = writeBatch(a, vecs);
+    done += a.length;
     if (done % (BATCH * 10) < BATCH) {
       const rate = done / ((Date.now() - t0) / 1000);
       log(`  ${done}/${Math.min(total, BUDGET)} embed edildi (${rate.toFixed(0)}/sn)`);
     }
-    current = await nextP;
+    a = b;
+    embedA = embedB;
+    b = await fetchAfter();
   }
   await pendingWrite;
   log(`=== Bitti: ${done} ilan embed edildi (${(done / ((Date.now() - t0) / 1000)).toFixed(0)}/sn ort) ===`);

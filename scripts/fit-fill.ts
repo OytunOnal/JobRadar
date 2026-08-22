@@ -164,7 +164,8 @@ while (done < LIMIT) {
         process.exit(0);
       }
     }
-    await sleep(1_500); // free-tier nezaket temposu
+    // Politeness pacing is for cloud quotas; a local Ollama needs none.
+    await sleep(Number(process.env.FIT_SLEEP_MS ?? 1_500));
   }
 }
 

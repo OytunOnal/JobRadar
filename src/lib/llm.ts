@@ -165,7 +165,14 @@ async function callOllama(p: Provider, messages: Msg[], model: string, opts: Cha
       messages,
       stream: false,
       think: process.env.OLLAMA_THINK === "1",
-      options: { temperature: opts.temperature ?? 0.5, num_predict: opts.maxTokens ?? 900 },
+      options: {
+        temperature: opts.temperature ?? 0.5,
+        num_predict: opts.maxTokens ?? 900,
+        // Prompt (~3.5k tok: system + CV + posting) + generation brushed the
+        // 4096 default — Ollama SILENTLY truncates the head when it overflows,
+        // i.e. the model would stop seeing the start of the CV.
+        num_ctx: 8192,
+      },
     }),
     signal: AbortSignal.timeout(180_000), // local models are slow, not broken
   });

@@ -28,16 +28,21 @@ function log(line: string): void {
   appendFileSync("fit-review.log", stamped + "\n");
 }
 
+// --visa-only: restrict the upgrade pass to visa-positive rows — the 8B era's
+// wave-1 was deliberately visa-first, so the unreliable "pre" pool is
+// CONCENTRATED exactly in the visa filter the user reads.
+const VISA_ONLY = process.argv.includes("--visa-only");
 const where = {
   fitScore: { gte: 40 },
   fitBy: null,
   delistedAt: null,
   duplicateOfId: null,
   status: { in: ["new", "interested"] },
+  ...(VISA_ONLY ? { OR: [{ sponsorReg: true }, { visa: "yes" }] } : {}),
 };
 
 const total = await prisma.job.count({ where });
-log(`=== fit:review (${process.env.OLLAMA_MODEL}) — kuyrukta ${total} ilan (fit>=40, incelenmemiş) ===`);
+log(`=== fit:review (${process.env.OLLAMA_MODEL}) — kuyrukta ${total} ilan (fit>=40, incelenmemiş${VISA_ONLY ? ", SADECE VISA-POZITIF" : ""}) ===`);
 
 let done = 0;
 let failStreak = 0;
@@ -47,7 +52,7 @@ while (true) {
   const batch = await prisma.job.findMany({
     include: { content: { select: { description: true } } },
     where,
-    orderBy: [{ fitScore: "desc" }, { score: "desc" }],
+    orderBy: [{ sponsorReg: "desc" }, { fitScore: "desc" }, { score: "desc" }],
     take: 10,
   });
   if (batch.length === 0) break;
@@ -64,7 +69,16 @@ while (true) {
           data: {
             fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
             fitCategory: fit.category, ghostRisk: fit.ghostRisk, fitBy: MARK,
+            ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown"
+              ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
             ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
+            judgments: {
+              create: {
+                model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
+                verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+                ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
+              },
+            },
           },
         });
         done++;
@@ -81,7 +95,7 @@ while (true) {
       await prisma.$disconnect();
       process.exit(0);
     }
-    await sleep(500);
+    await sleep(Number(process.env.FIT_SLEEP_MS ?? 500));
   }
 }
 

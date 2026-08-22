@@ -20,7 +20,48 @@ import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL } from "../src/lib/embe
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
 const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
-const BATCH = 128;
+
+// Adaptive batch size: the ideal depends on GPU state we can't see (VRAM
+// occupancy, partial offload, background load) and it CHANGES mid-run —
+// measured 30/s and 5/s with the same constants on the same machine. A
+// hill-climber measures real jobs/sec per window and walks the ladder;
+// a periodic re-probe escapes stale optima when conditions shift.
+const LADDER = [32, 64, 128, 256, 512];
+let ladderIdx = 2; // start at 128
+let BATCH = LADDER[ladderIdx];
+let direction = 1;
+const WINDOW = 6; // batches per measurement window
+let windowJobs = 0;
+let windowStart = Date.now();
+let windowBatches = 0;
+let lastRate = 0;
+let sinceProbe = 0;
+function tuneAfterBatch(n: number): void {
+  windowJobs += n;
+  windowBatches++;
+  if (windowBatches < WINDOW) return;
+  const rate = windowJobs / ((Date.now() - windowStart) / 1000);
+  const prev = lastRate;
+  lastRate = rate;
+  windowJobs = 0; windowBatches = 0; windowStart = Date.now();
+  sinceProbe++;
+  if (prev === 0) return; // first window: baseline only
+  if (rate > prev * 1.05) {
+    // improving — keep walking the same direction
+    const next = ladderIdx + direction;
+    if (next >= 0 && next < LADDER.length) { ladderIdx = next; BATCH = LADDER[ladderIdx]; log(`  [tune] ${rate.toFixed(0)}/sn ↑ — batch → ${BATCH}`); }
+  } else if (rate < prev * 0.9) {
+    // got worse — reverse and step back
+    direction = -direction;
+    const next = ladderIdx + direction;
+    if (next >= 0 && next < LADDER.length) { ladderIdx = next; BATCH = LADDER[ladderIdx]; log(`  [tune] ${rate.toFixed(0)}/sn ↓ — batch → ${BATCH}`); }
+  } else if (sinceProbe >= 10) {
+    // stable for ~10 windows: re-probe a neighbor in case conditions changed
+    sinceProbe = 0;
+    const next = ladderIdx + direction;
+    if (next >= 0 && next < LADDER.length) { ladderIdx = next; BATCH = LADDER[ladderIdx]; log(`  [tune] yeniden yoklama — batch → ${BATCH}`); }
+  }
+}
 
 function log(line: string): void {
   const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
@@ -61,6 +102,7 @@ async function main() {
   log(`=== embed:fill (${EMBED_MODEL}, pipelined) — kuyrukta ${total} ilan ===`);
 
   let done = 0;
+  let lastLogged = 0;
   const t0 = Date.now();
   let pendingWrite: Promise<void> = Promise.resolve();
   // Prefetch the first batch; inside the loop the NEXT fetch runs while the
@@ -107,9 +149,11 @@ async function main() {
     await pendingWrite;
     pendingWrite = writeBatch(a, vecs);
     done += a.length;
-    if (done % (BATCH * 10) < BATCH) {
+    tuneAfterBatch(a.length);
+    if (done - lastLogged >= 1500) {
+      lastLogged = done;
       const rate = done / ((Date.now() - t0) / 1000);
-      log(`  ${done}/${Math.min(total, BUDGET)} embed edildi (${rate.toFixed(0)}/sn)`);
+      log(`  ${done}/${Math.min(total, BUDGET)} embed edildi (ort ${rate.toFixed(0)}/sn, batch ${BATCH})`);
     }
     a = b;
     embedA = embedB;

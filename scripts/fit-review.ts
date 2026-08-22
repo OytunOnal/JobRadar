@@ -17,7 +17,7 @@ process.env.LLM_DISABLE = "anthropic,cerebras,groq,gemini,deepseek";
 process.env.OLLAMA_MODEL = process.env.REVIEW_MODEL || "qwen3.8:27b";
 
 import { appendFileSync } from "node:fs";
-import { analyzeFit } from "../src/lib/fit";
+import { analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
 
 const MARK = "qwen27b-review";
@@ -45,6 +45,7 @@ const drops: string[] = [];
 
 while (true) {
   const batch = await prisma.job.findMany({
+    include: { content: { select: { description: true } } },
     where,
     orderBy: [{ fitScore: "desc" }, { score: "desc" }],
     take: 10,
@@ -52,7 +53,7 @@ while (true) {
   if (batch.length === 0) break;
   for (const j of batch) {
     try {
-      const fit = await analyzeFit(j);
+      const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
       if (!fit) {
         failStreak++;
       } else {

@@ -153,7 +153,7 @@ export default async function Page({
 
   if (and.length) where.AND = and;
 
-  const [jobs, filteredCount, statusCounts, verdictCounts] = await Promise.all([
+  const [jobs, filteredCount, snapshot] = await Promise.all([
     prisma.job.findMany({
       where,
       // LLM-analyzed jobs (real fit) rank first; the rest fall back to keyword score.
@@ -165,11 +165,18 @@ export default async function Page({
       ],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
+      // Only the tiny coverLetter field crosses the content split — 20 rows,
+      // usually null; descriptions stay out of the list path entirely.
+      include: { content: { select: { coverLetter: true } } },
     }),
     prisma.job.count({ where }),
-    prisma.job.groupBy({ by: ["status"], _count: true }),
-    prisma.job.groupBy({ by: ["fitVerdict"], _count: true }),
+    // The stat strip reads the ingest-end snapshot — one row instead of
+    // group-by'ing half a million (measured cause of slow filter clicks).
+    prisma.dashboardStatsSnapshot.findFirst({ orderBy: { at: "desc" } }),
   ]);
+  const snap = snapshot
+    ? (JSON.parse(snapshot.stats) as { total: number; byStatus: Record<string, number>; byVerdict: Record<string, number> })
+    : { total: 0, byStatus: {}, byVerdict: {} };
 
   // Starred ("interested") jobs — a compact always-visible shortlist above the
   // discovery list, unaffected by the filters.
@@ -189,9 +196,9 @@ export default async function Page({
     })).map((r) => r.company),
   );
 
-  const sc = Object.fromEntries(statusCounts.map((c) => [c.status, c._count]));
-  const vc = Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count]));
-  const total = statusCounts.reduce((a, c) => a + c._count, 0);
+  const sc = snap.byStatus;
+  const vc = snap.byVerdict;
+  const total = snap.total;
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
@@ -378,7 +385,7 @@ export default async function Page({
       ) : (
         jobs.map((j) => {
           const freshness = classifyFreshness(j, new Date(), poolNewest ?? undefined);
-          const langBarriers = detectLanguageRequirements(j.description ?? "").filter((c) => !profile.languages.includes(c));
+          const langBarriers = (j.langReq ?? "").split(",").filter(Boolean).filter((c) => !profile.languages.includes(c));
           const appliedHere = appliedCompanies.has(j.company);
           return (
           <article className="job" key={j.id}>
@@ -450,10 +457,10 @@ export default async function Page({
               </div>
               {j.fitComment && <div className="fitcomment">{j.fitComment}</div>}
               {j.scoreReason && <div className="reason">{j.scoreReason}</div>}
-              {j.coverLetter && (
+              {j.content?.coverLetter && (
                 <details className="cover">
                   <summary>cover letter draft</summary>
-                  <pre>{j.coverLetter}</pre>
+                  <pre>{j.content.coverLetter}</pre>
                 </details>
               )}
             </div>

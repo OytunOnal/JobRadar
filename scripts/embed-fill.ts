@@ -22,7 +22,7 @@ function log(line: string): void {
 }
 
 async function main() {
-  const where = { embedding: null, delistedAt: null, duplicateOfId: null };
+  const where = { vector: null, delistedAt: null, duplicateOfId: null } as const;
   const total = await prisma.job.count({ where });
   log(`=== embed:fill (${EMBED_MODEL}) — kuyrukta ${total} ilan ===`);
 
@@ -32,12 +32,16 @@ async function main() {
       where,
       orderBy: [{ disqualified: "asc" }, { score: "desc" }],
       take: BATCH,
-      select: { id: true, title: true, description: true },
+      select: { id: true, title: true, content: { select: { description: true } } },
     });
     if (batch.length === 0) break;
-    const vecs = await embedTexts(batch.map((j) => jobEmbedText(j.title, j.description)));
+    const vecs = await embedTexts(batch.map((j) => jobEmbedText(j.title, j.content?.description ?? null)));
     for (let i = 0; i < batch.length; i++) {
-      await prisma.job.update({ where: { id: batch[i].id }, data: { embedding: toBuffer(vecs[i]) } });
+      await prisma.jobEmbedding.upsert({
+        where: { jobId: batch[i].id },
+        update: { model: EMBED_MODEL, vector: toBuffer(vecs[i]) },
+        create: { jobId: batch[i].id, model: EMBED_MODEL, vector: toBuffer(vecs[i]) },
+      });
     }
     done += batch.length;
     if (done % (BATCH * 25) < BATCH) log(`  ${done}/${Math.min(total, BUDGET)} embed edildi`);

@@ -134,12 +134,12 @@ async function main() {
 
   const raw = await prisma.job.findMany({
     where: { fitScore: { not: null }, duplicateOfId: null },
-    select: { id: true, title: true, description: true, score: true, fitScore: true, fitBy: true },
+    select: { id: true, title: true, content: { select: { description: true } }, score: true, fitScore: true, fitBy: true },
   });
   const jobs: JobRow[] = raw.map((j) => ({
     id: j.id,
     title: j.title,
-    desc: (j.description ?? "").slice(0, 1500),
+    desc: (j.content?.description ?? "").slice(0, 1500),
     keyword: j.score,
     fit: j.fitScore as number,
     gold: (j.fitBy ?? "").startsWith("qwen27b"),

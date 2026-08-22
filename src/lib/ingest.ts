@@ -465,12 +465,14 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
       salaryText: job.salaryText ?? null,
       sourceTrust: sourceTrust(job.source),
-      description: safeSlice(job.description, 8000),
       score: rejected ? 0 : s.score,
       track: s.track,
       scoreReason: s.reason,
       scoredBy: s.scoredBy,
       disqualified: rejected,
+      seniorityLevel: s.seniorityLevel === "unknown" ? null : s.seniorityLevel,
+      seniorityBy: s.seniorityLevel === "unknown" ? null : "detector",
+      langReq: s.langReq || null,
       // Sources parse dates from wild formats; one NaN Date must degrade to
       // "date unknown", never kill the whole run (it took down a sweep slice).
       postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
@@ -508,18 +510,30 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           country: data.country,
           visa: data.visa,
           contentKey: ck,
+          langReq: data.langReq,
+          // The LLM's level verdict outranks the detector — don't overwrite it.
+          ...(existing.seniorityBy === "llm" ? {} : { seniorityLevel: data.seniorityLevel, seniorityBy: data.seniorityBy }),
           // A re-score can flip the gate verdict in either direction.
           disqualified: data.disqualified,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
           delistedAt: null, // it's back (or never left)
+          ...(existing.delistedAt
+            ? { listings: { create: { event: "relisted", source: job.source, at: new Date() } } }
+            : {}),
         },
       });
       report.updated++;
     } else {
-      const created = await prisma.job.create({ data });
+      const created = await prisma.job.create({
+        data: {
+          ...data,
+          content: { create: { description: safeSlice(job.description, 8000) } },
+          listings: { create: { event: "listed", source: job.source, at: new Date() } },
+        },
+      });
       report.stored++;
-      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: created.description, source: created.source });
+      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: job.description, source: created.source });
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
 
@@ -550,7 +564,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     });
     for (const row of stored) {
       if (!seen.has(row.externalId)) {
-        await prisma.job.update({ where: { id: row.id }, data: { delistedAt: new Date() } });
+        await prisma.job.update({
+          where: { id: row.id },
+          data: { delistedAt: new Date(), listings: { create: { event: "delisted", source: src, at: new Date() } } },
+        });
         swept++;
       }
     }
@@ -620,10 +637,13 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
           orderBy: { lastSeenAt: "desc" },
           take: 12,
-          select: { id: true, title: true, description: true },
+          select: { id: true, title: true, content: { select: { description: true } } },
         });
         if (candidates.length === 0) continue;
-        const outcome = await findDuplicate(nj, candidates);
+        const outcome = await findDuplicate(
+          nj,
+          candidates.map((c) => ({ id: c.id, title: c.title, description: c.content?.description ?? c.title })),
+        );
         compareBudget -= outcome.compareCalls;
         if (outcome.duplicateOfId) {
           await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
@@ -651,10 +671,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       where: { fitScore: null, status: { in: ["new", "interested"] }, duplicateOfId: null, disqualified: false },
       orderBy: { score: "desc" },
       take: AUTO_FIT_TOP_N,
+      include: { content: { select: { description: true } } },
     });
     for (const j of toAnalyze) {
       try {
-        const fit = await analyzeFit(j);
+        const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
         if (!fit) continue;
         await prisma.job.update({
           where: { id: j.id },
@@ -678,6 +699,28 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         report.errors.push(`fit ${j.id}: ${e.message}`);
       }
     }
+  }
+
+  // Dashboard snapshot: the stat strip reads this one row instead of
+  // group-by'ing half a million.
+  try {
+    const [statusCounts, verdictCounts, total] = await Promise.all([
+      prisma.job.groupBy({ by: ["status"], _count: true, where: { disqualified: false } }),
+      prisma.job.groupBy({ by: ["fitVerdict"], _count: true, where: { disqualified: false } }),
+      prisma.job.count(),
+    ]);
+    await prisma.dashboardStatsSnapshot.create({
+      data: {
+        at: new Date(),
+        stats: JSON.stringify({
+          total,
+          byStatus: Object.fromEntries(statusCounts.map((c) => [c.status, c._count])),
+          byVerdict: Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count])),
+        }),
+      },
+    });
+  } catch (e: any) {
+    report.errors.push(`snapshot: ${String(e.message).slice(0, 100)}`);
   }
 
   return report;

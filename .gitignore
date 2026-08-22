@@ -26,3 +26,10 @@ eliminated-sample.txt
 eliminated-v2.txt
 data/embed-cache/
 embed-eval-results.md
+migrate-layered.log
+embed-fill.log
+prisma/dev.db-shm
+prisma/dev.db-wal
+prisma/dev.db.pre-layered-backup
+migrate-layered.log
+embed-fill.log

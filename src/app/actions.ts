@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
 import { draftCoverLetter } from "@/lib/cover";
-import { analyzeFit } from "@/lib/fit";
+import { analyzeFit, FIT_PROMPT_VERSION } from "@/lib/fit";
 
 const FOLLOW_UP_DAYS = 10; // Europe answers slowly — first nudge after 10 days
 
@@ -29,7 +29,19 @@ export async function setStatus(formData: FormData) {
   } else {
     extra.dismissReason = null;
   }
-  await prisma.job.update({ where: { id }, data: { status, ...extra } });
+  await prisma.job.update({
+    where: { id },
+    data: {
+      status, ...extra,
+      actions: {
+        create: {
+          type: status === "ignored" ? "dismissed" : "status-change",
+          payload: JSON.stringify({ to: status, ...(extra.dismissReason ? { reason: extra.dismissReason } : {}) }),
+          at: new Date(),
+        },
+      },
+    },
+  });
   revalidatePath("/");
   revalidatePath("/applied");
   revalidatePath("/dismissed");
@@ -41,9 +53,18 @@ export async function setStatus(formData: FormData) {
 export async function dismissCompanyRest(formData: FormData) {
   const company = String(formData.get("company"));
   if (!company) return;
-  await prisma.job.updateMany({
+  const affected = await prisma.job.findMany({
     where: { company, status: { in: ["new", "interested"] } },
+    select: { id: true },
+  });
+  await prisma.job.updateMany({
+    where: { id: { in: affected.map((a) => a.id) } },
     data: { status: "ignored", dismissReason: "company-applied" },
+  });
+  await prisma.userActionLog.createMany({
+    data: affected.map((a) => ({
+      jobId: a.id, type: "dismissed", payload: '{"reason":"company-applied","bulk":true}', at: new Date(),
+    })),
   });
   revalidatePath("/");
   revalidatePath("/dismissed");
@@ -62,7 +83,10 @@ export async function setFollowUp(formData: FormData) {
 export async function saveNote(formData: FormData) {
   const id = String(formData.get("id"));
   const note = String(formData.get("note") ?? "").slice(0, 500);
-  await prisma.job.update({ where: { id }, data: { note: note || null } });
+  await prisma.job.update({
+    where: { id },
+    data: { note: note || null, actions: { create: { type: "note", payload: null, at: new Date() } } },
+  });
   revalidatePath("/applied");
 }
 
@@ -73,23 +97,34 @@ export async function triggerIngest() {
 
 export async function draftCover(formData: FormData) {
   const id = String(formData.get("id"));
-  const job = await prisma.job.findUnique({ where: { id } });
+  const job = await prisma.job.findUnique({ where: { id }, include: { content: true } });
   if (!job) return;
-  const letter = await draftCoverLetter(job);
-  await prisma.job.update({ where: { id }, data: { coverLetter: letter } });
+  const letter = await draftCoverLetter({ ...job, description: job.content?.description ?? job.title });
+  await prisma.jobContent.update({ where: { jobId: id }, data: { coverLetter: letter } });
   revalidatePath("/");
 }
 
 export async function analyzeFitAction(formData: FormData) {
   const id = String(formData.get("id"));
-  const job = await prisma.job.findUnique({ where: { id } });
+  const job = await prisma.job.findUnique({ where: { id }, include: { content: true } });
   if (!job) return;
   // Deliberate per-job check from the dashboard — use the strong model.
-  const fit = await analyzeFit(job, "strong");
+  const fit = await analyzeFit({ ...job, description: job.content?.description ?? job.title }, "strong");
   if (!fit) return;
   await prisma.job.update({
     where: { id },
-    data: { fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk, ...(fit.category === "NO_VISA" ? { visa: "no" } : {}) },
+    data: {
+      fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk,
+      ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown" ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
+      ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
+      judgments: {
+        create: {
+          model: "on-demand-strong", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
+          verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+          ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
+        },
+      },
+    },
   });
   revalidatePath("/");
 }

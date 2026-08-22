@@ -1,6 +1,12 @@
 import { countryPassesAccept, resolveCountry } from "./geo";
 import { profile, seniorityFor, type Track } from "./profile";
+import { detectSeniority, levelBlocked, type SeniorityLevel } from "./seniority";
+import { detectLanguageRequirements } from "./langreq";
 import type { RawJob } from "./sources/types";
+
+// Bumped MANUALLY when scoring rules change — KeywordScoreHistory rows carry
+// it, and a re-score means "fill where scorerVersion < this".
+export const SCORER_VERSION = "v6-layered";
 
 export interface Scored {
   score: number; // 0-100
@@ -8,6 +14,10 @@ export interface Scored {
   reason: string;
   scoredBy: "keyword";
   disqualified: boolean;
+  // Cheap deterministic extractions, bundled here so every caller (ingest,
+  // desc-fill, rescore) gets them from ONE pass over the text.
+  seniorityLevel: SeniorityLevel;
+  langReq: string; // comma-separated ISO codes, "" = none detected
 }
 
 function countHits(haystack: string, needles: readonly string[]): string[] {
@@ -61,6 +71,11 @@ function regionOk(job: RawJob): boolean {
 export function scoreJob(job: RawJob): Scored {
   const text = `${job.title}\n${job.description}`.toLowerCase();
   const title = job.title.toLowerCase();
+  const seniority = detectSeniority(job.title, job.description);
+  const extras = {
+    seniorityLevel: seniority.level,
+    langReq: detectLanguageRequirements(job.description).join(","),
+  };
 
   // Hard disqualifiers first — TITLE only: the description mentioning
   // "recruiter"/"internship" in boilerplate must not kill a real posting
@@ -73,6 +88,7 @@ export function scoreJob(job: RawJob): Scored {
       reason: `Excluded (${negHit[0]})`,
       scoredBy: "keyword",
       disqualified: true,
+      ...extras,
     };
   }
   // Non-engineering role in the title (business dev, marketing, designer, ...).
@@ -94,6 +110,7 @@ export function scoreJob(job: RawJob): Scored {
       reason: `Non-eng role (${roleNeg[0]})`,
       scoredBy: "keyword",
       disqualified: true,
+      ...extras,
     };
   }
   // A technical role must announce itself in the title.
@@ -105,6 +122,7 @@ export function scoreJob(job: RawJob): Scored {
       reason: "No engineering role signal in title",
       scoredBy: "keyword",
       disqualified: true,
+      ...extras,
     };
   }
   if (!regionOk(job)) {
@@ -114,6 +132,7 @@ export function scoreJob(job: RawJob): Scored {
       reason: `Region mismatch (${job.location})`,
       scoredBy: "keyword",
       disqualified: true,
+      ...extras,
     };
   }
 
@@ -151,7 +170,12 @@ export function scoreJob(job: RawJob): Scored {
     // which are exactly the ones the fit queue reads first.
     s = Math.min(100, s);
     const appetite = seniorityFor(t.key);
-    s = Math.max(0, Math.min(100, s + seniorityAdjust(title, appetite.boost, appetite.avoid)));
+    let adj = seniorityAdjust(title, appetite.boost, appetite.avoid);
+    // Structured detector (v2): catches what title words miss — "8+ years"
+    // in the body, management signals. Only demotes when the word list
+    // hasn't already, so the penalty never doubles.
+    if (adj >= 0 && levelBlocked(seniority.level, appetite.avoid)) adj -= 8;
+    s = Math.max(0, Math.min(100, s + adj));
 
     // Prefer a higher score; break ties toward a title match and earlier track.
     const better = s > best.score || (s === best.score && titleMatched && !best.titleHit);
@@ -168,5 +192,6 @@ export function scoreJob(job: RawJob): Scored {
     reason: best.reason,
     scoredBy: "keyword",
     disqualified: best.score === 0,
+    ...extras,
   };
 }

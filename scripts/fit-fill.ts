@@ -1,4 +1,4 @@
-import { analyzeFit } from "../src/lib/fit";
+import { analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
 import { blendOrder, cosine, cvVector, fromBuffer } from "../src/lib/embed";
 
@@ -69,13 +69,13 @@ const skipped: string[] = []; // title-only rows wait for desc:fill
 async function buildQueue(): Promise<string[]> {
   const candidates = await prisma.job.findMany({
     where: { ...where, id: { notIn: skipped } },
-    select: { id: true, score: true, sponsorReg: true, visa: true, embedding: true },
+    select: { id: true, score: true, sponsorReg: true, visa: true, vector: { select: { vector: true } } },
   });
   const scored = candidates.map((c) => ({
     id: c.id,
     score: c.score,
     visaTier: c.sponsorReg || c.visa === "yes" ? 1 : 0,
-    sim: cv && c.embedding ? cosine(fromBuffer(c.embedding), cv) : null,
+    sim: cv && c.vector ? cosine(fromBuffer(c.vector.vector), cv) : null,
   }));
   return [
     ...blendOrder(scored.filter((s) => s.visaTier === 1)),
@@ -102,7 +102,10 @@ while (done < LIMIT) {
   }
   const ids = queue.slice(cursor, cursor + 25);
   cursor += ids.length;
-  const rows = await prisma.job.findMany({ where: { id: { in: ids }, fitScore: null } });
+  const rows = await prisma.job.findMany({
+    where: { id: { in: ids }, fitScore: null },
+    include: { content: { select: { description: true } } },
+  });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const batch = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => Boolean(r));
   if (batch.length === 0) continue;
@@ -110,12 +113,13 @@ while (done < LIMIT) {
     if (done >= LIMIT) break;
     // Title-only rows have nothing for the model to read — desc:fill feeds
     // them; skip in-memory only, so they re-enter once a description lands.
-    if ((j.description ?? "").length < j.title.length + 60) {
+    const desc = j.content?.description ?? "";
+    if (desc.length < j.title.length + 60) {
       skipped.push(j.id);
       continue;
     }
     try {
-      const fit = await analyzeFit(j);
+      const fit = await analyzeFit({ ...j, description: desc });
       if (!fit) {
         failStreak++;
       } else {
@@ -128,7 +132,17 @@ while (done < LIMIT) {
             // Single-tier regime (user decision 2026-08-21): the 27B judges
             // directly — no 8B triage, no separate review pass to await.
             fitBy: "qwen27b",
+            // The LLM's level verdict outranks the regex detector.
+            ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown"
+              ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
             ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
+            judgments: {
+              create: {
+                model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
+                verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+                ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
+              },
+            },
           },
         });
         done++;

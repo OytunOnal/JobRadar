@@ -14,7 +14,7 @@
 
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
-import { scoreJob } from "../src/lib/score";
+import { scoreJob, SCORER_VERSION } from "../src/lib/score";
 import { detectVisa } from "../src/lib/visa";
 import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
 
@@ -102,9 +102,9 @@ const rows = await prisma.job.findMany({
     OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })),
   },
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
-  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, description: true },
+  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, content: { select: { description: true } } },
 });
-const queue = rows.filter((r) => (r.description ?? "").length < r.title.length + 60);
+const queue = rows.filter((r) => (r.content?.description ?? "").length < r.title.length + 60);
 log(`=== desc:fill — ${queue.length} title-only ilan (toplam ${rows.length} aday içinden) ===`);
 
 let done = 0;
@@ -129,12 +129,24 @@ for (const r of queue) {
     await prisma.job.update({
       where: { id: r.id },
       data: {
-        description: stored,
+        content: {
+          upsert: { create: { description: stored }, update: { description: stored } },
+        },
         score: newScore,
         track: s.track,
         scoreReason: s.reason,
+        disqualified: s.disqualified,
+        langReq: s.langReq || null,
+        seniorityLevel: s.seniorityLevel === "unknown" ? null : s.seniorityLevel,
+        seniorityBy: s.seniorityLevel === "unknown" ? null : "detector",
         workMode: deriveWorkMode(raw),
         visa: detectVisa(desc, r.title),
+        scores: {
+          create: {
+            scorerVersion: SCORER_VERSION, score: newScore, track: s.track,
+            reason: s.reason, disqualified: s.disqualified, at: new Date(),
+          },
+        },
       },
     });
     filled++;

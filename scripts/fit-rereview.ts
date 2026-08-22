@@ -45,10 +45,10 @@ let done = 0;
 let raised = 0;
 let failStreak = 0;
 for (const t of targets) {
-  const j = await prisma.job.findUnique({ where: { id: t.id } });
+  const j = await prisma.job.findUnique({ where: { id: t.id }, include: { content: { select: { description: true } } } });
   if (!j) continue;
   try {
-    const fit = await analyzeFit(j);
+    const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
     if (!fit) {
       failStreak++;
     } else {

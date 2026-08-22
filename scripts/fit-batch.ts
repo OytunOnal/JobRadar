@@ -47,7 +47,7 @@ if (cmd === "collect" && argId) {
   const rescoreAll = process.argv.includes("--all");
   const jobs = await prisma.job.findMany({
     where: { status: { not: "ignored" }, ...(rescoreAll ? {} : { fitScore: null }) },
-    select: { id: true, title: true, company: true, location: true, description: true },
+    select: { id: true, title: true, company: true, location: true, content: { select: { description: true } } },
   });
   if (jobs.length === 0) {
     console.log("Nothing to score — every job already has a fit. (Use --all to re-score.)");
@@ -59,7 +59,7 @@ if (cmd === "collect" && argId) {
     title: j.title,
     company: j.company,
     location: j.location,
-    description: j.description,
+    description: j.content?.description ?? j.title,
   }));
   console.log(`Submitting batch for ${batchJobs.length} jobs (model: claude-haiku-4-5)...`);
   const batchId = await submitFitBatch(batchJobs);

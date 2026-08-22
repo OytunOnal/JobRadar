@@ -26,7 +26,9 @@ const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
 // measured 30/s and 5/s with the same constants on the same machine. A
 // hill-climber measures real jobs/sec per window and walks the ladder;
 // a periodic re-probe escapes stale optima when conditions shift.
-const LADDER = [32, 64, 128, 256, 512];
+// 512 killed the run live: one /api/embed call with 512 texts (~200k tok)
+// gets rejected by the server. 256 is the measured safe ceiling.
+const LADDER = [32, 64, 128, 256];
 let ladderIdx = 2; // start at 128
 let BATCH = LADDER[ladderIdx];
 let direction = 1;
@@ -142,10 +144,23 @@ async function main() {
 
   let a = await fetchAfter();
   let b = await fetchAfter();
-  let embedA = a.length ? embedTexts(a.map((j) => jobEmbedText(j.title, j.content?.description ?? null))) : null;
+  let embedA: Promise<number[][] | Error> | null = a.length ? embedTexts(a.map((j) => jobEmbedText(j.title, j.content?.description ?? null))).catch((e) => e as Error) : null;
   while (done < BUDGET && embedA) {
-    const embedB = b.length ? embedTexts(b.map((j) => jobEmbedText(j.title, j.content?.description ?? null))) : null;
-    const vecs = await embedA;
+    const embedB = b.length ? embedTexts(b.map((j) => jobEmbedText(j.title, j.content?.description ?? null))).catch((e) => e as Error) : null;
+    let vecs = await embedA;
+    if (vecs instanceof Error) {
+      // Server refused/failed the batch: retreat down the ladder and redo
+      // THIS batch in safe chunks instead of dying mid-run.
+      log(`  [tune] embed hatası (${vecs.message.slice(0, 60)}) — batch küçültülüp yeniden denenecek`);
+      ladderIdx = Math.max(0, ladderIdx - 1);
+      BATCH = LADDER[ladderIdx];
+      direction = -1;
+      const redo: number[][] = [];
+      for (let i = 0; i < a.length; i += 64) {
+        redo.push(...(await embedTexts(a.slice(i, i + 64).map((j) => jobEmbedText(j.title, j.content?.description ?? null)))));
+      }
+      vecs = redo;
+    }
     await pendingWrite;
     pendingWrite = writeBatch(a, vecs);
     done += a.length;

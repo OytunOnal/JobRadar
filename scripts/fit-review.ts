@@ -52,7 +52,10 @@ while (true) {
   const batch = await prisma.job.findMany({
     include: { content: { select: { description: true } } },
     where,
-    orderBy: [{ sponsorReg: "desc" }, { fitScore: "desc" }, { score: "desc" }],
+    // Highest fit first across the whole (visa-only) set — an explicit
+    // "sponsorship offered" 85 must not wait behind a register-matched 45;
+    // sponsorReg only breaks ties.
+    orderBy: [{ fitScore: "desc" }, { sponsorReg: "desc" }, { score: "desc" }],
     take: 10,
   });
   if (batch.length === 0) break;

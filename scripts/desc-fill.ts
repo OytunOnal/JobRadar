@@ -50,6 +50,24 @@ async function getHtml(url: string): Promise<string> {
   }
 }
 
+// Generic lane: schema.org JSON-LD JobPosting, the standard structured block
+// most hosted career pages embed. One parser covers SF/BeeSite/Radancy/
+// Softgarden/Avature/CSOD and future platforms without bespoke fetchers.
+function jsonLdDescription(html: string): string {
+  for (const m of html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const data = JSON.parse(m[1]);
+      const nodes = Array.isArray(data) ? data : data["@graph"] ?? [data];
+      for (const n of nodes) {
+        if (n && (n["@type"] === "JobPosting" || (Array.isArray(n["@type"]) && n["@type"].includes("JobPosting"))) && n.description) {
+          return stripHtml(String(n.description));
+        }
+      }
+    } catch { /* malformed block — try the next */ }
+  }
+  return "";
+}
+
 function ogDescription(html: string): string {
   const m = html.match(/property="og:description"\s+content="([\s\S]*?)"\s*\/?>/) ||
     html.match(/content="([\s\S]*?)"\s+property="og:description"/);
@@ -86,12 +104,65 @@ async function fetchDescription(source: string, externalId: string, url: string)
     case "join":
       // No public JSON detail — the job page's og:description carries the body.
       return ogDescription(await getHtml(url));
+    case "rippling": {
+      // Detail's description is an OBJECT of html sections (company/role/...)
+      // — live-verified shape; join the section values.
+      const d = await getJson(`https://api.rippling.com/platform/api/ats/v1/board/${token}/jobs/${externalId}`);
+      const desc = d?.description;
+      if (typeof desc === "string") return stripHtml(desc);
+      if (desc && typeof desc === "object") {
+        return stripHtml(Object.values(desc).filter((v) => typeof v === "string").join("\n"));
+      }
+      return "";
+    }
+    case "gem": {
+      // Public GraphQL detail query (boardId = token, extId = externalId).
+      try {
+        const res = await fetch(`https://jobs.gem.com/api/public/graphql/batch?board=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", batch: "true" },
+          body: JSON.stringify([{
+            operationName: "ExternalJobPostingQuery",
+            variables: { boardId: token, extId: externalId },
+            query: "query ExternalJobPostingQuery($boardId: String!, $extId: String!) { oatsExternalJobPosting(boardId: $boardId, extId: $extId) { descriptionHtml } }",
+          }]),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) return "";
+        const d = await res.json();
+        return stripHtml(d?.[0]?.data?.oatsExternalJobPosting?.descriptionHtml ?? "");
+      } catch { return ""; }
+    }
+    case "oracle": {
+      // CE details REST: full body in ExternalDescriptionStr + siblings.
+      const m = token.match(/^([^@]+)@(.+)$/);
+      if (!m) return "";
+      const d = await getJson(
+        `https://${m[1]}.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails` +
+        `?onlyData=true&expand=all&finder=ById;Id=%22${encodeURIComponent(externalId)}%22,siteNumber=${encodeURIComponent(m[2])}`,
+      );
+      const it = d?.items?.[0];
+      return stripHtml([it?.ExternalDescriptionStr, it?.ExternalQualificationsStr, it?.ExternalResponsibilitiesStr, it?.CorporateDescriptionStr]
+        .filter(Boolean).join("\n"));
+    }
+    case "sf":
+    case "beesite":
+    case "radancy":
+    case "softgarden":
+    case "avature":
+    case "csod":
+    case "phenom":
+    case "personio": {
+      // HTML platforms: JSON-LD JobPosting first, og:description as fallback.
+      const html = await getHtml(url);
+      return jsonLdDescription(html) || ogDescription(html);
+    }
     default:
       return "";
   }
 }
 
-const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:"];
+const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:"];
 const rows = await prisma.job.findMany({
   where: {
     delistedAt: null,

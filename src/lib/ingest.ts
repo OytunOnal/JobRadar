@@ -558,14 +558,28 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       (await prisma.job.findFirst({ where: { contentKey: ck }, ...withText }));
 
     if (existing) {
+      // Score the text we are going to KEEP, not the text that just arrived.
+      //
+      // These are not always the same, and the difference was undoing
+      // desc:fill's work on every sweep. Several platforms' list payloads
+      // carry only the title, so desc:fill fetches the real body from the
+      // detail endpoint; betterText then correctly refuses to overwrite that
+      // body with the next sweep's title-only payload — but the score was
+      // recomputed from the payload regardless, collapsing to a title-only
+      // score and often crossing back below the gate. The posting kept its
+      // good text and lost the score that text had earned.
+      const keepIncoming = betterText(job.description, existing.content?.description);
+      const kept = keepIncoming ? job.description : existing.content?.description ?? job.description;
+      const rescored = keepIncoming ? s : scoreJob({ ...job, description: kept });
+
       // Refresh score/text but never clobber the user's pipeline status/notes.
       await prisma.job.update({
         where: { id: existing.id },
         data: {
-          score: data.score,
-          track: data.track,
-          scoreReason: data.scoreReason,
-          scoredBy: data.scoredBy,
+          score: rescored.disqualified ? 0 : rescored.score,
+          track: rescored.track,
+          scoreReason: rescored.reason,
+          scoredBy: "keyword",
           salaryText: data.salaryText,
           workMode: data.workMode,
           country: data.country,
@@ -574,7 +588,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
             { visa: data.visa as any, by: data.visaBy === "source" ? "source" : "regex" },
           ),
           contentKey: ck,
-          langReq: data.langReq,
+          // Same rule: every derived field follows the text we keep.
+          langReq: rescored.langReq || null,
           // Refresh the stored text when the board now offers a better one.
           // This is how structure comes back to postings ingested before
           // htmlToText: the old stripHtml collapsed every newline, so ~half
@@ -583,16 +598,21 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
             ? {
                 content: {
                   upsert: {
-                    create: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION },
-                    update: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION },
+                    create: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
+                    update: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
                   },
                 },
               }
             : {}),
           // The LLM's level verdict outranks the detector — don't overwrite it.
-          ...(existing.seniorityBy === "llm" ? {} : { seniorityLevel: data.seniorityLevel, seniorityBy: data.seniorityBy }),
+          ...(existing.seniorityBy === "llm"
+            ? {}
+            : {
+                seniorityLevel: rescored.seniorityLevel === "unknown" ? null : rescored.seniorityLevel,
+                seniorityBy: rescored.seniorityLevel === "unknown" ? null : "detector",
+              }),
           // A re-score can flip the gate verdict in either direction.
-          disqualified: data.disqualified,
+          disqualified: rescored.disqualified,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
           delistedAt: null, // it's back (or never left)

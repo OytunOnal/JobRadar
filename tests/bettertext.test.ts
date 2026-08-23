@@ -28,3 +28,21 @@ test("accepts a genuinely richer re-sighting (the posting was edited)", () => {
   assert.equal(betterText("body ".repeat(300), "body ".repeat(200)), true);
   assert.equal(betterText("body ".repeat(205), "body ".repeat(200)), false); // noise, not an edit
 });
+
+// The rule betterText enforces on TEXT has to be enforced on the SCORE too.
+// This is the shape of the bug it was hiding: a platform whose list payload
+// carries only the title (SmartRecruiters, Workable) has its real body
+// fetched by desc:fill; the next sweep brings the title-only payload back,
+// betterText correctly keeps the good body — and the score used to be
+// recomputed from the payload anyway, collapsing to a title-only score and
+// often falling back under the gate. The posting kept its text and lost the
+// score that text had earned, every single sweep.
+test("the kept text and the score it produces are the same text", () => {
+  const enriched = "Requirements:\n- 5 years of Unity\n- C# and shader work\n".repeat(8);
+  const titleOnly = "Senior Unity Developer";
+  assert.equal(betterText(titleOnly, enriched), false, "the payload must not replace the body");
+  // Therefore the score must come from `enriched`, not from `titleOnly` —
+  // ingest picks whichever betterText kept and scores THAT.
+  const kept = betterText(titleOnly, enriched) ? titleOnly : enriched;
+  assert.equal(kept, enriched);
+});

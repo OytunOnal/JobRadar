@@ -3,29 +3,33 @@ import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
 import { staleVectorWhere } from "../src/lib/embed";
-import { FIT_PROMPT_VERSION, judgeableWhere } from "../src/lib/fit";
+import { FIT_PROMPT_VERSION, judgeableWhere, VISA_MARKED } from "../src/lib/fit";
+import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../src/lib/chunks";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
 // which is right for a migration and wrong for a tool that lives on your
 // machine — the pool changes every ingest and the work never really ends.
 //
-// Two rules decide the whole design.
+// Three rules decide the design, and each came out of a measurement.
 //
-// FIRST, EMBEDDING IS NOT BACKGROUND WORK. It looks like the small job (a
-// vector is 0.05s against a judgment's ~50s) so the instinct is to trickle it
-// in when nothing else is running. That is backwards: 78k vectors is about an
-// hour, and it decides the ORDER the 90+ hours of judging happen in — the
-// bake-off measured strong-match precision in the top 100 going from 0.49 to
-// 0.61 on the sectioned view. An hour spent making the expensive queue pick
-// better jobs is the best hour in the pipeline. So embedding runs to
-// completion first, always.
+// EMBEDDING LEADS, BUT ONLY FOR WHAT IS ABOUT TO BE JUDGED. A vector costs
+// 0.05s against a judgment's ~50s, so the instinct is to trickle embedding in
+// when nothing else runs. Backwards: the vectors decide the ORDER the ~460
+// hours of judging happen in (the bake-off measured top-100 strong-match
+// precision going 0.49 -> 0.61). But embedding the whole pool first is ~18
+// minutes of nothing visibly happening, so each pass embeds exactly its own
+// chunk — seconds — and judges it.
 //
-// SECOND, THE QUEUE IS NEVER MEANT TO EMPTY. Judging every candidate is 90
-// hours, and extracting facts for all of them would be another 218; both
-// numbers grow with every ingest. The goal was never a finished pool — it is
-// the best jobs, judged first, continuously. So the worker walks the blended
-// queue top-down forever and simply gets as deep as the machine allows.
+// SPONSOR-MARKED POSTINGS COME FIRST, ahead of every score chunk. The user's
+// call. It is also the only visa signal available without the GPU: the
+// model's reading is discovered while judging, not before, so it cannot
+// prioritise anything.
+//
+// THE QUEUE IS NEVER MEANT TO EMPTY. Judging everything pending is ~460
+// hours and grows with each ingest. The goal was never a finished pool — it
+// is the best jobs, judged first, continuously. So the worker re-selects from
+// the top every pass and simply gets as deep as the machine allows.
 //
 //   npm run worker            (runs until stopped)
 //   npm run worker -- --once  (one pass, for checking behaviour)
@@ -74,43 +78,93 @@ function run(script: string, extra: string[] = []): Promise<number> {
 
 const CANDIDATE = { disqualified: false, delistedAt: null, duplicateOfId: null } as const;
 
-async function pending() {
-  const [vectors, judgments] = await Promise.all([
-    prisma.job.count({
-      where: { ...CANDIDATE, ...staleVectorWhere() },
-    }),
-    // The SAME predicate fit-fill queues on, not an approximation of it.
-    prisma.job.count({ where: judgeableWhere(true) }),
-  ]);
-  return { vectors, judgments };
+// The same rows the child will work on — used for the before/after progress
+// check, so "did that do anything" is asked about the right population.
+function laneWhere(lane: Lane) {
+  const q = judgeableWhere(true) as any;
+  return lane.kind === "visa"
+    ? { ...q, AND: [...(q.AND ?? []), VISA_MARKED] }
+    : { ...q, ...chunkWhere(lane.chunk) };
+}
+
+// What the worker works on next, in one place.
+//
+// Sponsor-marked postings are the OUTER priority, not a tie-break inside a
+// score chunk. That is the user's call and it is cheap: 2,828 of them against
+// 24,271 others, about two days of judging before the general queue starts.
+// They are also the only visa signal available without the GPU — the model's
+// reading of a posting is discovered while judging it, not before.
+//
+// Everything else descends by score in chunks of roughly CHUNK_TARGET,
+// re-selected from the top on every pass, so a high-scoring posting arriving
+// mid-descent is picked up next turn rather than in two days.
+type Lane =
+  | { kind: "visa"; n: number }
+  | { kind: "chunk"; chunk: Chunk };
+
+async function nextLane(): Promise<Lane | null> {
+  const q = judgeableWhere(true) as any;
+  const visa = await prisma.job.count({ where: { ...q, AND: [...(q.AND ?? []), VISA_MARKED] } });
+  if (visa > 0) return { kind: "visa", n: visa };
+  // The pending histogram, straight from SQL: 27k rows is too many to pull
+  // into memory just to group them.
+  const hist: Array<{ score: number; n: bigint }> = await prisma.$queryRawUnsafe(
+    `SELECT score, COUNT(*) n FROM Job
+     WHERE disqualified = 0 AND delistedAt IS NULL AND duplicateOfId IS NULL
+       AND status IN ('new','interested') AND score >= 40
+       AND (fitScore IS NULL OR fitPromptVersion IS NOT ?)
+     GROUP BY score`,
+    FIT_PROMPT_VERSION,
+  );
+  const chunk = chunkFromHistogram(hist.map((h) => ({ score: h.score, n: Number(h.n) })));
+  return chunk ? { kind: "chunk", chunk } : null;
 }
 
 async function pass(): Promise<boolean> {
   const busy = gpuBusyMessage();
   if (busy) { log(busy); return false; }
-  const { vectors, judgments } = await pending();
 
-  if (vectors > 0) {
+  const lane = await nextLane();
+  if (lane) {
+    // Scope both stages to the SAME selection: vectors for exactly what we
+    // are about to judge, which is seconds of work, not the twenty minutes a
+    // whole-pool embed would cost before the first verdict.
+    const args = lane.kind === "visa"
+      ? ["--visa-marked"]
+      : ["--min-score", String(lane.chunk.lo), "--max-score", String(lane.chunk.hi)];
+    const label = lane.kind === "visa"
+      ? `vize işaretli (${lane.n.toLocaleString("tr")})`
+      : `${chunkLabel(lane.chunk)} (${lane.chunk.n.toLocaleString("tr")})`;
+
+    const before = await prisma.job.count({ where: laneWhere(lane) });
+
     if (!acquireGpu("worker/embed")) return false;
-    log(`vektör: ${vectors.toLocaleString("tr")} bayat/eksik — tamamına kadar koşuyor`);
-    try { await run("scripts/embed-fill.ts", ["--candidates"]); } finally { releaseGpu(); }
-    return true;
-  }
-
-  if (judgments > 0) {
-    if (!acquireGpu("worker/judge")) return false;
-    log(`yargı: ${judgments.toLocaleString("tr")} aday sırada — ${BATCH} tanesi (gerçekler ilan başına çıkarılır)`);
     try {
-      await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH)]);
+      const lw = laneWhere(lane) as any;
+      const stale = await prisma.job.count({
+        // Same trap: laneWhere already carries an AND list, and
+        // staleVectorWhere returns an OR — merge, never spread over.
+        where: { ...lw, AND: [...(lw.AND ?? []), staleVectorWhere()] },
+      });
+      if (stale > 0) {
+        log(`${label} — ${stale.toLocaleString("tr")} vektör eksik/bayat, önce onlar`);
+        await run("scripts/embed-fill.ts", ["--candidates", ...args]);
+      }
     } finally { releaseGpu(); }
-    // Did anything actually happen? A child that exits without judging
-    // anything — because the queue skipped every row, or a predicate drifted
-    // apart from this count — would otherwise be respawned forever. Belt and
-    // braces on top of sharing judgeableWhere: this catches the NEXT such
-    // mismatch too, whatever causes it.
-    const left = await prisma.job.count({ where: judgeableWhere(true) });
-    if (left >= judgments) {
-      log(`  ilerleme yok (${left} hâlâ sırada) — kuyruk fiilen boş sayılıyor, bekleniyor`);
+
+    if (!acquireGpu("worker/judge")) return false;
+    log(`${label} — ${BATCH} ilan yargılanıyor`);
+    try {
+      await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...args]);
+    } finally { releaseGpu(); }
+
+    // Did anything actually happen? A child that exits without judging —
+    // because every row was skipped, or a predicate drifted apart from this
+    // count — would otherwise be respawned forever. Belt and braces on top of
+    // sharing judgeableWhere: this catches the NEXT such mismatch too.
+    const after = await prisma.job.count({ where: laneWhere(lane) });
+    if (after >= before) {
+      log(`  ilerleme yok (${after} hâlâ sırada) — bekleniyor`);
       return false;
     }
     return true;

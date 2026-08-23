@@ -2,6 +2,8 @@ import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL, embedStamp, staleVectorWhere } from "../src/lib/embed";
+import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
+import { VISA_MARKED } from "../src/lib/fit";
 
 // Embedding backfill: vectors for every job that doesn't have one. Local
 // (Ollama), no API cost. Candidates first, disqualified rows after them (the
@@ -26,6 +28,14 @@ const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
 // revive it, and the rescue lane mines it by similarity) but it is 445k rows
 // of work that must not stand between a text change and the judging queue.
 const CANDIDATES_ONLY = args.includes("--candidates");
+// --min-score / --max-score: embed one score chunk. The worker walks chunks
+// top-down and wants vectors for the chunk it is about to judge, not for the
+// whole pool — seconds of work instead of a quarter of an hour.
+const CHUNK = chunkFromArgs(args);
+// --visa-marked: embed only the sponsor-marked lane, so the worker's first
+// pass vectorises 2,373 postings instead of the whole 74k pool before it can
+// judge the ones the user asked for first.
+const VISA_ONLY = args.includes("--visa-marked");
 
 // Adaptive batch size: the ideal depends on GPU state we can't see (VRAM
 // occupancy, partial offload, background load) and it CHANGES mid-run —
@@ -85,7 +95,13 @@ async function fetchBatch(): Promise<Row[]> {
     // have since re-fetched, or from a projection we have since redesigned,
     // is wrong in a way `vector IS NULL` cannot express — which is how the
     // pool once reported zero pending work while every vector was outdated.
-    where: { delistedAt: null, duplicateOfId: null, ...staleVectorWhere() },
+    where: {
+      delistedAt: null, duplicateOfId: null,
+      ...chunkWhere(CHUNK),
+      // AND, not spread: VISA_MARKED and staleVectorWhere BOTH return an
+      // `OR` key, and spreading lets the second silently erase the first.
+      AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
+    },
     orderBy: [{ disqualified: "asc" }, { score: "desc" }],
     take: BATCH,
     select: { id: true, title: true, content: { select: { description: true } } },
@@ -131,7 +147,8 @@ async function main() {
     where: {
       delistedAt: null, duplicateOfId: null,
       ...(CANDIDATES_ONLY ? { disqualified: false } : {}),
-      ...staleVectorWhere(),
+      ...chunkWhere(CHUNK),
+      AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
     },
   });
   log(`=== embed:fill (${EMBED_MODEL}, pipelined) — kuyrukta ${total} ilan ===`);
@@ -160,7 +177,8 @@ async function main() {
         where: {
           delistedAt: null, duplicateOfId: null,
           disqualified: phase === 1, id: { gt: lastId },
-          ...staleVectorWhere(),
+          ...chunkWhere(CHUNK),
+          AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
         },
         orderBy: { id: "asc" },
         take: BATCH,

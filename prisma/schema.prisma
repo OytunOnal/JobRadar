@@ -99,6 +99,13 @@ model Job {
   fitVerdict  String?  // strong | possible | weak
   fitComment  String?
   fitCategory String?  // why weak: NO_VISA | LANGUAGE | PROFILE | OTHER (NONE otherwise)
+  // WHICH system produced the verdict. Same contract as SCORER_VERSION and
+  // EXTRACTOR_VERSION: the queue is "everything whose version is behind".
+  // Without it the only question we could ask was "has this ever been
+  // judged", and the answer was yes for 5,622 postings whose verdicts came
+  // from a pre-v3 prompt reading markup-filled text through a blind
+  // head-slice — a different system wearing the same column.
+  fitPromptVersion String?
   // Posting reads like an evergreen/talent-pool ad, per the fit analysis.
   ghostRisk   Boolean  @default(false)
 

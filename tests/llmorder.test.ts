@@ -12,15 +12,22 @@ function withSettings<T>(llm: unknown, env: Record<string, string>, fn: () => T)
   const dir = mkdtempSync(join(tmpdir(), "jr-llm-"));
   const path = join(dir, "settings.json");
   writeFileSync(path, JSON.stringify(llm === undefined ? {} : { llm }));
-  const prev = { ...process.env };
-  for (const k of ["ANTHROPIC_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "OLLAMA_MODEL"]) {
-    delete process.env[k];
-  }
+  // Restore each variable individually. Reassigning process.env wholesale
+  // looks equivalent and is not: it leaked JOBRADAR_SETTINGS_PATH into the
+  // rest of the suite, and settings.ts reads that path per call — so the
+  // settings tests started reading this temp file instead of their own.
+  const touched = ["ANTHROPIC_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY",
+    "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "OLLAMA_MODEL", "JOBRADAR_SETTINGS_PATH"];
+  const prev = new Map(touched.map((k) => [k, process.env[k]]));
+  for (const k of touched) delete process.env[k];
   Object.assign(process.env, env, { JOBRADAR_SETTINGS_PATH: path });
   try {
     return fn();
   } finally {
-    process.env = prev;
+    for (const [k, v] of prev) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 }

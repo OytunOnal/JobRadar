@@ -1,4 +1,5 @@
-import { analyzeFit, judgeableWhere, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { analyzeFit, judgeableWhere, VISA_MARKED, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
 import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { blendOrder, cosine, cvVector, fromBuffer } from "../src/lib/embed";
@@ -49,7 +50,18 @@ function log(line: string): void {
   setInterval(beatGpu, 20_000).unref();
 }
 
-const where = judgeableWhere(WIDE);
+// --min-score / --max-score: judge one score chunk. Which postings come next
+// is the chunk's job; which of them is read first stays the blend's.
+const CHUNK = chunkFromArgs(args);
+// --visa-marked: judge only postings we already know can sponsor (public
+// register, a source's structured flag, or the posting's own words). The
+// user's stated priority, and knowable without spending a second of GPU.
+const VISA_ONLY = args.includes("--visa-marked");
+const where = {
+  ...judgeableWhere(WIDE),
+  ...chunkWhere(CHUNK),
+  ...(VISA_ONLY ? { AND: [...((judgeableWhere(WIDE) as any).AND ?? []), VISA_MARKED] } : {}),
+};
 
 // Blended queue: visa-positive tier first, then the measured 40/60
 // keyword/embedding rank blend (see src/lib/embed.ts). Jobs without a vector
@@ -117,6 +129,7 @@ const total = queue.length;
 let done = 0;
 let failStreak = 0;
 let factsDone = 0;
+let ruledOut = 0;
 let cursor = 0;
 let sinceSnapshot = 0;
 while (done < LIMIT) {
@@ -166,6 +179,16 @@ while (done < LIMIT) {
           });
           if (fresh) job = { ...j, ...fresh };
           factsDone++;
+          // Just-extracted facts can rule the posting out — talent-pool
+          // wording, a language the profile lacks, a level the track avoids.
+          // Spending ~50s judging it now would be a minute stolen from a live
+          // option; leave it unjudged and the next queue rebuild files it in
+          // the back tier, where it is still reachable.
+          if (factsRuleOut(facts as any, j.track)) {
+            ruledOut++;
+            skipped.push(j.id);
+            continue;
+          }
         }
       }
       const fit = await analyzeFit({ ...job, description: desc, visaTier: job.visaTier, seniorityLevel: job.seniorityLevel, langReq: job.langReq });
@@ -181,6 +204,9 @@ while (done < LIMIT) {
             // Single-tier regime (user decision 2026-08-21): the 27B judges
             // directly — no 8B triage, no separate review pass to await.
             fitBy: "qwen27b",
+            // The stamp that makes the queue "everything whose version is
+            // behind" rather than "everything never touched".
+            fitPromptVersion: FIT_PROMPT_VERSION,
             ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
             judgments: {
               create: {
@@ -215,5 +241,5 @@ while (done < LIMIT) {
   }
 }
 
-log(`=== Bitti: ${done} ilan analiz edildi, ${factsDone} tanesi için gerçekler de çıkarıldı ===`);
+log(`=== Bitti: ${done} analiz, ${factsDone} çıkarım, ${ruledOut} ilan gerçeklerle elenip sona atıldı ===`);
 await prisma.$disconnect();

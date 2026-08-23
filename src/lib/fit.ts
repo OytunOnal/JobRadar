@@ -43,21 +43,57 @@ export type FitCategory = "NONE" | "NO_VISA" | "LANGUAGE" | "PROFILE" | "SENIORI
 // the worker would keep spawning a child that exited immediately.
 const JUDGE_TARGETS = ["de", "nl", "es", "ch", "dk", "se", "be", "pl", "fr", "pt", "at", "ie", "gb", "no", "fi"];
 
+// A posting the user already acted on is not up for re-judging: their own
+// decision outranks any verdict of ours.
+const OPEN = { status: { in: ["new", "interested"] } };
+
+// "Marked as sponsoring" — the signals we have WITHOUT asking a model: the
+// company sits in a public sponsor register, the source shipped a structured
+// visa flag, or the posting itself says so. These are the user's stated
+// priority, and unlike the LLM's reading they are known before any GPU time
+// is spent.
+export const VISA_MARKED = {
+  OR: [{ visaTier: "yes" }, { visaTier: "not-needed" }, { sponsorReg: true }, { visa: "yes" }],
+};
+
 export function judgeableWhere(wide: boolean) {
+  // "Not judged" is the wrong question; "not judged by THIS system" is the
+  // right one. All 5,622 existing verdicts came from a pre-v7 prompt reading
+  // markup-filled text through a blind head-slice — keeping them would freeze
+  // the radar on a system we have replaced.
+  const unjudged = {
+    OR: [{ fitScore: null }, { fitPromptVersion: { not: FIT_PROMPT_VERSION } }],
+  };
   const base = {
-    fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
-    status: { in: ["new", "interested"] },
+    delistedAt: null, duplicateOfId: null, disqualified: false,
+    ...OPEN,
+    AND: [unjudged],
   };
   if (!wide) {
-    return { ...base, score: { gt: 50 }, OR: [{ sponsorReg: true }, { visa: "yes" }] };
+    return { ...base, score: { gt: 50 }, AND: [unjudged, VISA_MARKED] };
   }
   return {
     ...base,
     // 40+: a single title hit scores 40, and title-only sources cap around
     // it — the 50 bar was hiding half the eligible pool.
     score: { gte: 40 },
-    postedAt: { gte: new Date(Date.now() - 45 * 86_400_000) },
-    OR: [{ country: { in: JUDGE_TARGETS } }, { workMode: "remote" }],
+    AND: [
+      unjudged,
+      // Freshness, with the visa-marked exempt. postedAt is the source's
+      // claim and the schema already warns it lies on evergreen boards
+      // (Lever createdAt from 2019); worse, a NULL excludes the posting
+      // outright. That filter alone was keeping 1,250 of the 2,009 unjudged
+      // sponsor-marked postings out of the queue — exactly the ones the user
+      // most wants judged. delistedAt is what actually retires a dead
+      // posting, so a sponsor-marked one may stay regardless of its date.
+      {
+        OR: [
+          VISA_MARKED,
+          { postedAt: { gte: new Date(Date.now() - 45 * 86_400_000) } },
+        ],
+      },
+      { OR: [{ country: { in: JUDGE_TARGETS } }, { workMode: "remote" }] },
+    ],
   };
 }
 

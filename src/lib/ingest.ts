@@ -47,6 +47,7 @@ import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
 import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
+import { TEXT_VERSION } from "./html-text";
 import { visaFields } from "./visa-write";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -554,8 +555,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
             ? {
                 content: {
                   upsert: {
-                    create: { description: safeSlice(job.description, 8000) },
-                    update: { description: safeSlice(job.description, 8000) },
+                    create: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION },
+                    update: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION },
                   },
                 },
               }
@@ -577,7 +578,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       const created = await prisma.job.create({
         data: {
           ...data,
-          content: { create: { description: safeSlice(job.description, 8000) } },
+          content: { create: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION } },
           listings: { create: { event: "listed", source: job.source, at: new Date() } },
         },
       });

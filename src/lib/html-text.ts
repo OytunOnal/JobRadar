@@ -12,6 +12,16 @@
 // posting gives; flattening whitespace destroyed that signal before any
 // consumer could see it.
 
+// Stamped onto JobContent.textVersion by everything that writes a
+// description. Bump it when a change to this file would produce materially
+// different stored text, so the backfill knows what is stale.
+//   (unset) — the old stripHtml: entities decoded after tags were stripped,
+//             and \s+ collapsed, so escaped markup was manifested into the
+//             text and all paragraph structure was destroyed.
+//   t2      — htmlToText: decode first, block tags to newlines, horizontal
+//             whitespace only.
+export const TEXT_VERSION = "t2";
+
 const ENTITIES: Record<string, string> = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'",
   "#x27": "'", "#x2F": "/", "#47": "/", "#160": " ", hellip: "…", mdash: "—",

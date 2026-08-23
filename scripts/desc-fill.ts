@@ -18,6 +18,7 @@ import { scoreJob, SCORER_VERSION } from "../src/lib/score";
 import { detectVisa } from "../src/lib/visa";
 import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
 import { labelledSections as labelled } from "../src/lib/sections";
+import { TEXT_VERSION } from "../src/lib/html-text";
 
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
@@ -201,10 +202,28 @@ const rows = await prisma.job.findMany({
     OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })),
   },
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
-  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, content: { select: { description: true } } },
+  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, content: { select: { description: true, textVersion: true } } },
 });
-const queue = rows.filter((r) => (r.content?.description ?? "").length < r.title.length + 60);
-log(`=== desc:fill — ${queue.length} title-only ilan (toplam ${rows.length} aday içinden) ===`);
+// Two reasons to fetch a posting's detail page.
+//
+//   1. TITLE-ONLY — the original reason. These platforms' LIST endpoints
+//      carry no body at all, so the stored description is the title.
+//   2. FLAT — the stored text has no line breaks. That is damage we did:
+//      the old stripHtml collapsed \s+, so a rich HTML posting arrived as
+//      one unbroken paragraph and the section parser has nothing to read.
+//      Measured across the candidate pool, half the rows are in this state.
+//
+// The version stamp is what keeps case 2 from re-fetching forever. A row
+// written by the current converter is left alone even if the SOURCE ships
+// flat prose — some genuinely do, and re-asking them every run would burn
+// hours to learn the same thing.
+const queue = rows.filter((r) => {
+  const d = r.content?.description ?? "";
+  if (d.length < r.title.length + 60) return true;
+  return !d.includes("\n") && r.content?.textVersion !== TEXT_VERSION;
+});
+const titleOnly = queue.filter((r) => (r.content?.description ?? "").length < r.title.length + 60).length;
+log(`=== desc:fill — ${queue.length} ilan (${titleOnly} gövdesiz, ${queue.length - titleOnly} yapısız) / ${rows.length} aday ===`);
 
 let done = 0;
 let filled = 0;
@@ -229,7 +248,10 @@ for (const r of queue) {
       where: { id: r.id },
       data: {
         content: {
-          upsert: { create: { description: stored }, update: { description: stored } },
+          upsert: {
+            create: { description: stored, textVersion: TEXT_VERSION },
+            update: { description: stored, textVersion: TEXT_VERSION },
+          },
         },
         score: newScore,
         track: s.track,

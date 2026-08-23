@@ -220,6 +220,15 @@ model JobContent {
   description String
   contentHash String  @default("")
   coverLetter String?
+  // HOW this text was produced, not what it says. Same convention as
+  // SCORER_VERSION / FIT_PROMPT_VERSION / EXTRACTOR_VERSION: a refresh is
+  // "fill where the version is behind", which makes a pool-wide re-fetch
+  // resumable and idempotent instead of a job that must run to completion.
+  //
+  // The version that matters right now is the one before this field existed:
+  // text written by the old stripHtml, which collapsed every newline and so
+  // destroyed the section structure at ingest. Half the pool carries it.
+  textVersion String?
 }
 
 // Embedding vector, split even from JobContent: the queue builder reads ALL

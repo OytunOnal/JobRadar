@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
-import { htmlToText, looksLikeHtml } from "../src/lib/html-text";
+import { htmlToText, looksLikeHtml, TEXT_VERSION } from "../src/lib/html-text";
 import { safeSlice } from "../src/lib/sources/types";
 
 // Repair descriptions that still carry markup, in place and offline.
@@ -53,7 +53,10 @@ async function main() {
       const clean = safeSlice(htmlToText(r.description), 8000);
       // Guard against a conversion that would gut a posting (malformed markup).
       if (clean.length < Math.min(120, r.description.length * 0.15)) continue;
-      writes.push(prisma.jobContent.update({ where: { jobId: r.jobId }, data: { description: clean } }));
+      writes.push(prisma.jobContent.update({
+        where: { jobId: r.jobId },
+        data: { description: clean, textVersion: TEXT_VERSION },
+      }));
       bytesSaved += r.description.length - clean.length;
       repaired++;
     }

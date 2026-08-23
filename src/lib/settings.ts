@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { TrackDef } from "./profile";
 
@@ -70,14 +70,27 @@ function fileStamp(path: string): string {
   }
 }
 
+// Set when the file existed but could not be parsed. Degrading to defaults
+// keeps scoring alive, which is right — but doing it SILENTLY is not: the
+// radar would quietly retarget to the template and nothing would say why.
+// The profile page reads this to warn, and the loader says it once per load.
+export let settingsUnreadable: string | null = null;
+
 export function loadSettings(): Settings {
   const path = settingsPath();
   const stamp = fileStamp(path);
   if (cache !== null && stamp === cachedStamp) return cache;
   try {
     cache = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Settings) : {};
-  } catch {
-    cache = {}; // a corrupt settings file must never break scoring
+    settingsUnreadable = null;
+  } catch (e) {
+    // A corrupt settings file must never break scoring — but it must be loud.
+    cache = {};
+    settingsUnreadable = `${path}: ${(e as Error).message}`;
+    console.error(
+      `[settings] ${path} okunamadı — ayarlar varsayılana düştü. ` +
+      `Son iyi sürüm: ${path}.bak`,
+    );
   }
   cachedStamp = stamp;
   return cache;
@@ -88,6 +101,13 @@ export function loadSettings(): Settings {
 export function saveSettings(next: Settings): void {
   const path = settingsPath();
   mkdirSync(dirname(path), { recursive: true });
+  // Keep the last good version beside the new one. This file is gitignored
+  // because it is personal, which also means git cannot restore it — and a
+  // stray write really did destroy one during a test run, with no way back.
+  // One copy is cheap insurance for the only unrecoverable file we own.
+  try {
+    if (existsSync(path)) copyFileSync(path, `${path}.bak`);
+  } catch { /* a missing backup must not block saving */ }
   const body = JSON.stringify({ ...next, updatedAt: new Date().toISOString() }, null, 2);
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, body, "utf8");

@@ -5,6 +5,7 @@ import { SCORER_VERSION } from "@/lib/score";
 import { EXTRACTOR_VERSION } from "@/lib/facts";
 import { FIT_PROMPT_VERSION } from "@/lib/fit";
 import { providerStatus } from "@/lib/llm";
+import { settingsUnreadable } from "@/lib/settings";
 import {
   addTrack, impactCounts, moveTrack, removeTrack, retierVisa,
   savePreferences, saveTrack, saveJudge, startTask, currentSettings,
@@ -48,6 +49,13 @@ export default async function ProfilePage() {
           <a className="chip active" href="/profile">profile</a>
         </nav>
       </header>
+
+      {settingsUnreadable && (
+        <p className="warn">
+          ⚠ Ayar dosyası okunamadı ({settingsUnreadable}) — <b>tüm tercihler varsayılana düştü</b>.
+          Son iyi sürüm <code>config/settings.json.bak</code> dosyasında; adını düzeltip sayfayı yenileyin.
+        </p>
+      )}
 
       {/* ── Pool health / repairs ─────────────────────────────────────── */}
       <section className="panel">

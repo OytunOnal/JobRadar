@@ -128,6 +128,7 @@ export default async function AppliedPage({
           <a className="chip" href={radarHref}>radar</a>
           <a className="chip active" href={`/applied${fromQS}`}>applications</a>
           <a className="chip" href={`/dismissed${fromQS}`}>dismissed</a>
+          <a className="chip" href="/profile">profile</a>
         </nav>
       </header>
 

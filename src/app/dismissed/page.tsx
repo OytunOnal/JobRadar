@@ -37,6 +37,7 @@ export default async function DismissedPage({
           <a className="chip" href={radarHref}>radar</a>
           <a className="chip" href={`/applied${fromQS}`}>applications</a>
           <a className="chip active" href={`/dismissed${fromQS}`}>dismissed</a>
+          <a className="chip" href="/profile">profile</a>
         </nav>
       </header>
 

@@ -252,6 +252,7 @@ export default async function Page({
           <a className="chip active" href="/">radar</a>
           <a className="chip" href={`/applied${fromQS}`}>applications</a>
           <a className="chip" href={`/dismissed${fromQS}`}>dismissed</a>
+          <a className="chip" href="/profile">profile</a>
         </nav>
         <form action={triggerIngest}>
           <button className="btn primary" type="submit">Scan for new jobs</button>

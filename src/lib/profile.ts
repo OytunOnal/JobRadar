@@ -9,6 +9,7 @@
 import { user } from "../../config/user";
 import { CV_CONTEXT } from "./cv";
 import { cvHash, loadGeneratedProfile } from "./profilegen";
+import { loadSettings } from "./settings";
 import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
 export type Track = string;
@@ -53,22 +54,24 @@ export const generatedProfileStale =
 // A job must look remote OR be in one of these regions to survive the filter.
 const defaultRegions = ["remote", "europe", "emea", "türkiye", "turkey", "turkiye", "izmir", "istanbul", "germany", "berlin", "cyprus", "poland", "lithuania"];
 
-export const profile = {
+function buildProfile() {
+  const settings = loadSettings();
+  return {
   name: user.name,
   location: user.location,
 
-  acceptRegions: u.acceptRegions ?? defaultRegions,
+  acceptRegions: settings.acceptRegions ?? u.acceptRegions ?? defaultRegions,
 
   // Hard floor. Postings that clearly pay under this (parsed loosely) get demoted.
   // Kept as EUR/year for reference; salary parsing is best-effort only.
-  salaryFloorEURYear: 30000,
+  salaryFloorEURYear: settings.salaryFloorEURYear ?? 30000,
 
   // Tracks map a job to one of your CV variants / target roles. Scoring is TITLE-FIRST:
   // a track only wins strongly if one of its `titleKeywords` appears in the job
   // title. `bodyKeywords` add supporting weight from the description.
   // Tracks are ordered specific → generic; on a tie the earlier track wins.
   // Precedence: config/user.ts override > CV-generated profile > this template.
-  tracks: u.tracks ?? generated?.tracks ?? ([
+  tracks: settings.tracks ?? u.tracks ?? generated?.tracks ?? ([
     {
       key: "playable" as Track,
       label: "Playable Ads",
@@ -127,19 +130,19 @@ export const profile = {
   // and drop out of the visa axis entirely — an EU citizen applying inside the
   // EU should never see a visa chip. Empty = assume sponsorship is needed
   // everywhere (the conservative default).
-  workAuthorization: generated?.workAuthorization ?? [],
+  workAuthorization: settings.workAuthorization ?? generated?.workAuthorization ?? [],
 
   // Languages the candidate can work in (ISO codes). Detection of a posting's
   // language REQUIREMENTS is universal (lib/langreq.ts); whether a requirement
   // is a barrier is judged against this list.
-  languages: generated?.languages ?? ["en"],
+  languages: settings.languages ?? generated?.languages ?? ["en"],
 
   // Seniority appetite — title words to lift or demote in keyword scoring and
   // to state in the fit prompt. Per-user by design: a new grad boosts
   // "junior", an IC avoids "head of". Template default mirrors the old
   // hardcoded behavior so template users see no change.
-  seniorityBoost: generated?.seniority?.boost ?? ["senior", "lead", "staff"],
-  seniorityAvoid: generated?.seniority?.avoid ?? [],
+  seniorityBoost: settings.seniority?.boost ?? generated?.seniority?.boost ?? ["senior", "lead", "staff"],
+  seniorityAvoid: settings.seniority?.avoid ?? generated?.seniority?.avoid ?? [],
 
   // Roles from every UNSELECTED family — the mirror of roleSignals.
   roleNegatives: (generated
@@ -155,12 +158,26 @@ export const profile = {
   // User-specific role exclusions ride roleNegatives (NOT the hard negatives)
   // on purpose: the specific-track title override still applies, so e.g. a
   // "Unity iOS Developer" posting survives an "ios developer" exclusion.
-  ).concat(generated?.extraRoleNegatives ?? []),
+  ).concat(settings.extraRoleNegatives ?? generated?.extraRoleNegatives ?? []),
 
   // Aggregator search strings (JSearch/Adzuna). Env vars still win; the
   // generated profile supplies persona-appropriate defaults.
-  searchQueries: generated?.searchQueries ?? null,
-} as const;
+  searchQueries: settings.searchQueries ?? generated?.searchQueries ?? null,
+  } as const;
+}
+
+// A live view, not a frozen snapshot: the profile page writes settings.json and
+// the very next read here reflects it — no server restart, and every existing
+// `profile.x` call site keeps working untouched.
+export const profile = new Proxy({} as ReturnType<typeof buildProfile>, {
+  get: (_t, key: string) => (buildProfile() as Record<string, unknown>)[key],
+  has: (_t, key: string) => key in buildProfile(),
+  ownKeys: () => Reflect.ownKeys(buildProfile()),
+  getOwnPropertyDescriptor: (_t, key: string) => ({
+    ...Object.getOwnPropertyDescriptor(buildProfile(), key),
+    configurable: true,
+  }),
+});
 
 // Resolve the seniority appetite for a track: track override wins, global
 // lists fall back per-field (a track may override only `avoid`).

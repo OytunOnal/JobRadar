@@ -228,10 +228,40 @@ log(`=== desc:fill — ${queue.length} ilan (${titleOnly} gövdesiz, ${queue.len
 let done = 0;
 let filled = 0;
 let crossed = 0;
+// Per-platform outcomes. A run that spends hours on a platform whose detail
+// endpoint is gone should say so rather than look like slow progress.
+const tally = new Map<string, { tried: number; ok: number; flat: number }>();
+// Platforms given up on for this run, and the miss streak that gets them there.
+const broken = new Set<string>();
+const misses = new Map<string, number>();
+const BREAK_AFTER = 25;
+let skipped = 0;
 for (const r of queue) {
   if (done >= BUDGET) break;
+  const plat0 = r.source.split(":")[0];
+  // Circuit breaker. A platform that answers nothing — rate-limited, moved,
+  // or retired — will answer nothing for the whole run, and a 31k-row queue
+  // gives it thousands of chances to prove that. Workable made the case: 111
+  // consecutive 429s in a sample of 250, which at this pace would have spent
+  // half an hour of the run learning one fact. Stop asking, say so, move on.
+  if (broken.has(plat0)) { skipped++; continue; }
   done++;
   const desc = await fetchDescription(r.source, r.externalId, r.url);
+  const plat = r.source.split(":")[0];
+  const t = tally.get(plat) ?? { tried: 0, ok: 0, flat: 0 };
+  t.tried++;
+  if (desc.length >= r.title.length + 60) { t.ok++; if (!desc.includes("\n")) t.flat++; }
+  tally.set(plat, t);
+  if (desc.length >= r.title.length + 60) {
+    misses.set(plat, 0);
+  } else {
+    const m = (misses.get(plat) ?? 0) + 1;
+    misses.set(plat, m);
+    if (m >= BREAK_AFTER) {
+      broken.add(plat);
+      log(`   ! ${plat}: üst üste ${m} boş yanıt — bu koşuda atlanıyor`);
+    }
+  }
   if (desc.length >= r.title.length + 60) {
     const raw = {
       source: r.source, externalId: r.externalId, url: r.url, title: r.title,
@@ -276,7 +306,11 @@ for (const r of queue) {
   if (done % 200 === 0) log(`  ${done}/${Math.min(queue.length, BUDGET)} işlendi — ${filled} metin geldi, ${crossed} ilan 50+ oldu`);
   await sleep(300);
 }
-log(`=== Bitti: ${done} denendi, ${filled} açıklama dolduruldu, ${crossed} ilan fit eşiğini aştı ===`);
+log(`=== Bitti: ${done} denendi, ${filled} açıklama dolduruldu, ${crossed} ilan fit eşiğini aştı` + (skipped ? `, ${skipped} atlandı (${[...broken].join(",")})` : "") + " ===");
+for (const [plat, t] of [...tally].sort((a, b) => b[1].tried - a[1].tried)) {
+  const pc = (n: number) => `${Math.round((n / t.tried) * 100)}%`;
+  log(`   ${plat.padEnd(12)} denendi ${String(t.tried).padStart(5)} | metin geldi ${pc(t.ok).padStart(4)} | gelen ama hâlâ düz ${t.ok ? Math.round((t.flat / t.ok) * 100) : 0}%`);
+}
 await prisma.$disconnect();
 }
 

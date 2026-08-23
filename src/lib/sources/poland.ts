@@ -1,4 +1,5 @@
 import { stripHtml, type RawJob, type Source } from "./types";
+import { labelledSections } from "../sections";
 
 // Poland's two big tech boards, both with keyless JSON APIs (contracts
 // learned from career-ops' providers). Neither takes a keyword parameter the
@@ -35,7 +36,13 @@ export function mapJustJoin(o: any): RawJob | null {
     workMode: workplace === "remote" || workplace === "hybrid" || workplace === "office"
       ? (workplace === "office" ? "onsite" : (workplace as "remote" | "hybrid"))
       : undefined,
-    description: [title, ...(Array.isArray(o.requiredSkills) ? o.requiredSkills : [])].join(", "),
+    // The list payload carries no body, only a skills array — present it as a
+    // requirements list so the scorer and the section parser can read it.
+    description: labelledSections([
+      ["", title],
+      ["Requirements", (Array.isArray(o.requiredSkills) ? o.requiredSkills : [])
+        .map((s: any) => `- ${typeof s === "string" ? s : s?.name ?? ""}`).join("\n")],
+    ]),
     postedAt: o.publishedAt && !Number.isNaN(Date.parse(o.publishedAt)) ? new Date(o.publishedAt) : undefined,
   };
 }
@@ -98,8 +105,11 @@ export function mapNoFluff(p: any): RawJob | null {
     location: city && !/remote/i.test(city) ? `${city}, Poland` : "Poland",
     remote,
     salaryText: salary,
-    description: [title, ...(Array.isArray(p.tiles?.values) ? p.tiles.values.map((v: any) => v?.value) : [])]
-      .filter(Boolean).join(", "),
+    description: labelledSections([
+      ["", title],
+      ["Requirements", (Array.isArray(p.tiles?.values) ? p.tiles.values : [])
+        .map((v: any) => v?.value).filter(Boolean).map((v: string) => `- ${v}`).join("\n")],
+    ]),
     postedAt: typeof p.posted === "number" ? new Date(p.posted) : undefined,
   };
 }

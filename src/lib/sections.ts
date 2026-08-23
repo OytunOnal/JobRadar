@@ -1,3 +1,5 @@
+import { htmlToText } from "./html-text";
+
 // Splitting a posting into its sections, so each pipeline stage can be given
 // the parts it actually needs.
 //
@@ -12,6 +14,27 @@
 // A posting is not prose; it is a form. Headings and bullets are how it tells
 // us where its parts begin, and that structure survives to us now that
 // htmlToText stops flattening it.
+
+// Assemble a posting from parts a source hands us WITH their names.
+//
+// Several APIs do not ship one description — they ship an object of named
+// fields (Lever's `lists`, SmartRecruiters' `jobAd.sections`, Landing.Jobs'
+// role_description/main_requirements/nice_to_have/perks, Oracle's
+// ExternalQualificationsStr and friends). Every one of those call sites used
+// to join the VALUES with a newline and drop the KEYS, which threw away the
+// only ground truth we ever get: the source telling us, in its own words,
+// which part is the requirements list.
+//
+// Keep the names. A heading we were handed always beats one we inferred.
+export function labelledSections(parts: Array<[string, unknown]>): string {
+  const blocks: string[] = [];
+  for (const [heading, raw] of parts) {
+    const body = htmlToText(typeof raw === "string" ? raw : "");
+    if (!body.trim()) continue;
+    blocks.push(heading ? `${heading}:\n${body}` : body);
+  }
+  return blocks.join("\n\n");
+}
 
 export type SectionKind =
   | "intro"
@@ -44,11 +67,11 @@ const HEADING_RULES: Array<[SectionKind, RegExp]> = [
   // bare \b at the end of the alternation silently refuses it. That one
   // omission was hiding "what we're looking for", the single most common
   // requirements heading in the pool.
-  ["requirements", /\b(requirements?|qualifications?|what (you|we)('?(ll|re|d| a))? ?(bring|have|need|expect|look|want)\w*|who you are|your profile|about you|we('?re| are)? ?look\w* for|we expect you|must[\s-]haves?|skills?( and experience)?|experience|education|essential|required|profile|key technologies|tech(nical)? stack|our stack|stack technique|you'?(ll|d)? ?(should apply|might thrive|might be a good fit|thrive)|this opportunity is open to|dein profil|ihr profil|anforderungen|qualifikationen|wat (je|jij) meebrengt|jouw profiel|profil recherché|ce que tu apportes|tu perfil|perfil)\b/i],
+  ["requirements", /\b(requirements?|qualifications?|what you('?(ll|re|d| a))? ?(bring|have|need|want)\w*|what we('?(ll|re|d))? ?(need|expect|look|want)\w*|who you are|your profile|about you|we('?re| are)? ?look\w* for|we expect you|must[\s-]haves?|skills?( and experience)?|experience|education|essential|required|profile|key technologies|tech(nical)? stack|our stack|stack technique|you'?(ll|d|re)? ?(should |might |may |could |would )?(have|thrive|apply|bring|be a (great |good )?fit)|ideally,? you|(an )?ideal candidate|your (background|expertise|superpowers|profile)|we (prefer|hope)|even better if|minimum|gives you an edge|this opportunity is open to|dein profil|ihr profil|anforderungen|qualifikationen|wat (je|jij) meebrengt|jouw profiel|profil recherché|ce que tu apportes|tu perfil|perfil)\b/i],
   ["responsibilities", /\b(responsibilities|what you('?ll)? ?(do|be doing|build|own)|what success looks like|in this role,? you will|you will|your (role|tasks?|mission|impact|day)|the (role|job|position|day[\s-]to[\s-]day)|the impact you will have|duties|tasks|scope|deine aufgaben|ihre aufgaben|aufgaben|tätigkeiten|jouw (rol|taken)|vos missions|tus funciones|funciones)\b/i],
-  ["benefits", /\b(benefits?|what we offer|what'?s in it for you|perks|compensation|salary|total rewards|why (join|us)|we offer|wir bieten|was wir bieten|unser angebot|wij bieden|ce que nous t'?offrons|nous offrons|ofrecemos|te ofrecemos)\b/i],
-  ["company", /(\babout (us|the company|the team|us at)\b|^about\s+\S+|\b(who we are|who is \S+|why (join|work (at|with))\b|our (story|mission|company|team|culture)|the team|we are( proud)?\b|how we work|what'?s it like to work at|company (profile|overview)|über uns|wir sind|over ons|à propos|sobre nosotros|quiénes somos)\b)/i],
-  ["process", /\b(how to apply|application (process|procedure)|interview process|hiring process|next steps|recruitment process|what happens next|when you'?re ready to start|bewerbungsprozess|so bewirbst du|sollicitatieprocedure)\b/i],
+  ["benefits", /\b(benefits?|what we (have to )?offer|what'?s in it for you|perks|compensation|salary|total rewards|time off|vacation|holidays?|why (join|us)|we (have to )?offer|wir bieten|was wir bieten|unser angebot|wij bieden|ce que nous t'?offrons|nous offrons|ofrecemos|te ofrecemos)\b/i],
+  ["company", /(\babout (us|the company|the team|us at)\b|^about\s+\S+|\b(who we are|who is \S+|why (join|work (at|with))\b|our (story|mission|company|team|culture)|the team|we are( proud)?\b|how we work|culture( at | of )?\S*|our values|key principles|what'?s it like to work at|company (profile|overview)|über uns|wir sind|over ons|à propos|sobre nosotros|quiénes somos)\b)/i],
+  ["process", /\b(how to apply|application (process|procedure)|interview process|hiring process|next steps|recruitment process|what happens next|when you'?re ready to start|contact( information| us)?|kontakt\w*|bewerbungsprozess|so bewirbst du|sollicitatieprocedure)\b/i],
   ["legal", /\b(equal (opportunity|employment)|diversity|inclusion|data (protection|privacy)|privacy( and ai)? (policy|notice|guidelines)|gdpr|datenschutz|chancengleichheit|imprint|disclaimer|security notice|notice to recruitment agencies)\b/i],
 ];
 
@@ -65,6 +88,43 @@ function classify(heading: string): SectionKind {
   return "other";
 }
 
+// Vocabulary alone cannot win here. Companies invent their own headings
+// ("Your superpowers ⚡", "Dein Spielfeld"), and skills lists are often split
+// under bare technology names ("PowerShell scripting"). Enumerating those is
+// endless and, worse, English-shaped — a German or Portuguese posting with an
+// invented heading would stay unclassified forever.
+//
+// So when a heading is unknown, read the BODY instead: requirement text has
+// a recognisable fingerprint in any language ("5+ years", "proficiency in",
+// "degree in", "Jahre Erfahrung"). Demand two independent markers, or one
+// inside a bullet list, so a passing mention in a prose intro is not enough
+// to relabel the section.
+const REQ_MARKERS: RegExp[] = [
+  /\b\d+\+?\s*(years?|jahre|años|ans|jaar)\b/i,
+  /\b(years?|jahre\w*) (of )?(experience|erfahrung)\b/i,
+  /\bproficien\w+|fluent in|fließend\b/i,
+  /\bexperience (with|in|using)\b/i,
+  /\b(bachelor|master'?s|degree in|abschluss|diploma)\b/i,
+  /\b(you (have|are|know)|du (hast|bist)|familiar with|vertraut mit|solid understanding)\b/i,
+];
+
+// A benefits list trips the requirement markers by accident — "you have 30
+// days of paid time off" carries both "you have" and a number. When the body
+// reads like an offer to the candidate rather than a demand of them, leave it
+// alone; a wrongly promoted perks list would push real requirements out of
+// the fit window.
+const PERK_MARKERS =
+  /\b(paid time off|days? (of )?(paid )?(leave|holiday|vacation)|health insurance|pension|401k|stock options?|equity|budget for|free (lunch|snacks|gym)|urlaubstage|home[\s-]office (budget|allowance))\b/i;
+
+function classifyByBody(body: string): SectionKind | null {
+  if (PERK_MARKERS.test(body)) return null;
+  const hits = REQ_MARKERS.filter((re) => re.test(body)).length;
+  if (hits >= 2) return "requirements";
+  const bulleted = /(^|\n)\s*[-•*]/.test(body);
+  if (hits >= 1 && bulleted) return "requirements";
+  return null;
+}
+
 // A line is a heading when it reads like a label rather than a sentence.
 // Deliberately conservative: mislabelling a requirements line as a heading
 // costs us the line, while missing a heading only means a fatter section.
@@ -78,6 +138,9 @@ function isHeading(line: string, next: string | undefined): boolean {
   // them only when they are short AND recognised, so a rhetorical sentence in
   // the middle of a paragraph does not open a section.
   if (/\?$/.test(s)) return s.split(/\s+/).length <= 8 && classify(s) !== "other";
+  // "Location: Berlin (hybrid)" is a labelled VALUE, not a section heading —
+  // a colon with text after it on the same line disqualifies the line.
+  if (/^[^:]{2,30}:\s+\S/.test(s)) return false;
   // A colon ends a label ("Requirements:"), and so does a following bullet.
   if (/:$/.test(s)) return true;
   if (next !== undefined && /^\s*[-•*]/.test(next)) return true;
@@ -94,6 +157,12 @@ export function parseSections(text: string): Section[] {
   let cur: Section = { kind: "intro", heading: "", body: "" };
   const push = () => {
     cur.body = cur.body.trim();
+    // Only a LABELLED but unrecognised section earns the body fallback; the
+    // unlabelled intro keeps its own kind, since a posting's opening almost
+    // always mentions experience without being the requirements list.
+    if (cur.kind === "other" && cur.heading) {
+      cur.kind = classifyByBody(cur.body) ?? "other";
+    }
     if (cur.body || cur.heading) out.push(cur);
   };
   for (let i = 0; i < lines.length; i++) {

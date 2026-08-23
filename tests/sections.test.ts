@@ -114,6 +114,21 @@ const CORPUS: Array<[string, string]> = [
   ["Important security notice for job applicants", "legal"],
   ["Notice to recruitment agencies and search firms", "legal"],
   ["When you're ready to start, simply click on the link below", "process"],
+  ["Required", "requirements"],
+  ["Must-haves", "requirements"],
+  ["What we expect", "requirements"],
+  ["Ideally you'd have", "requirements"],
+  ["An ideal candidate should have", "requirements"],
+  ["Your background looks something like this", "requirements"],
+  ["Ce que tu apportes", "requirements"],
+  ["Qualifikationen", "requirements"],
+  ["Deine Skills", "requirements"],
+  ["Kontaktinformationen", "process"],
+  // Negatives: these tripped the requirements rules before narrowing them.
+  ["What we have to offer", "benefits"],
+  ["Time off", "benefits"],
+  ["Culture at Ankar", "company"],
+  ["Our values", "company"],
 ];
 
 test("heading vocabulary: every heading harvested from the pool classifies", () => {

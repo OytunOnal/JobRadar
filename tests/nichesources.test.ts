@@ -143,7 +143,10 @@ test("manfred detailToText joins sections and stack", () => {
   });
   assert.ok(text.includes("Great team."));
   assert.ok(text.includes("Ship features"));
-  assert.ok(text.includes("Tech stack: TypeScript, React"));
+  // Manfred's own block names are kept as headings now — the section parser
+  // reads them instead of guessing from one run-on wall of text.
+  assert.match(text, /Responsibilities:\nShip features\nReview code/);
+  assert.match(text, /Tech stack:\nTypeScript, React/);
 });
 
 // ── Net-Empregos ─────────────────────────────────────────────────────────────

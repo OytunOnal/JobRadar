@@ -1,4 +1,5 @@
 import { getJSON, getText, postJSON, stripHtml, type RawJob } from "./types";
+import { labelledSections } from "../sections";
 
 // Generic connectors for the major applicant-tracking systems. Each takes a
 // company's board token and returns that company's postings, normalized.
@@ -54,15 +55,12 @@ export async function lever(token: string, company: string, region = ""): Promis
 // Rebuild the document instead, keeping Lever's own headings — they are
 // better section labels than anything we could infer.
 function leverBody(j: any): string {
-  const parts: string[] = [stripHtml(j.description ?? "")];
+  const parts: Array<[string, unknown]> = [["", j.description]];
   for (const list of Array.isArray(j.lists) ? j.lists : []) {
-    const heading = String(list?.text ?? "").trim();
-    const body = stripHtml(list?.content ?? "");
-    if (body) parts.push(heading ? `${heading}:\n${body}` : body);
+    parts.push([String(list?.text ?? "").trim(), list?.content]);
   }
-  parts.push(stripHtml(j.additional ?? ""));
-  const doc = parts.filter((p) => p.trim()).join("\n\n").trim();
-  return doc || String(j.descriptionPlain ?? "");
+  parts.push(["", j.additional]);
+  return labelledSections(parts) || String(j.descriptionPlain ?? "");
 }
 
 export async function ashby(token: string, company: string): Promise<RawJob[]> {
@@ -164,9 +162,22 @@ export async function personio(token: string, company: string): Promise<RawJob[]
     const id = tag("id");
     if (!id) continue;
     const office = stripHtml(tag("office"));
-    const descriptionHtml = [...block.matchAll(
-      /<value>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/value>/g,
-    )].map((m) => m[1]).join(" ");
+    // Personio ships <jobDescription> PAIRS: a <name> that is the section
+    // heading ("Deine Skills", "Deine Benefits") and a <value> holding its
+    // HTML. We used to take the values, join them with a SPACE, and discard
+    // every heading — turning a structured posting into one flat line.
+    const sections: Array<[string, unknown]> = [];
+    for (const [, entry] of block.matchAll(/<jobDescription>([\s\S]*?)<\/jobDescription>/g)) {
+      const heading = entry.match(/<name>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/name>/)?.[1]?.trim() ?? "";
+      const value = entry.match(/<value>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/value>/)?.[1] ?? "";
+      if (value.trim()) sections.push([heading, value]);
+    }
+    // Older feeds carry bare <value> blocks with no pairing — fall back to
+    // those rather than returning an empty body.
+    const description = sections.length
+      ? labelledSections(sections)
+      : stripHtml([...block.matchAll(/<value>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/value>/g)]
+          .map((m) => m[1]).join("\n\n"));
     const title = stripHtml(tag("name"));
     jobs.push({
       source: `personio:${token}`,
@@ -176,7 +187,7 @@ export async function personio(token: string, company: string): Promise<RawJob[]
       company: stripHtml(tag("subcompany")) || company,
       location: office,
       remote: /remote|home\s*office/i.test(`${office} ${tag("schedule")} ${title}`),
-      description: stripHtml(descriptionHtml) || title,
+      description: description || title,
       postedAt: tag("createdAt") ? new Date(tag("createdAt")) : undefined,
     });
   }
@@ -425,10 +436,11 @@ export async function oracle(token: string, company: string): Promise<RawJob[]> 
         remote: /remote/i.test(`${j.WorkplaceType ?? ""} ${j.PrimaryLocation ?? ""}`),
         // ShortDescriptionStr is a real summary (not a title echo); the full
         // body lives behind the details endpoint (desc-fill territory).
-        description: [j.ShortDescriptionStr, j.ExternalQualificationsStr, j.ExternalResponsibilitiesStr]
-          .filter(Boolean)
-          .map((s: any) => stripHtml(String(s)))
-          .join("\n") || String(j.Title),
+        description: labelledSections([
+          ["", j.ShortDescriptionStr],
+          ["Responsibilities", j.ExternalResponsibilitiesStr],
+          ["Requirements", j.ExternalQualificationsStr],
+        ]) || String(j.Title),
         postedAt: j.PostedDate ? new Date(j.PostedDate) : undefined,
       });
     }
@@ -733,8 +745,10 @@ export async function comeet(token: string, company: string): Promise<RawJob[]> 
         location: locStr,
         remote: Boolean(loc.is_remote) || /remote/i.test(String(j.workplace_type ?? "")),
         description:
-          stripHtml([j.details?.description, j.details?.requirements].filter(Boolean).join("\n")) ||
-          String(j.name),
+          labelledSections([
+            ["", j.details?.description],
+            ["Requirements", j.details?.requirements],
+          ]) || String(j.name),
         postedAt: j.time_updated ? new Date(j.time_updated) : undefined,
       };
     });

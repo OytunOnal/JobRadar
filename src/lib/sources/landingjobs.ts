@@ -1,4 +1,5 @@
 import { stripHtml, type RawJob, type Source } from "./types";
+import { labelledSections } from "../sections";
 
 // Landing.Jobs — Portugal-centric European tech board with a relocation
 // focus. Keyless JSON API. Pagination is OFFSET-based: `page` and `sort` are
@@ -28,9 +29,13 @@ export function mapJob(j: any): RawJob | null {
     j.gross_salary_low != null
       ? `${j.gross_salary_low}–${j.gross_salary_high ?? j.gross_salary_low} ${j.currency_code ?? ""}`.trim()
       : undefined;
-  const description = stripHtml(
-    [j.role_description, j.main_requirements, j.nice_to_have, j.perks].filter(Boolean).join("\n"),
-  );
+  // Landing.Jobs names all four blocks — keep the names as headings.
+  const description = labelledSections([
+    ["", j.role_description],
+    ["Requirements", j.main_requirements],
+    ["Nice to have", j.nice_to_have],
+    ["Benefits", j.perks],
+  ]);
   return {
     source: "landingjobs",
     externalId: String(j.id),

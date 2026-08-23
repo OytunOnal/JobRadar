@@ -17,6 +17,7 @@ import { prisma } from "../src/lib/db";
 import { scoreJob, SCORER_VERSION } from "../src/lib/score";
 import { detectVisa } from "../src/lib/visa";
 import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
+import { labelledSections as labelled } from "../src/lib/sections";
 
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
@@ -72,20 +73,6 @@ function ogDescription(html: string): string {
   const m = html.match(/property="og:description"\s+content="([\s\S]*?)"\s*\/?>/) ||
     html.match(/content="([\s\S]*?)"\s+property="og:description"/);
   return m ? stripHtml(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&")) : "";
-}
-
-// Several detail endpoints hand us NAMED sections, and we used to join them
-// with a newline and throw the names away. Emitting each name as a heading
-// gives the section parser ground truth instead of an inference — it is what
-// lets the fit view drop the company blurb and the embedding skip the perks.
-function labelled(parts: Array<[string, unknown]>): string {
-  const blocks: string[] = [];
-  for (const [heading, raw] of parts) {
-    const body = stripHtml(typeof raw === "string" ? raw : "");
-    if (!body.trim()) continue;
-    blocks.push(heading ? `${heading}:\n${body}` : body);
-  }
-  return blocks.join("\n\n");
 }
 
 // Per-platform detail fetch → plain-text description ("" = unavailable).
@@ -169,8 +156,14 @@ export async function fetchDescription(source: string, externalId: string, url: 
         `?onlyData=true&expand=all&finder=ById;Id=%22${encodeURIComponent(externalId)}%22,siteNumber=${encodeURIComponent(m[2])}`,
       );
       const it = d?.items?.[0];
-      return stripHtml([it?.ExternalDescriptionStr, it?.ExternalQualificationsStr, it?.ExternalResponsibilitiesStr, it?.CorporateDescriptionStr]
-        .filter(Boolean).join("\n"));
+      // Oracle names each block; keep the names and put them in reading
+      // order (the corporate blurb closes rather than opens the posting).
+      return labelled([
+        ["", it?.ExternalDescriptionStr],
+        ["Responsibilities", it?.ExternalResponsibilitiesStr],
+        ["Requirements", it?.ExternalQualificationsStr],
+        ["About the company", it?.CorporateDescriptionStr],
+      ]);
     }
     case "sf":
     case "beesite":

@@ -1,4 +1,5 @@
 import { scoreJob } from "../score";
+import { labelledSections } from "../sections";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Manfred — Spanish tech job platform with a genuinely open public API:
@@ -42,19 +43,17 @@ export function mapOffer(o: any, description = ""): RawJob | null {
 
 // Detail sections → one readable description.
 export function detailToText(d: any): string {
-  const parts = [
-    d?.introduction,
-    d?.whatWillYouDo,
-    d?.whatTheyAskFor,
-    d?.responsibilities,
-    Array.isArray(d?.techs) ? `Tech stack: ${d.techs.map((t: any) => t?.name ?? t).join(", ")}` : "",
-  ];
-  return parts
-    .flat()
-    .map((p) => (typeof p === "string" ? stripHtml(p) : ""))
-    .filter(Boolean)
-    .join("\n")
-    .slice(0, 8000);
+  // Manfred names every block; keep the names so the section parser reads
+  // them as headings instead of guessing from one run-on wall of text.
+  const flatten = (v: unknown) =>
+    Array.isArray(v) ? v.filter((x) => typeof x === "string").join("\n") : v;
+  return labelledSections([
+    ["", flatten(d?.introduction)],
+    ["Responsibilities", flatten(d?.whatWillYouDo)],
+    ["Requirements", flatten(d?.whatTheyAskFor)],
+    ["Responsibilities", flatten(d?.responsibilities)],
+    ["Tech stack", Array.isArray(d?.techs) ? d.techs.map((t: any) => t?.name ?? t).join(", ") : ""],
+  ]).slice(0, 8000);
 }
 
 async function getJson(url: string, fetchImpl: typeof fetch): Promise<any | null> {

@@ -238,26 +238,44 @@ const VIEWS: Record<string, {
     // budget (97.3% whole, prompt unchanged at ~9.6k chars); going to 4000
     // reaches 99.5% for about 94 extra tokens a job, against a context
     // window of 8192 that the prompt currently fills to ~2.5k.
-    budget: 4000,
+    // The budget is read off the DEMAND, not guessed: measured over 6,000
+    // candidates, the classified sections a fit view keeps occupy 2,984
+    // characters at the median and 6,623 at the 99th percentile, so 6,000
+    // delivers every named section whole in 97.1% of postings (5,000 gives
+    // 91.5%, 4,000 only 75.4%). The prompt then runs ~3.4k tokens against a
+    // context window of 8192.
+    //
+    // `intro` is capped hardest even though it is the single largest kind
+    // (95th percentile 4,420 characters). That size is an artefact: an
+    // unstructured posting is ALL intro, and there are no sections there to
+    // deliver whole. Where a posting IS unstructured the named kinds are
+    // absent, so the second pass hands intro the whole window anyway.
+    budget: 6000,
     quota: [
-      ["requirements", 4000],     // what the job demands — never truncated
-      ["responsibilities", 1200],
-      ["niceToHave", 450],
-      ["visa", 250],
-      ["intro", 600],
-      ["other", 500],
+      ["requirements", 3200],     // 99th percentile is 2,580 — never truncated
+      ["responsibilities", 2600],
+      ["niceToHave", 1300],
+      ["visa", 600],
+      ["other", 1500],
+      ["intro", 800],
     ],
   },
   facts: {
     rescue: ["company", "benefits"],
-    budget: 2400,
+    // Same reasoning, one size smaller: this stage answers four small
+    // questions and its value is in being cheap enough to run over
+    // populations the fit stage cannot afford. 5,000 covers every named
+    // section in 88.5% of postings, and the signal-line rescue in
+    // posting-text.ts still carries stray visa and language sentences from
+    // whatever falls outside.
+    budget: 5000,
     quota: [
-      ["visa", 500],
-      ["requirements", 700],
-      ["benefits", 600],          // sponsorship is advertised as a perk
-      ["intro", 500],
-      ["responsibilities", 300],
-      ["other", 400],
+      ["visa", 800],
+      ["requirements", 2000],
+      ["benefits", 1500],         // sponsorship is advertised as a perk
+      ["responsibilities", 1200],
+      ["other", 1200],
+      ["intro", 800],
     ],
   },
   embed: {
@@ -301,8 +319,22 @@ export type Consumer = keyof typeof VIEWS;
 export function viewParts(
   text: string,
   consumer: Consumer,
+  // Budget override, for experiments only (scripts/embed-eval.ts compares
+  // window sizes). Production callers take the measured default.
+  budgetOverride?: number,
 ): Array<{ kind: SectionKind; text: string; full: number }> {
-  const view = VIEWS[consumer];
+  const base = VIEWS[consumer];
+  // Scale the quotas with the budget rather than removing them, so a bigger
+  // window is the same projection at a larger size — otherwise the comparison
+  // would be measuring two different designs at once.
+  const view = budgetOverride
+    ? {
+        ...base,
+        budget: budgetOverride,
+        quota: base.quota.map(([k, q]) =>
+          [k, Math.round((q * budgetOverride) / base.budget)] as [SectionKind, number]),
+      }
+    : base;
   const blocks = parseSections(text)
     // A heading whose body is empty carries no information — postings are
     // full of them (metadata labels, placeholder bullets). Printing
@@ -370,9 +402,15 @@ export function viewParts(
     .map(([at, t]) => ({ kind: blocks.find((b) => b.at === at)!.kind, text: t, full: blocks.find((b) => b.at === at)!.text.length }));
 }
 
-export function postingView(text: string, consumer: Consumer): string {
-  const joined = viewParts(text, consumer).map((p) => p.text).join("\n\n").trim();
-  return joined || text.slice(0, VIEWS[consumer].budget);
+// The character budget a stage's projection is allowed. Exposed so callers
+// and tests read the number from one place instead of copying it.
+export function viewBudget(consumer: Consumer): number {
+  return VIEWS[consumer].budget;
+}
+
+export function postingView(text: string, consumer: Consumer, budgetOverride?: number): string {
+  const joined = viewParts(text, consumer, budgetOverride).map((p) => p.text).join("\n\n").trim();
+  return joined || text.slice(0, budgetOverride ?? VIEWS[consumer].budget);
 }
 
 // How much of a posting a view keeps — used by the measurement script and the

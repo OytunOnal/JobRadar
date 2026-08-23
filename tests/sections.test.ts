@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSections, postingView } from "../src/lib/sections";
+import { parseSections, postingView, viewBudget } from "../src/lib/sections";
 
 const POSTING = `About us
 Acme GmbH was founded in 2011 and we love ping pong.
@@ -65,9 +65,11 @@ test("sections come back in document order, not priority order", () => {
 });
 
 test("a posting with no headings degrades to the old head slice", () => {
-  const flat = "We need a Unity developer. ".repeat(200);
+  const budget = viewBudget("fit");
+  const flat = "We need a Unity developer. ".repeat(Math.ceil(budget / 20));
   const v = postingView(flat, "fit");
-  assert.ok(v.length > 3800 && v.length <= 4000, `filled the budget, got ${v.length}`);
+  // Reads the budget from the library so retuning it does not break the test.
+  assert.ok(v.length > budget * 0.95 && v.length <= budget, `filled the budget, got ${v.length} of ${budget}`);
   assert.match(v, /Unity developer/);
 });
 

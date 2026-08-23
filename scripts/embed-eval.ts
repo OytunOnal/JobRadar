@@ -16,15 +16,40 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../src/lib/db";
+import { postingView } from "../src/lib/sections";
 
-const MODELS = [
+// --models / --variants narrow the matrix. The full run answers "which
+// model"; a narrow run answers "which job text", which is the open question
+// once the model is settled.
+const argv = process.argv.slice(2);
+const list = (flag: string, dflt: string[]) => {
+  const i = argv.indexOf(flag);
+  return i !== -1 && argv[i + 1] ? argv[i + 1].split(",") : dflt;
+};
+
+const MODELS = list("--models", [
   "bge-m3",
   "qwen3-embedding:0.6b",
   "embeddinggemma",
   "snowflake-arctic-embed2",
   "nomic-embed-text",
-];
-const VARIANTS = ["t", "td"] as const; // title-only | title+desc(1500)
+]);
+
+// How the job side is turned into text. "td" is the historical baseline: the
+// raw first 1500 characters, which is what the original bake-off measured and
+// what shipped. The v* variants are the SECTIONED view at several windows —
+// the same characters spent on responsibilities and requirements instead of
+// on whatever the posting happened to open with. Comparing them is the only
+// honest way to keep or change the 1500 that the baseline earned.
+const VARIANTS = list("--variants", ["t", "td"]);
+const jobText = (variant: string, title: string, full: string): string => {
+  if (variant === "t") return title;
+  if (variant === "td") return `${title}\n${full.slice(0, 1500)}`;
+  const m = variant.match(/^v(\d+)$/);
+  if (!m) throw new Error(`unknown variant ${variant}`);
+  const view = postingView(full, "embed", Number(m[1]));
+  return view ? `${title}\n${view}` : title;
+};
 const STRATEGIES = ["cv", "facets", "ads", "mix"] as const;
 const CACHE_DIR = "data/embed-cache";
 const OLLAMA = process.env.OLLAMA_URL ?? "http://localhost:11434";
@@ -139,7 +164,7 @@ async function main() {
   const jobs: JobRow[] = raw.map((j) => ({
     id: j.id,
     title: j.title,
-    desc: (j.content?.description ?? "").slice(0, 1500),
+    desc: j.content?.description ?? "", // full text; variants slice it themselves
     keyword: j.score,
     fit: j.fitScore as number,
     gold: (j.fitBy ?? "").startsWith("qwen27b"),
@@ -172,7 +197,7 @@ async function main() {
           continue;
         }
       }
-      const texts = jobs.map((j) => (variant === "t" ? j.title : `${j.title}\n${j.desc}`));
+      const texts = jobs.map((j) => jobText(variant, j.title, j.desc));
       const t0 = Date.now();
       const vecs = (await embedAll(model, texts, `${model}/${variant}`)).map(norm);
       console.log(`  ${variant}: embedded ${texts.length} in ${((Date.now() - t0) / 1000).toFixed(0)}s`);

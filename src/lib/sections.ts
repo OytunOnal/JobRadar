@@ -68,9 +68,11 @@ const HEADING_RULES: Array<[SectionKind, RegExp]> = [
   // omission was hiding "what we're looking for", the single most common
   // requirements heading in the pool.
   ["requirements", /\b(requirements?|qualifications?|what you('?(ll|re|d| a))? ?(bring|have|need|want)\w*|what we('?(ll|re|d))? ?(need|expect|look|want)\w*|who you are|your profile|about you|we('?re| are)? ?look\w* for|we expect you|must[\s-]haves?|skills?( and experience)?|experience|education|essential|required|profile|key technologies|tech(nical)? stack|our stack|stack technique|you'?(ll|d|re)? ?(should |might |may |could |would )?(have|thrive|apply|bring|be a (great |good )?fit)|ideally,? you|(an )?ideal candidate|your (background|expertise|superpowers|profile)|we (prefer|hope)|even better if|minimum|gives you an edge|this opportunity is open to|dein profil|ihr profil|anforderungen|qualifikationen|wat (je|jij) meebrengt|jouw profiel|profil recherché|ce que tu apportes|tu perfil|perfil)\b/i],
-  ["responsibilities", /\b(responsibilities|what you('?ll)? ?(do|be doing|build|own)|what success looks like|in this role,? you will|you will|your (role|tasks?|mission|impact|day)|the (role|job|position|day[\s-]to[\s-]day)|the impact you will have|duties|tasks|scope|deine aufgaben|ihre aufgaben|aufgaben|tätigkeiten|jouw (rol|taken)|vos missions|tus funciones|funciones)\b/i],
+  ["responsibilities", /\b(responsibilities|what you('?ll)? ?(do|be doing|build|own)|what success looks like|in this role,? you will|you will|your (role|tasks?|mission|impact|day)|the (role|job|position|day[\s-]to[\s-]day)|the impact you will have|^role$|duties|tasks|scope|deine aufgaben|ihre aufgaben|aufgaben|tätigkeiten|jouw (rol|taken)|vos missions|tus funciones|funciones)\b/i],
   ["benefits", /\b(benefits?|what we (have to )?offer|what'?s in it for you|perks|compensation|salary|total rewards|time off|vacation|holidays?|why (join|us)|we (have to )?offer|wir bieten|was wir bieten|unser angebot|wij bieden|ce que nous t'?offrons|nous offrons|ofrecemos|te ofrecemos)\b/i],
-  ["company", /(\babout (us|the company|the team|us at)\b|^about\s+\S+|\b(who we are|who is \S+|why (join|work (at|with))\b|our (story|mission|company|team|culture)|the team|we are( proud)?\b|how we work|culture( at | of )?\S*|our values|key principles|what'?s it like to work at|company (profile|overview)|über uns|wir sind|over ons|à propos|sobre nosotros|quiénes somos)\b)/i],
+  // "About this role" is NOT a company blurb — the bare `about <word>` rule
+  // was swallowing it, and the fit view then dropped the role description.
+  ["company", /(\babout (us|the company|the team|us at)\b|^about\s+(?!(this|the)\s+(role|position|job|opportunity|team\b))\S+|\b(who we are|who is \S+|why (join|work (at|with))\b|our (story|mission|company|team|culture)|the team|we are( proud)?\b|how we work|culture( at | of )?\S*|our values|key principles|what'?s it like to work at|company (profile|overview)|über uns|wir sind|over ons|à propos|sobre nosotros|quiénes somos)\b)/i],
   ["process", /\b(how to apply|application (process|procedure)|interview process|hiring process|next steps|recruitment process|what happens next|when you'?re ready to start|contact( information| us)?|kontakt\w*|bewerbungsprozess|so bewirbst du|sollicitatieprocedure)\b/i],
   ["legal", /\b(equal (opportunity|employment)|diversity|inclusion|data (protection|privacy)|privacy( and ai)? (policy|notice|guidelines)|gdpr|datenschutz|chancengleichheit|imprint|disclaimer|security notice|notice to recruitment agencies)\b/i],
 ];
@@ -143,6 +145,21 @@ function isHeading(line: string, next: string | undefined): boolean {
   if (/^[^:]{2,30}:\s+\S/.test(s)) return false;
   // A colon ends a label ("Requirements:"), and so does a following bullet.
   if (/:$/.test(s)) return true;
+  // ALL-CAPS short lines are headings, whatever the words are. Postings that
+  // style their sections this way ("ABOUT VOODOO", "TEAM", "ROLE") defeated
+  // every other rule: no colon, no bullet beneath, and vocabulary that does
+  // not know a bare "ROLE". The whole role description then sat inside the
+  // company blurb and the fit view threw it away. Caps is a structural
+  // signal, so it works in any language.
+  if (
+    s === s.toUpperCase() && s.length <= 60 && !/[.!?,]$/.test(s) &&
+    // Words, not figures: "$112,000 — $187,000 USD" is a salary VALUE that
+    // happens to carry no lowercase, and reading it as a heading split the
+    // pay range away from its own label.
+    /^[^\d$€£+]/.test(s) && (s.match(/[a-zäöüáéíóúàèìòùçşğ]/gi) ?? []).length >= 3
+  ) {
+    return true;
+  }
   if (next !== undefined && /^\s*[-•*]/.test(next)) return true;
   // Otherwise demand that it look like a title: few words, no trailing comma,
   // and vocabulary we recognise. Without the vocabulary check a short sentence
@@ -195,22 +212,63 @@ export function parseSections(text: string): Section[] {
 //            toward the same point and blunts the similarity we rank on.
 //   keyword  is a cheap scan; it reads nearly everything, minus the legal and
 //            process text that only ever produces false hits.
-const VIEWS: Record<string, { keep: SectionKind[]; budget: number }> = {
+// Each kind gets a QUOTA, not just a place in a queue.
+//
+// Strict priority filling looked right and measured wrong: an audit of 6,000
+// candidates found the fit view losing requirement text in 12.7% of postings
+// and the embedding in 45.2%. The cause was greedy order — a posting with two
+// long "what you'll do" sections spent the whole window before the
+// requirements list was reached, so the judge read what the job DOES and
+// never what it DEMANDS. Quotas reserve each kind its share first; whatever
+// is left over is then handed out in the same priority order, so a posting
+// that lacks a kind still gets a full window.
+const VIEWS: Record<string, {
+  budget: number;
+  quota: Array<[SectionKind, number]>;
+  // Kinds admitted ONLY when the view would otherwise starve (see below).
+  rescue?: SectionKind[];
+}> = {
   fit: {
-    keep: ["intro", "responsibilities", "requirements", "niceToHave", "visa", "other"],
+    rescue: ["company", "benefits"],
     budget: 3000,
+    quota: [
+      ["requirements", 1200],     // what the job demands — the core of fit
+      ["responsibilities", 900],
+      ["niceToHave", 350],
+      ["visa", 250],
+      ["intro", 500],
+      ["other", 500],
+    ],
   },
   facts: {
-    keep: ["intro", "visa", "requirements", "benefits", "responsibilities", "other"],
+    rescue: ["company", "benefits"],
     budget: 2400,
+    quota: [
+      ["visa", 500],
+      ["requirements", 700],
+      ["benefits", 600],          // sponsorship is advertised as a perk
+      ["intro", 500],
+      ["responsibilities", 300],
+      ["other", 400],
+    ],
   },
   embed: {
-    keep: ["responsibilities", "requirements", "intro", "other"],
+    rescue: ["company", "benefits"],
     budget: 1500,
+    quota: [
+      ["responsibilities", 600],
+      ["requirements", 600],
+      ["intro", 300],
+      ["other", 300],
+    ],
   },
   keyword: {
-    keep: ["intro", "responsibilities", "requirements", "niceToHave", "visa", "other", "benefits", "company"],
     budget: 20000,
+    quota: [
+      ["intro", 20000], ["responsibilities", 20000], ["requirements", 20000],
+      ["niceToHave", 20000], ["visa", 20000], ["other", 20000],
+      ["benefits", 20000], ["company", 20000],
+    ],
   },
 };
 
@@ -223,32 +281,60 @@ export type Consumer = keyof typeof VIEWS;
 // to exactly the old head-slice behaviour instead of coming back empty.
 export function postingView(text: string, consumer: Consumer): string {
   const view = VIEWS[consumer];
-  const sections = parseSections(text);
-  const chosen: string[] = [];
+  const blocks = parseSections(text)
+    // A heading whose body is empty carries no information — postings are
+    // full of them (metadata labels, placeholder bullets). Printing
+    // "Work Authorization:" with nothing under it spends tokens on nothing.
+    .filter((s) => s.body.trim())
+    .map((s, i) => ({ kind: s.kind, at: i, text: (s.heading ? `${s.heading}:\n` : "") + s.body }));
+
+  const kept = new Map<number, string>(); // section index -> how much we kept
   let used = 0;
-  for (const kind of view.keep) {
-    for (const s of sections) {
-      if (s.kind !== kind) continue;
-      const block = (s.heading ? `${s.heading}:\n` : "") + s.body;
-      if (used + block.length > view.budget) {
-        const room = view.budget - used;
-        if (room > 200) {
-          chosen.push(block.slice(0, room));
-          used = view.budget;
-        }
-        continue;
-      }
-      chosen.push(block);
-      used += block.length;
+
+  // Take up to `cap` more characters from every section of one kind.
+  const take = (kind: SectionKind, cap: number) => {
+    let room = Math.min(cap, view.budget - used);
+    for (const b of blocks) {
+      if (room <= 0) break;
+      if (b.kind !== kind) continue;
+      const already = kept.get(b.at)?.length ?? 0;
+      if (already >= b.text.length) continue;
+      const add = Math.min(room, b.text.length - already);
+      // A 40-character fragment of a requirements list helps nobody and
+      // reads as noise; skip a section rather than open it with a scrap.
+      if (already === 0 && add < 120 && b.text.length > add) continue;
+      kept.set(b.at, b.text.slice(0, already + add));
+      room -= add;
+      used += add;
     }
-    if (used >= view.budget) break;
+  };
+
+  for (const [kind, quota] of view.quota) take(kind, quota);
+  // Second pass: a posting that has no benefits section should not be
+  // punished for it — spend the leftover budget in the same priority order.
+  for (const [kind] of view.quota) take(kind, view.budget - used);
+
+  // Starvation guard. Classification will sometimes be wrong in a way no
+  // vocabulary fixes — a posting that files its entire role description
+  // under "ABOUT US" leaves the fit view holding a 400-character skills list
+  // out of 3,200 characters of posting. Sending a nearly empty prompt is
+  // worse than sending an imperfectly filtered one, so when a view ends up
+  // with far less than it could have had, let the excluded kinds back in.
+  // Both conditions matter. A small share of the posting alone is fine — a
+  // posting that IS mostly company blurb should be filtered hard, not padded
+  // back out. It is only a problem when what survives is also too thin to
+  // judge on, which is what a fraction plus an absolute floor together say.
+  const available = blocks.reduce((n, b) => n + b.text.length, 0);
+  // Short postings are exempt: there is nothing much to lose, and the view
+  // already holds most of what exists.
+  if (available >= 800 && used < available * 0.35 && used < view.budget * 0.4) {
+    for (const kind of view.rescue ?? []) take(kind, view.budget - used);
   }
-  // Sections are gathered by priority but printed in document order, so the
-  // model reads the posting the way a person would.
-  const order = new Map(sections.map((s, i) => [(s.heading ? `${s.heading}:\n` : "") + s.body, i]));
-  chosen.sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9));
-  const joined = chosen.join("\n\n").trim();
-  return joined || text.slice(0, view.budget);
+
+  // Gathered by priority, printed in document order: the model reads the
+  // posting the way a person would.
+  const out = [...kept.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
+  return out.join("\n\n").trim() || text.slice(0, view.budget);
 }
 
 // How much of a posting a view keeps — used by the measurement script and the

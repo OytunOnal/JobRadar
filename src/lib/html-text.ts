@@ -53,6 +53,12 @@ export function htmlToText(input: string | undefined | null): string {
   // rescued. Cap blank runs at one so the text stays compact.
   s = s.replace(/[ \t ]+/g, " ");
   s = s.replace(/ *\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n");
+  // Empty list items are common in the wild — postings published with
+  // `<li><strong>&nbsp;</strong></li>` placeholders (verified on a live
+  // Greenhouse board). Faithfully rendering them as bare "-" lines spends
+  // prompt tokens on nothing and makes a section look populated when it is
+  // not. Drop the marker, keep the section.
+  s = s.replace(/^-\s*$/gm, "").replace(/\n{3,}/g, "\n\n");
   return s.trim();
 }
 

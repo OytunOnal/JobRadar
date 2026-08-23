@@ -33,7 +33,9 @@
     "visa:retier": "tsx --env-file=.env scripts/visa-retier.ts",
     "repair:descriptions": "tsx --env-file=.env scripts/repair-descriptions.ts",
     "measure:sections": "tsx --env-file=.env scripts/measure-sections.ts",
-    "diagnose:sections": "tsx --env-file=.env scripts/diagnose-sections.ts"
+    "diagnose:sections": "tsx --env-file=.env scripts/diagnose-sections.ts",
+    "audit:sections": "tsx --env-file=.env scripts/audit-sections.ts",
+    "diagnose:requirements": "tsx --env-file=.env scripts/diagnose-requirements.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

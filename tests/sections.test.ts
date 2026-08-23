@@ -137,3 +137,50 @@ test("heading vocabulary: every heading harvested from the pool classifies", () 
     .filter(([, want, got]) => want !== got);
   assert.deepEqual(wrong, [], `yanlış sınıflanan başlıklar: ${JSON.stringify(wrong)}`);
 });
+
+test("ALL-CAPS headings are read as headings, whatever the words", () => {
+  // Shape taken from a live Ashby posting that filed its entire role
+  // description under "ABOUT VOODOO": no colons, no bullets beneath, and a
+  // bare "ROLE" no vocabulary knows. The fit view kept a 402-character skills
+  // list out of 3,204 characters of posting until caps was treated as
+  // structure.
+  const posting = [
+    "ABOUT ACME", "Founded in 2013, Acme makes mobile games.",
+    "TEAM", "You will join a team of 5 engineers on the backend platform.",
+    "ROLE", "You will work on services played by millions every day.",
+    "PROFILE", "- 5 years of Go experience", "- Strong analytical skills",
+  ].join("\n");
+  const kinds = parseSections(posting).map((s) => `${s.kind}:${s.heading}`);
+  assert.deepEqual(kinds, [
+    "company:ABOUT ACME", "other:TEAM", "responsibilities:ROLE", "requirements:PROFILE",
+  ]);
+  const fit = postingView(posting, "fit");
+  assert.match(fit, /played by millions/);   // the role survives
+  assert.match(fit, /5 years of Go/);
+  assert.doesNotMatch(fit, /Founded in 2013/); // the blurb still does not
+});
+
+test("a salary range is a value, not a heading", () => {
+  const posting = "Base Salary Range:\n$112,000 — $187,000 USD\n\nRequirements:\n- Go";
+  const headings = parseSections(posting).map((s) => s.heading);
+  assert.ok(!headings.includes("$112,000 — $187,000 USD"), headings.join("|"));
+});
+
+test("starvation guard: a posting hiding its role in the company blurb still fills the window", () => {
+  // Everything under one company heading, nothing else but a short list.
+  const posting = `ABOUT ACME:\n${"We are a company that does things. ".repeat(60)}\n\nPROFILE:\n- Go`;
+  const fit = postingView(posting, "fit");
+  assert.ok(fit.length > 800, `starved at ${fit.length} chars`);
+});
+
+test("no starvation rescue when the posting is simply short", () => {
+  const posting = "About us:\nWe love ping pong.\n\nRequirements:\n- Unity\n- C#";
+  assert.doesNotMatch(postingView(posting, "fit"), /ping pong/);
+});
+
+test("empty-bodied headings are not printed", () => {
+  const posting = "Role type:\n\nWork Authorization:\n\nRequirements:\n- Go";
+  const v = postingView(posting, "fit");
+  assert.doesNotMatch(v, /Work Authorization/);
+  assert.match(v, /- Go/);
+});

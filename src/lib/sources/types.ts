@@ -86,19 +86,12 @@ export async function getText(
 }
 
 // Strip HTML tags/entities so keyword + LLM scoring see clean text.
-export function stripHtml(html: string | undefined | null): string {
-  if (!html) return "";
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Kept as the name every source connector imports; the implementation now
+// lives in lib/html-text.ts, which decodes entities BEFORE stripping tags and
+// preserves paragraph/heading/bullet structure. The previous version did the
+// reverse and manifested escaped markup into the stored text.
+export { htmlToText as stripHtml } from "../html-text";
+
 
 // Cut a string without leaving half a surrogate pair at the boundary — a lone
 // half is unserializable and killed a desc-fill run mid-queue.

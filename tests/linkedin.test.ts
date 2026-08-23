@@ -90,7 +90,9 @@ test("parseJobDetail: depth-tracked div extraction survives nested divs", () => 
   const html = `<div class="core-section"><div class="show-more-less-html__markup rich">
       <p>Lead the effort.</p><div class="inner"><b>Nested</b> block</div><p>After nested.</p>
     </div></div>`;
-  assert.equal(parseJobDetail(html), "Lead the effort. Nested block After nested.");
+  // Structure is preserved now (block tags become newlines): the old
+  // space-flattened expectation encoded the pre-fix behaviour.
+  assert.equal(parseJobDetail(html), "Lead the effort.\nNested block\nAfter nested.");
   assert.equal(parseJobDetail("<div>no markup class</div>"), "");
   assert.equal(extractDivContent("<div class='x'>unclosed", "x"), null);
 });

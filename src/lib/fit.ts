@@ -36,6 +36,31 @@ function langReqLine(langReq: string | null): string {
 
 export type FitCategory = "NONE" | "NO_VISA" | "LANGUAGE" | "PROFILE" | "SENIORITY" | "OTHER";
 
+// WHICH postings are eligible for judging. Exported because two callers need
+// the same answer: fit-fill builds its queue from it, and the worker decides
+// whether to start fit-fill at all. When those two disagreed, the worker
+// counted 67k eligible while the queue held 21k — so once the queue drained
+// the worker would keep spawning a child that exited immediately.
+const JUDGE_TARGETS = ["de", "nl", "es", "ch", "dk", "se", "be", "pl", "fr", "pt", "at", "ie", "gb", "no", "fi"];
+
+export function judgeableWhere(wide: boolean) {
+  const base = {
+    fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
+    status: { in: ["new", "interested"] },
+  };
+  if (!wide) {
+    return { ...base, score: { gt: 50 }, OR: [{ sponsorReg: true }, { visa: "yes" }] };
+  }
+  return {
+    ...base,
+    // 40+: a single title hit scores 40, and title-only sources cap around
+    // it — the 50 bar was hiding half the eligible pool.
+    score: { gte: 40 },
+    postedAt: { gte: new Date(Date.now() - 45 * 86_400_000) },
+    OR: [{ country: { in: JUDGE_TARGETS } }, { workMode: "remote" }],
+  };
+}
+
 // Bumped MANUALLY whenever the prompt text changes — LlmJudgmentHistory rows
 // carry it, so "did the seniority-rule change move scores" stays a query.
 export const FIT_PROMPT_VERSION = "v7-sectioned";

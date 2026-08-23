@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
 import { staleVectorWhere } from "../src/lib/embed";
-import { FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { FIT_PROMPT_VERSION, judgeableWhere } from "../src/lib/fit";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
@@ -32,7 +32,12 @@ import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-
 
 const args = process.argv.slice(2);
 const ONCE = args.includes("--once");
-const BATCH = Number(args[args.indexOf("--batch") + 1]) || 200;
+// How many judgments before the loop returns to re-check priorities. Each is
+// ~62s (facts + judgment), so 50 means new text waits at most ~52 minutes for
+// its vectors instead of the ~3.4 hours a 200-job batch would impose. The
+// cost of returning is one queue rebuild, which fit-fill does every 100
+// analyses anyway.
+const BATCH = Number(args[args.indexOf("--batch") + 1]) || 50;
 const IDLE_MS = 60_000;
 
 function log(line: string): void {
@@ -74,7 +79,8 @@ async function pending() {
     prisma.job.count({
       where: { ...CANDIDATE, ...staleVectorWhere() },
     }),
-    prisma.job.count({ where: { ...CANDIDATE, fitScore: null, score: { gte: 40 } } }),
+    // The SAME predicate fit-fill queues on, not an approximation of it.
+    prisma.job.count({ where: judgeableWhere(true) }),
   ]);
   return { vectors, judgments };
 }
@@ -94,7 +100,19 @@ async function pass(): Promise<boolean> {
   if (judgments > 0) {
     if (!acquireGpu("worker/judge")) return false;
     log(`yargı: ${judgments.toLocaleString("tr")} aday sırada — ${BATCH} tanesi (gerçekler ilan başına çıkarılır)`);
-    try { await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH)]); } finally { releaseGpu(); }
+    try {
+      await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH)]);
+    } finally { releaseGpu(); }
+    // Did anything actually happen? A child that exits without judging
+    // anything — because the queue skipped every row, or a predicate drifted
+    // apart from this count — would otherwise be respawned forever. Belt and
+    // braces on top of sharing judgeableWhere: this catches the NEXT such
+    // mismatch too, whatever causes it.
+    const left = await prisma.job.count({ where: judgeableWhere(true) });
+    if (left >= judgments) {
+      log(`  ilerleme yok (${left} hâlâ sırada) — kuyruk fiilen boş sayılıyor, bekleniyor`);
+      return false;
+    }
     return true;
   }
 

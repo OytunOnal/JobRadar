@@ -1,4 +1,4 @@
-import { analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { analyzeFit, judgeableWhere, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { blendOrder, cosine, cvVector, fromBuffer } from "../src/lib/embed";
@@ -30,7 +30,6 @@ const LIMIT = limIdx !== -1 ? Number(args[limIdx + 1]) || 100000 : 100000;
 // (free quotas refill on rolling/daily windows — an overnight run rides them).
 const waitIdx = args.indexOf("--wait");
 const WAIT_MIN = waitIdx !== -1 ? Number(args[waitIdx + 1]) || 30 : 0;
-const TARGETS = ["de", "nl", "es", "ch", "dk", "se", "be", "pl", "fr", "pt", "at", "ie", "gb", "no", "fi"];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function log(line: string): void {
@@ -50,23 +49,7 @@ function log(line: string): void {
   setInterval(beatGpu, 20_000).unref();
 }
 
-const freshCut = new Date(Date.now() - 45 * 86_400_000);
-const where = WIDE
-  ? {
-      fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
-      status: { in: ["new", "interested"] },
-      // 40+: a single title hit scores 40, and title-only sources cap
-      // around it — the 50 bar was hiding half the eligible pool.
-      score: { gte: 40 },
-      postedAt: { gte: freshCut },
-      OR: [{ country: { in: TARGETS } }, { workMode: "remote" }],
-    }
-  : {
-      fitScore: null, delistedAt: null, duplicateOfId: null, disqualified: false,
-      status: { in: ["new", "interested"] },
-      score: { gt: 50 },
-      OR: [{ sponsorReg: true }, { visa: "yes" }],
-    };
+const where = judgeableWhere(WIDE);
 
 // Blended queue: visa-positive tier first, then the measured 40/60
 // keyword/embedding rank blend (see src/lib/embed.ts). Jobs without a vector

@@ -1,7 +1,12 @@
-// Multi-provider LLM layer. Providers are tried in order; if one is rate-limited
-// or errors, the next takes over — this keeps JobRadar working when a single
-// provider's budget runs out. Anthropic (Claude) is first for quality; the
-// OpenAI-compatible free tiers (Cerebras, Groq, …) stay as fallbacks.
+// Multi-provider LLM layer. Providers are tried in order; if one is
+// rate-limited or errors, the next takes over — this keeps JobRadar working
+// when a single provider's budget runs out.
+//
+// WHICH provider leads is the user's choice, not ours (see settings.llm).
+// Keys stay in .env because they are secrets; the preference lives in
+// settings.json because it is a preference, and the profile page edits it.
+
+import { loadSettings } from "./settings";
 
 export class RateLimitError extends Error {}
 
@@ -17,11 +22,46 @@ interface Provider {
   strongModel: string;
 }
 
+// Recommended order when the user has not chosen one. Local first: the
+// judgments are the expensive, opinionated part of this tool, and running
+// them on your own machine costs nothing, cannot be rate-limited, and does
+// not send your CV to a third party. Cloud providers follow for machines
+// that cannot host a 27B, and the user can reorder any of it.
+const DEFAULT_ORDER = ["ollama", "anthropic", "cerebras", "groq", "gemini", "deepseek"];
+
+// What the profile page shows: every provider we know how to talk to, whether
+// it is usable on this machine, and why not when it is not.
+export function providerStatus(): Array<{ name: string; ready: boolean; model: string; needs: string }> {
+  const ready = new Map(providers().map((p) => [p.name, p.strongModel]));
+  const known: Array<[string, string]> = [
+    ["ollama", "yerel model (OLLAMA_MODEL veya ayarlardan)"],
+    ["anthropic", "ANTHROPIC_API_KEY"],
+    ["cerebras", "CEREBRAS_API_KEY"],
+    ["groq", "GROQ_API_KEY"],
+    ["gemini", "GOOGLE_API_KEY"],
+    ["deepseek", "DEEPSEEK_API_KEY"],
+  ];
+  const order = llmOrder();
+  return known
+    .map(([name, needs]) => ({ name, ready: ready.has(name), model: ready.get(name) ?? "", needs }))
+    .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+}
+
+function llmOrder(): string[] {
+  const chosen = loadSettings().llm?.order ?? [];
+  return [...chosen, ...DEFAULT_ORDER.filter((n) => !chosen.includes(n))];
+}
+
 function providers(): Provider[] {
   const list: Provider[] = [];
   const env = process.env;
+  const settings = loadSettings().llm ?? {};
   // LLM_DISABLE="anthropic,deepseek" sidelines providers without touching keys.
-  const disabled = new Set((env.LLM_DISABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean));
+  // The settings file can do the same from the UI; either is enough.
+  const disabled = new Set([
+    ...(env.LLM_DISABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    ...(settings.disabled ?? []),
+  ]);
 
   // Anthropic first: best judgment quality. Haiku for everything (cheap, fast).
   if (env.ANTHROPIC_API_KEY) {
@@ -67,18 +107,17 @@ function providers(): Provider[] {
       strongModel: env.GEMINI_MODEL || "gemini-flash-latest",
     });
   }
-  // Ollama last: the local model has no quota, so it catches everything the
-  // cloud free tiers drop — backlog fills keep running at local speed instead
-  // of stopping. Enable with OLLAMA_MODEL (e.g. "qwen3.8:27b"); the endpoint
-  // is OpenAI-compatible and keyless.
-  if (env.OLLAMA_MODEL) {
+  // The local model, keyless and quota-free. The settings file wins over the
+  // dotenv so the choice can be made in the UI; either one enables it.
+  const localModel = settings.localModel || env.OLLAMA_MODEL;
+  if (localModel) {
     list.push({
       name: "ollama",
       kind: "ollama",
       baseURL: env.OLLAMA_URL || "http://localhost:11434",
       key: "ollama", // the endpoint ignores auth; the header just needs a value
-      fastModel: env.OLLAMA_FAST_MODEL || env.OLLAMA_MODEL,
-      strongModel: env.OLLAMA_MODEL,
+      fastModel: env.OLLAMA_FAST_MODEL || localModel,
+      strongModel: localModel,
     });
   }
   if (env.DEEPSEEK_API_KEY) {
@@ -91,7 +130,12 @@ function providers(): Provider[] {
       strongModel: "deepseek-chat",
     });
   }
-  return list.filter((p) => !disabled.has(p.name));
+  // Availability decided which providers exist; preference decides the order
+  // they are tried in.
+  const order = llmOrder();
+  return list
+    .filter((p) => !disabled.has(p.name))
+    .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
 }
 
 export function llmEnabled(): boolean {

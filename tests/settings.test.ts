@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
-import { loadSettings, patchSettings, saveSettings, SETTINGS_PATH } from "../src/lib/settings";
+import { loadSettings, patchSettings, saveSettings, settingsPath } from "../src/lib/settings";
+const SETTINGS_PATH = settingsPath();
 
 // These tests write the real settings file, so they restore whatever was there.
 const backup = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, "utf8") : null;

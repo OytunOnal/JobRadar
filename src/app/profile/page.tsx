@@ -4,9 +4,10 @@ import { LANG_NAMES } from "@/lib/langreq";
 import { SCORER_VERSION } from "@/lib/score";
 import { EXTRACTOR_VERSION } from "@/lib/facts";
 import { FIT_PROMPT_VERSION } from "@/lib/fit";
+import { providerStatus } from "@/lib/llm";
 import {
   addTrack, impactCounts, moveTrack, removeTrack, retierVisa,
-  savePreferences, saveTrack, startTask, currentSettings,
+  savePreferences, saveTrack, saveJudge, startTask, currentSettings,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,7 @@ function Impact({ n, what, stale, task }: { n: number; what: string; stale: stri
 
 export default async function ProfilePage() {
   const [counts, settings] = await Promise.all([impactCounts(), currentSettings()]);
+  const judge = providerStatus();
   const cvLines = CV_CONTEXT.split("\n").filter(Boolean);
 
   return (
@@ -143,6 +145,40 @@ export default async function ProfilePage() {
             </div>
           </div>
           <div className="actions"><button className="btn act" type="submit">ekle</button></div>
+        </form>
+      </section>
+
+      {/* ── Judge (which model decides) ───────────────────────────────── */}
+      <section className="panel">
+        <h2 className="grouphead">Yargıç</h2>
+        <p className="hint">
+          İlanları hangi model değerlendirsin? Önerilen yerel model: kotası yok, ücreti yok,
+          CV&apos;n bilgisayardan çıkmaz — ama 27B barındıramayan bir makine için bulut anahtarı
+          da birinci sınıf seçenek. Anahtarlar <code>.env</code>&apos;de kalır; buradaki yalnızca tercih.
+        </p>
+        <form action={saveJudge} className="prefs">
+          <label className="fieldrow">
+            <span>önce denenecek</span>
+            <select className="inp" name="lead" defaultValue={judge[0]?.name ?? "ollama"}>
+              {judge.map((p) => (
+                <option key={p.name} value={p.name} disabled={!p.ready}>
+                  {p.name}{p.model ? ` — ${p.model}` : ""}{p.ready ? "" : ` (kurulu değil: ${p.needs})`}
+                </option>
+              ))}
+            </select>
+            <em>Sıradakiler yedek kalır: biri kota yerse ya da hata verirse bir sonrakine geçilir.</em>
+          </label>
+          <label className="fieldrow">
+            <span>yerel model</span>
+            <input className="inp" name="localModel" defaultValue={settings.llm?.localModel ?? ""} placeholder="qwen3.8:27b" />
+            <em>Ollama&apos;da kurulu bir model adı. Boş bırakılırsa <code>.env</code>&apos;deki OLLAMA_MODEL kullanılır.</em>
+          </label>
+          <label className="fieldrow chk">
+            <input type="checkbox" name="localOnly" defaultChecked={(settings.llm?.disabled ?? []).includes("anthropic")} />
+            <span>yalnızca yerel çalıştır</span>
+            <em>Bulut sağlayıcıları tümden kapatır. Yerel model çalışmıyorsa değerlendirme durur — buluta düşmez.</em>
+          </label>
+          <button className="btn act" type="submit">yargıcı kaydet</button>
         </form>
       </section>
 

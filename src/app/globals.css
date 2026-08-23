@@ -249,3 +249,8 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .prefs .btn { width: auto; align-self: flex-start; margin-top: 12px; }
 .trackkey { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-left: 8px; }
 .job.trackrow .title { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+
+/* Checkbox row in the judge panel: label beside the box, help text below. */
+.fieldrow.chk { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+.fieldrow.chk input { width: 14px; height: 14px; margin: 0; }
+.fieldrow.chk em { grid-column: 2; }

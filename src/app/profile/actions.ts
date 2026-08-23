@@ -35,6 +35,31 @@ export async function savePreferences(formData: FormData): Promise<void> {
   revalidatePath("/");
 }
 
+// Which model does the judging. The local model is the recommendation, not
+// the requirement: a machine that cannot host a 27B should be able to point
+// this at a cloud key instead, and a user who does not want their CV leaving
+// the laptop should be able to refuse one. Both are one dropdown away.
+export async function saveJudge(formData: FormData): Promise<void> {
+  const lead = String(formData.get("lead") || "ollama");
+  const localModel = String(formData.get("localModel") || "").trim();
+  const localOnly = formData.get("localOnly") === "on";
+  patchSettings({
+    llm: {
+      // The chosen provider leads; everything else keeps its default position
+      // behind it, so adding a key later needs no edit here.
+      order: [lead],
+      localModel: localModel || undefined,
+      // "My CV never leaves this machine" is a real preference, and it
+      // deserves a real switch rather than asking the user to delete keys
+      // they may want back tomorrow. Note this turns the fallback chain OFF:
+      // if the local model is down, judging stops instead of going to a
+      // provider the user just refused.
+      disabled: localOnly ? ["anthropic", "cerebras", "groq", "gemini", "deepseek"] : [],
+    },
+  });
+  revalidatePath("/profile");
+}
+
 export async function saveTrack(formData: FormData): Promise<void> {
   const key = String(formData.get("key"));
   const tracks: TrackDef[] = [...profile.tracks];

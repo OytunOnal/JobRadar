@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
-import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL } from "../src/lib/embed";
+import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
+import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL, embedStamp, staleVectorWhere } from "../src/lib/embed";
 
 // Embedding backfill: vectors for every job that doesn't have one. Local
 // (Ollama), no API cost. Candidates first, disqualified rows after them (the
@@ -20,6 +21,11 @@ import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL } from "../src/lib/embe
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
 const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
+// --candidates: stop after the live pool instead of walking into the
+// disqualified archive. The archive is worth embedding (a scorer fix can
+// revive it, and the rescue lane mines it by similarity) but it is 445k rows
+// of work that must not stand between a text change and the judging queue.
+const CANDIDATES_ONLY = args.includes("--candidates");
 
 // Adaptive batch size: the ideal depends on GPU state we can't see (VRAM
 // occupancy, partial offload, background load) and it CHANGES mid-run —
@@ -75,7 +81,11 @@ interface Row { id: string; title: string; content: { description: string } | nu
 
 async function fetchBatch(): Promise<Row[]> {
   return prisma.job.findMany({
-    where: { vector: null, delistedAt: null, duplicateOfId: null },
+    // "Missing" is not the only kind of stale. A vector built from text we
+    // have since re-fetched, or from a projection we have since redesigned,
+    // is wrong in a way `vector IS NULL` cannot express — which is how the
+    // pool once reported zero pending work while every vector was outdated.
+    where: { delistedAt: null, duplicateOfId: null, ...staleVectorWhere() },
     orderBy: [{ disqualified: "asc" }, { score: "desc" }],
     take: BATCH,
     select: { id: true, title: true, content: { select: { description: true } } },
@@ -85,21 +95,44 @@ async function fetchBatch(): Promise<Row[]> {
 // One multi-row statement per batch — SQLite pays the commit cost once, not
 // N times. $executeRawUnsafe with placeholders (values parameterized).
 async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
-  const placeholders = rows.map(() => "(?, ?, ?)").join(", ");
+  const placeholders = rows.map(() => "(?, ?, ?, ?)").join(", ");
   const params: unknown[] = [];
+  const stamp = embedStamp();
   for (let i = 0; i < rows.length; i++) {
-    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])));
+    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])), stamp);
   }
   await prisma.$executeRawUnsafe(
-    `INSERT INTO JobEmbedding (jobId, model, vector) VALUES ${placeholders}
-     ON CONFLICT(jobId) DO UPDATE SET model = excluded.model, vector = excluded.vector`,
+    `INSERT INTO JobEmbedding (jobId, model, vector, builtFrom) VALUES ${placeholders}
+     ON CONFLICT(jobId) DO UPDATE SET model = excluded.model, vector = excluded.vector,
+       builtFrom = excluded.builtFrom`,
     ...params,
   );
 }
 
+// Refuse rather than compete: two processes alternating between the 27B and
+// the embedder spend their time reloading 17.7 GB of weights, not working.
+{
+  const busy = gpuBusyMessage();
+  if (busy) { log(busy); await prisma.$disconnect(); process.exit(0); }
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") acquireGpu("manual/embed");
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") process.on("exit", releaseGpu);
+  setInterval(beatGpu, 20_000).unref();
+}
+
 async function main() {
   const total = await prisma.job.count({
-    where: { vector: null, delistedAt: null, duplicateOfId: null },
+    // "Missing" is not the only kind of stale. A vector built from text we
+    // have since re-fetched, or from a projection we have since redesigned,
+    // is wrong in a way `vector IS NULL` cannot express — which is how the
+    // pool once reported zero pending work while every vector was outdated.
+    //
+    // Counted over the same population the run will actually walk: a header
+    // that promises 520k and stops at 78k reads like a crash.
+    where: {
+      delistedAt: null, duplicateOfId: null,
+      ...(CANDIDATES_ONLY ? { disqualified: false } : {}),
+      ...staleVectorWhere(),
+    },
   });
   log(`=== embed:fill (${EMBED_MODEL}, pipelined) — kuyrukta ${total} ilan ===`);
 
@@ -125,8 +158,9 @@ async function main() {
     for (;;) {
       const rows = await prisma.job.findMany({
         where: {
-          vector: null, delistedAt: null, duplicateOfId: null,
+          delistedAt: null, duplicateOfId: null,
           disqualified: phase === 1, id: { gt: lastId },
+          ...staleVectorWhere(),
         },
         orderBy: { id: "asc" },
         take: BATCH,
@@ -136,7 +170,7 @@ async function main() {
         lastId = rows[rows.length - 1].id;
         return rows;
       }
-      if (phase === 1) return [];
+      if (phase === 1 || CANDIDATES_ONLY) return [];
       phase = 1;
       lastId = "";
     }

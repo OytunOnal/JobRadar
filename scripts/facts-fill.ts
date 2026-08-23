@@ -1,7 +1,19 @@
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
+import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { extractFacts, EXTRACTOR_VERSION } from "../src/lib/facts";
 import { applyFactsToJob } from "../src/lib/visa-write";
+
+// Refuse rather than compete: two processes alternating between the 27B and
+// the embedder spend their time reloading 17.7 GB of weights, not working.
+{
+  const busy = gpuBusyMessage();
+  if (busy) { log(busy); await prisma.$disconnect(); process.exit(0); }
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") acquireGpu("manual/facts");
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") process.on("exit", releaseGpu);
+  setInterval(beatGpu, 20_000).unref();
+}
+
 
 // Posting-fact extraction worker: the cheap CV-independent stage that feeds
 // the visa tier, the seniority badge and the language flag. Runs ahead of the

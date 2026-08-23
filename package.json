@@ -17,7 +17,7 @@
     "cv:import": "tsx scripts/cv-import.ts",
     "rescore": "tsx --env-file=.env scripts/rescore.ts",
     "fit:batch": "tsx --env-file=.env scripts/fit-batch.ts",
-    "test": "node --import tsx --test tests/score.test.ts tests/fit.test.ts tests/discovery.test.ts tests/harvest.test.ts tests/validate.test.ts tests/crawl.test.ts tests/pool.test.ts tests/freshness.test.ts tests/domains.test.ts tests/dedup.test.ts tests/hfDataset.test.ts tests/profilegen.test.ts tests/workmode.test.ts tests/geo.test.ts tests/visa.test.ts tests/linkedin.test.ts tests/indeed.test.ts tests/nameprobe.test.ts tests/deepprobe.test.ts tests/natsources.test.ts tests/arbeitnow.test.ts tests/natportals.test.ts tests/nichesources.test.ts tests/careeropswave.test.ts tests/sources.test.ts tests/embed.test.ts tests/langreq.test.ts tests/seniority.test.ts tests/visatier.test.ts tests/facts.test.ts tests/settings.test.ts tests/htmltext.test.ts tests/sections.test.ts tests/bettertext.test.ts tests/llmorder.test.ts",
+    "test": "node --import tsx --test tests/score.test.ts tests/fit.test.ts tests/discovery.test.ts tests/harvest.test.ts tests/validate.test.ts tests/crawl.test.ts tests/pool.test.ts tests/freshness.test.ts tests/domains.test.ts tests/dedup.test.ts tests/hfDataset.test.ts tests/profilegen.test.ts tests/workmode.test.ts tests/geo.test.ts tests/visa.test.ts tests/linkedin.test.ts tests/indeed.test.ts tests/nameprobe.test.ts tests/deepprobe.test.ts tests/natsources.test.ts tests/arbeitnow.test.ts tests/natportals.test.ts tests/nichesources.test.ts tests/careeropswave.test.ts tests/sources.test.ts tests/embed.test.ts tests/langreq.test.ts tests/seniority.test.ts tests/visatier.test.ts tests/facts.test.ts tests/settings.test.ts tests/htmltext.test.ts tests/sections.test.ts tests/bettertext.test.ts tests/llmorder.test.ts tests/gpulock.test.ts",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "doctor": "tsx --env-file=.env scripts/doctor.ts",
@@ -36,7 +36,8 @@
     "diagnose:sections": "tsx --env-file=.env scripts/diagnose-sections.ts",
     "audit:sections": "tsx --env-file=.env scripts/audit-sections.ts",
     "diagnose:requirements": "tsx --env-file=.env scripts/diagnose-requirements.ts",
-    "tune:fitwindow": "tsx --env-file=.env scripts/tune-fit-window.ts"
+    "tune:fitwindow": "tsx --env-file=.env scripts/tune-fit-window.ts",
+    "worker": "tsx --env-file=.env scripts/worker.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

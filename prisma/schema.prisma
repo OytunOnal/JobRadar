@@ -239,6 +239,12 @@ model JobEmbedding {
   job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
   model  String
   vector Bytes
+  // WHAT this vector was built from: the stored text's version and the
+  // projection that selected which of it to embed. Without this the only
+  // queue signal is "vector IS NULL", which cannot express staleness -- and
+  // after a re-fetch changed 31k descriptions the pool reported ZERO work
+  // pending while every vector was wrong.
+  builtFrom String?
 }
 
 // "This job was listed at this source at this time." Written on STATE CHANGES

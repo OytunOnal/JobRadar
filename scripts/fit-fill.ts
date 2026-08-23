@@ -1,6 +1,11 @@
 import { analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
+import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { blendOrder, cosine, cvVector, fromBuffer } from "../src/lib/embed";
+import { extractFacts, EXTRACTOR_VERSION } from "../src/lib/facts";
+import { applyFactsToJob } from "../src/lib/visa-write";
+import { levelBlocked, type SeniorityLevel } from "../src/lib/seniority";
+import { profile, seniorityFor } from "../src/lib/profile";
 
 // Paced fit-analysis backlog filler over the FREE provider chain. Wave 1 (the
 // user's pick): score > 50 AND visa-positive — the company is in a public
@@ -32,6 +37,17 @@ function log(line: string): void {
   const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
   console.log(stamped);
   appendFileSync("fit-fill.log", stamped + "\n");
+}
+
+
+// Refuse rather than compete: two processes alternating between the 27B and
+// the embedder spend their time reloading 17.7 GB of weights, not working.
+{
+  const busy = gpuBusyMessage();
+  if (busy) { log(busy); await prisma.$disconnect(); process.exit(0); }
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") acquireGpu("manual/fit");
+  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") process.on("exit", releaseGpu);
+  setInterval(beatGpu, 20_000).unref();
 }
 
 const freshCut = new Date(Date.now() - 45 * 86_400_000);
@@ -66,10 +82,33 @@ try {
 
 const skipped: string[] = []; // title-only rows wait for desc:fill
 
+// Facts we already extracted can rule a posting out before the 27B ever
+// reads it: a talent-pool ad with no real opening, a language the candidate
+// does not work in, a level the track avoids. These are NOT dropped — the
+// store-all rule holds and a profile change can revive them — but they go to
+// the very back of the queue, behind even the postings that refuse visas.
+// Judging one of these costs a minute stolen from a live option.
+//
+// Note the split this keeps: facts DETECT (ghost wording, a required
+// language, a stated level), the profile JUDGES (whether that language or
+// level is a barrier for THIS person). Nothing here is hardcoded to one CV.
+function factsRuleOut(f: { ghostRisk: boolean; langReq: string | null; seniorityLevel: string | null } | null, track: string | null): boolean {
+  if (!f) return false;
+  if (f.ghostRisk) return true;
+  const needed = (f.langReq ?? "").split(",").filter(Boolean);
+  if (needed.some((c) => !profile.languages.includes(c))) return true;
+  const level = (f.seniorityLevel ?? "unknown") as SeniorityLevel;
+  return level !== "unknown" && levelBlocked(level, seniorityFor(track ?? undefined).avoid);
+}
+
 async function buildQueue(): Promise<string[]> {
   const candidates = await prisma.job.findMany({
     where: { ...where, id: { notIn: skipped } },
-    select: { id: true, score: true, visaTier: true, vector: { select: { vector: true } } },
+    select: {
+      id: true, score: true, visaTier: true, track: true,
+      vector: { select: { vector: true } },
+      facts: { select: { ghostRisk: true, langReq: true, seniorityLevel: true } },
+    },
   });
   // Tier order by CERTAINTY of the sponsorship route, then the measured
   // keyword/embedding blend inside each tier. Postings that explicitly refuse
@@ -80,10 +119,11 @@ async function buildQueue(): Promise<string[]> {
   const scored = candidates.map((c) => ({
     id: c.id,
     score: c.score,
-    rank: RANK[c.visaTier] ?? 2,
+    // Tier 4 is the facts-ruled-out lane: last in line, still in line.
+    rank: factsRuleOut(c.facts, c.track) ? 4 : RANK[c.visaTier] ?? 2,
     sim: cv && c.vector ? cosine(fromBuffer(c.vector.vector), cv) : null,
   }));
-  return [0, 1, 2, 3].flatMap((r) => blendOrder(scored.filter((s) => s.rank === r))).map((s) => s.id);
+  return [0, 1, 2, 3, 4].flatMap((r) => blendOrder(scored.filter((s) => s.rank === r))).map((s) => s.id);
 }
 
 const RESNAPSHOT = 100;
@@ -93,6 +133,7 @@ const total = queue.length;
 
 let done = 0;
 let failStreak = 0;
+let factsDone = 0;
 let cursor = 0;
 let sinceSnapshot = 0;
 while (done < LIMIT) {
@@ -107,7 +148,10 @@ while (done < LIMIT) {
   cursor += ids.length;
   const rows = await prisma.job.findMany({
     where: { id: { in: ids }, fitScore: null },
-    include: { content: { select: { description: true } } },
+    include: {
+      content: { select: { description: true } },
+      facts: { select: { extractorVersion: true } },
+    },
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
   const batch = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => Boolean(r));
@@ -122,7 +166,26 @@ while (done < LIMIT) {
       continue;
     }
     try {
-      const fit = await analyzeFit({ ...j, description: desc, visaTier: j.visaTier, seniorityLevel: j.seniorityLevel, langReq: j.langReq });
+      // Extract the posting's facts FIRST, and only for a posting we are
+      // about to judge. Running facts over the whole pool would be 218 GPU
+      // hours for 78k rows, most of which will never be judged at all; doing
+      // it here costs ~12s on top of a ~50s judgment and nothing on the rows
+      // we never reach. The judgment needs it: visa tier, language and level
+      // reach the prompt as structured lines, not as prose to be re-derived.
+      let job = j;
+      if (!j.facts || j.facts.extractorVersion !== EXTRACTOR_VERSION) {
+        const facts = await extractFacts({ title: j.title, company: j.company, description: desc });
+        if (facts) {
+          await applyFactsToJob(j.id, facts);
+          const fresh = await prisma.job.findUnique({
+            where: { id: j.id },
+            select: { visaTier: true, seniorityLevel: true, langReq: true },
+          });
+          if (fresh) job = { ...j, ...fresh };
+          factsDone++;
+        }
+      }
+      const fit = await analyzeFit({ ...job, description: desc, visaTier: job.visaTier, seniorityLevel: job.seniorityLevel, langReq: job.langReq });
       if (!fit) {
         failStreak++;
       } else {
@@ -147,7 +210,7 @@ while (done < LIMIT) {
         });
         done++;
         sinceSnapshot++;
-        if (done % 25 === 0) log(`  ${done}/${total} analiz edildi (son: ${j.company.slice(0, 24)} — ${fit.fitScore})`);
+        if (done % 25 === 0) log(`  ${done}/${total} analiz edildi, ${factsDone} çıkarım (son: ${j.company.slice(0, 24)} — ${fit.fitScore})`);
       }
     } catch (e: any) {
       failStreak++;
@@ -169,5 +232,5 @@ while (done < LIMIT) {
   }
 }
 
-log(`=== Bitti: ${done} ilan analiz edildi ===`);
+log(`=== Bitti: ${done} ilan analiz edildi, ${factsDone} tanesi için gerçekler de çıkarıldı ===`);
 await prisma.$disconnect();

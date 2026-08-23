@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { postingView } from "./sections";
+import { TEXT_VERSION } from "./html-text";
 
 // Embedding layer for the blended fit-queue priority (bake-off winner:
 // qwen3-embedding:0.6b, whole-CV query, measured 2026-08-21 — see
@@ -14,6 +15,38 @@ const OLLAMA = process.env.OLLAMA_URL ?? "http://localhost:11434";
 // a plateau; 40 was best on the confirm and 27B-gold slices. Re-run the sweep
 // as the gold set grows and update here.
 export const KEYWORD_WEIGHT = 0.4;
+
+// How the job side was turned into text. Bump when the embed view or its
+// budget changes — a vector built from a different projection is not
+// comparable to one built from this projection, and the only way to notice is
+// to record which one it was.
+export const EMBED_VIEW_VERSION = "s2500";
+
+// The provenance stamp stored on every vector: the text it read and the
+// projection that chose which of that text to read. Anything that does not
+// match the current stamp is stale work, which is what makes the queue a
+// query rather than a guess.
+export function embedStamp(): string {
+  return `${TEXT_VERSION}/${EMBED_VIEW_VERSION}`;
+}
+
+// "This job needs embedding." One definition, because there are three callers
+// (the counter, the walker, the worker) and a copy that drifts is how a queue
+// reports zero work while half of it is stale.
+//
+// The `builtFrom: null` arm is not redundant: in SQL, NULL is not "different
+// from" anything, so `builtFrom != stamp` silently skips every row written
+// before the column existed — which was all of them.
+export function staleVectorWhere() {
+  return {
+    OR: [
+      { vector: { is: null } },
+      { vector: { model: { not: EMBED_MODEL } } },
+      { vector: { builtFrom: null } },
+      { vector: { builtFrom: { not: embedStamp() } } },
+    ],
+  };
+}
 
 export async function embedTexts(texts: string[]): Promise<number[][]> {
   const res = await fetch(`${OLLAMA}/api/embed`, {

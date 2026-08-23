@@ -116,7 +116,8 @@ export async function analyzeFitAction(formData: FormData) {
     data: {
       fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk,
       ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown" ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
-      ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
+      ...(fit.visaOffered === "yes" ? { visa: "yes" } : {}),
+      ...(fit.category === "NO_VISA" || fit.visaOffered === "no" ? { visa: "no" } : {}),
       judgments: {
         create: {
           model: "on-demand-strong", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,

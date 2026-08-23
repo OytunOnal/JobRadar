@@ -68,10 +68,16 @@ function regionOk(job: RawJob): boolean {
 // Deterministic keyword scorer. Picks the best-matching track and scores by how
 // strongly the posting hits that track's vocabulary, with bonuses for remote and
 // an explicit senior signal.
-export function scoreJob(job: RawJob): Scored {
+// opts.knownLevel: a level already extracted from the posting by the facts
+// stage (lib/facts.ts). The regex detector is the floor, not the truth — a
+// posting titled "Software Engineer" whose body says "8+ years, you will
+// manage a team" reads as management to the model and as nothing to a title
+// regex. When an authoritative reading exists, the band check must judge THAT.
+export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}): Scored {
   const text = `${job.title}\n${job.description}`.toLowerCase();
   const title = job.title.toLowerCase();
-  const seniority = detectSeniority(job.title, job.description);
+  const detected = detectSeniority(job.title, job.description);
+  const seniority = { level: opts.knownLevel ?? detected.level };
   const extras = {
     seniorityLevel: seniority.level,
     langReq: detectLanguageRequirements(job.description).join(","),

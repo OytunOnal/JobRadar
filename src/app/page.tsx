@@ -25,6 +25,13 @@ const WORK_MODES = [
 ] as const;
 const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
 const AGES = ["fresh", "all"] as const;
+// The visa axis: a derived tier, not raw evidence (see lib/visa.ts). Hidden
+// entirely when the profile says no sponsorship is needed anywhere.
+const VISA_TIERS = ["yes", "maybe", "no", "unknown", "not-needed"] as const;
+const VISA_TIER_LABELS: Record<(typeof VISA_TIERS)[number], string> = {
+  yes: "visa: yes", maybe: "visa: maybe", no: "visa: no",
+  unknown: "visa: unknown", "not-needed": "no visa needed",
+};
 const PAGE_SIZE = 30;
 
 // Jobs the user is actively pursuing stay visible whatever their age.
@@ -68,7 +75,7 @@ export default async function Page({
   const region = [...regionSet].sort().join(",");
   const countryParam = new Set((sp.country ?? "").split(",").map((s) => s.trim()).filter(Boolean));
   const visaSet = new Set(
-    (sp.visa ?? "").split(",").map((s) => s.trim()).filter((s) => ["yes", "unknown", "no"].includes(s)),
+    (sp.visa ?? "").split(",").map((s) => s.trim()).filter((s) => VISA_TIERS.includes(s as never)),
   );
   const visa = [...visaSet].sort().join(",");
   const q = (sp.q ?? "").trim();
@@ -84,7 +91,7 @@ export default async function Page({
   if (verdict !== "all") where.fitVerdict = verdict;
   if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
-  if (visaSet.size > 0) where.visa = { in: [...visaSet] };
+  if (visaSet.size > 0) where.visaTier = { in: [...visaSet] };
 
   // The pool's own clock: how far the newest observation has advanced. Guards
   // the delisted check against "we simply haven't ingested lately".
@@ -326,12 +333,12 @@ export default async function Page({
         <div className="fgroup">
           <span className="flabel">visa</span>
           <a href={href({ visa: "" })} className={`chip ${visaSet.size === 0 ? "active" : ""}`}>all</a>
-          {(["yes", "unknown", "no"] as const).map((v) => {
+          {VISA_TIERS.map((v) => {
             const next = new Set(visaSet);
             if (next.has(v)) next.delete(v); else next.add(v);
             return (
               <a key={v} href={href({ visa: [...next].sort().join(",") })}
-                 className={`chip ${visaSet.has(v) ? "active" : ""}`}>{v === "yes" ? "sponsors" : v}</a>
+                 className={`chip ${visaSet.has(v) ? "active" : ""}`}>{VISA_TIER_LABELS[v]}</a>
             );
           })}
         </div>
@@ -427,10 +434,11 @@ export default async function Page({
                 )}
                 {j.ghostRisk && <span className="badge ghost">ghost?</span>}
                 {j.visa === "yes" && <span className="badge s-strong">visa</span>}
-                {j.sponsorReg && (
-                  <span className="badge s-strong" title="Company appears in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE)">
-                    sponsor✓
-                  </span>
+                {j.visaTier === "yes" && (
+                  <span className="badge s-strong" title="The posting itself states it sponsors visas / offers relocation.">sponsor✓</span>
+                )}
+                {j.visaTier === "maybe" && (
+                  <span className="badge s-possible" title="The posting is silent, but the company is listed in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE) — it CAN sponsor.">sponsor?</span>
                 )}
                 {langBarriers.length > 0 && (
                   <span className="badge age-evergreen" title="The description appears to require a language outside your profile — verify before applying.">

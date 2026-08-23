@@ -27,6 +27,9 @@ export interface GeneratedProfile {
   // These keep user-specific judgment OUT of shared code: seniority appetite
   // and spoken languages differ per user, so they live in the profile.
   languages?: string[]; // ISO codes the candidate works in, e.g. ["en","tr"]
+  // Where the candidate may already work without sponsorship (ISO alpha-2 or
+  // "eu"). Drives the whole visa axis: empty/absent = needs sponsorship.
+  workAuthorization?: string[];
   seniority?: { boost: string[]; avoid: string[] }; // title words to lift/demote
   extraRoleNegatives?: string[]; // user-specific role exclusions (e.g. "ios developer")
 }
@@ -46,7 +49,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
       : "Infer the target roles from the CV.",
     "",
     "Return STRICT JSON only, exactly this shape:",
-    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "...": ["..."]}}], "searchQueries": ["..."], "languages": ["<iso codes>"], "seniority": {"boost": ["..."], "avoid": ["..."]}}',
+    '{"families": ["<keys>"], "tracks": [{"key": "<kebab-case>", "label": "<short>", "titleKeywords": ["..."], "bodyKeywords": ["..."], "searchVariants": {"en": ["..."], "de": ["..."], "...": ["..."]}}], "searchQueries": ["..."], "languages": ["<iso codes>"], "workAuthorization": ["<iso codes or eu>"], "seniority": {"boost": ["..."], "avoid": ["..."]}}',
     "",
     "families: 1-3 keys from this fixed list (which professional families the candidate belongs to / targets):",
     familyList,
@@ -63,6 +66,7 @@ export function generationPrompt(cv: string, targetRoles?: string): string {
     "searchQueries: 3-6 short search strings for job aggregators (e.g. \"senior product manager remote\").",
     "",
     "languages: ISO 639-1 codes of languages the candidate can WORK in, judged from the CV (education country, work history, stated skills). English almost always included.",
+    "workAuthorization: ISO alpha-2 codes (or \"eu\") where the candidate ALREADY has the right to work without sponsorship, judged conservatively from the CV (citizenship, current country of residence and work history). Include only what the CV supports; when unclear return [] — an empty list means every foreign job is treated as needing sponsorship.",
     "seniority: title words reflecting the level the candidate targets. boost = levels to prioritize (e.g. [\"senior\",\"lead\"] for an experienced IC, [\"junior\",\"graduate\"] for a new grad). avoid = levels that would be a mismatch (e.g. [\"principal\",\"head of\",\"engineering manager\"] for an IC not seeking management; [] when unclear).",
     "Seniority can also be set PER TRACK (a track may carry its own {\"seniority\": {\"boost\": [...], \"avoid\": [...]}}) when the candidate's level differs per field — e.g. 10 years in one specialty (lead-level there) but 1-2 years in another (mid-level there). Track-level overrides the global lists for jobs on that track.",
     "",

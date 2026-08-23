@@ -69,18 +69,21 @@ const skipped: string[] = []; // title-only rows wait for desc:fill
 async function buildQueue(): Promise<string[]> {
   const candidates = await prisma.job.findMany({
     where: { ...where, id: { notIn: skipped } },
-    select: { id: true, score: true, sponsorReg: true, visa: true, vector: { select: { vector: true } } },
+    select: { id: true, score: true, visaTier: true, vector: { select: { vector: true } } },
   });
+  // Tier order by CERTAINTY of the sponsorship route, then the measured
+  // keyword/embedding blend inside each tier. Postings that explicitly refuse
+  // sponsorship go LAST: for a candidate who needs it they are dead ends, and
+  // GPU minutes spent there are minutes stolen from live options. ("not-needed"
+  // rides at the top with yes — no barrier at all.)
+  const RANK: Record<string, number> = { "not-needed": 0, yes: 0, maybe: 1, unknown: 2, no: 3 };
   const scored = candidates.map((c) => ({
     id: c.id,
     score: c.score,
-    visaTier: c.sponsorReg || c.visa === "yes" ? 1 : 0,
+    rank: RANK[c.visaTier] ?? 2,
     sim: cv && c.vector ? cosine(fromBuffer(c.vector.vector), cv) : null,
   }));
-  return [
-    ...blendOrder(scored.filter((s) => s.visaTier === 1)),
-    ...blendOrder(scored.filter((s) => s.visaTier === 0)),
-  ].map((s) => s.id);
+  return [0, 1, 2, 3].flatMap((r) => blendOrder(scored.filter((s) => s.rank === r))).map((s) => s.id);
 }
 
 const RESNAPSHOT = 100;

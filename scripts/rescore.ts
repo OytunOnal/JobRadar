@@ -1,5 +1,6 @@
 import { prisma } from "../src/lib/db";
 import { scoreJob, SCORER_VERSION } from "../src/lib/score";
+import type { SeniorityLevel } from "../src/lib/seniority";
 import { deriveWorkMode } from "../src/lib/sources/types";
 import { loadLocationCache, resolveWithCache } from "../src/lib/locresolve";
 import { detectVisa } from "../src/lib/visa";
@@ -31,7 +32,7 @@ while (true) {
     select: {
       id: true, title: true, company: true,
       location: true, remote: true, source: true, externalId: true, url: true,
-      seniorityBy: true,
+      seniorityBy: true, seniorityLevel: true,
       content: { select: { description: true } },
     },
     take: BATCH,
@@ -49,7 +50,13 @@ while (true) {
       remote: j.remote,
       description: desc,
     };
-    const s = scoreJob(raw);
+    // The facts stage (or an earlier LLM fit) may already know this posting's
+    // level better than any regex can — judge the band against that.
+    const s = scoreJob(raw, {
+      knownLevel: j.seniorityBy === "llm" && j.seniorityLevel
+        ? (j.seniorityLevel as SeniorityLevel)
+        : undefined,
+    });
     // Rows that no longer pass are kept (the user may have acted on them) but
     // flagged: store-all semantics, never delete.
     const track = s.disqualified ? "other" : s.track;

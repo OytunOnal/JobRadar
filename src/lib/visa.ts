@@ -47,3 +47,66 @@ export function detectVisa(description: string, title = ""): VisaSignal {
   if (POSITIVE_RE.test(text)) return "yes";
   return "unknown";
 }
+
+// ── Visa tier: the derived answer the UI and the fit queue actually use ──────
+// Evidence (what the POSTING says) and capability (what the COMPANY may do)
+// are different facts and they DO contradict — 51 live rows sit in a public
+// sponsor register while their posting explicitly refuses sponsorship. So the
+// tier is derived, never stored by hand:
+//
+//   not-needed  the user already has the right to work in this job's country
+//   yes         the posting (or the source's structured flag) offers sponsorship
+//   maybe       posting silent, but the company is register-listed OR the whole
+//               source only lists licensed sponsors
+//   no          the posting explicitly refuses / demands an existing permit
+//   unknown     nothing is known
+//
+// Whether sponsorship is needed AT ALL is a per-user question: an EU citizen
+// applying inside the EU never needs it. profile.workAuthorization carries the
+// regions the user may already work in.
+export type VisaTier = "not-needed" | "yes" | "maybe" | "no" | "unknown";
+
+// Sources whose every posting comes from a licensed sponsor by construction
+// (e.g. a board built solely from a government sponsor register). Declared
+// here rather than guessed per job.
+export const VISA_FOCUSED_SOURCES: ReadonlySet<string> = new Set(["huntukvisa"]);
+
+// Evidence strength: a weaker layer must never overwrite a stronger one.
+const EVIDENCE_RANK: Record<string, number> = { regex: 1, source: 2, llm: 3 };
+
+export function visaEvidenceWins(existingBy: string | null | undefined, incomingBy: string): boolean {
+  const cur = EVIDENCE_RANK[existingBy ?? ""] ?? 0;
+  return (EVIDENCE_RANK[incomingBy] ?? 0) >= cur;
+}
+
+export function needsSponsorship(
+  jobCountry: string | null | undefined,
+  authorizedRegions: readonly string[],
+): boolean {
+  if (!jobCountry) return true; // unknown location — assume it may be needed
+  const c = jobCountry.toLowerCase();
+  if (authorizedRegions.includes(c)) return false;
+  // "eu" as an authorization grant covers EU member states.
+  if (authorizedRegions.includes("eu") && EU_COUNTRIES.has(c)) return false;
+  return true;
+}
+
+const EU_COUNTRIES = new Set([
+  "at", "be", "bg", "hr", "cy", "cz", "dk", "ee", "fi", "fr", "de", "gr", "hu",
+  "ie", "it", "lv", "lt", "lu", "mt", "nl", "pl", "pt", "ro", "sk", "si", "es", "se",
+]);
+
+export function deriveVisaTier(job: {
+  visa: string;
+  sponsorReg: boolean;
+  source: string;
+  country: string | null | undefined;
+}, authorizedRegions: readonly string[]): VisaTier {
+  if (!needsSponsorship(job.country, authorizedRegions)) return "not-needed";
+  // An explicit refusal in the posting outranks the company's licence: holding
+  // a sponsor licence is not a promise to use it for THIS role.
+  if (job.visa === "no") return "no";
+  if (job.visa === "yes") return "yes";
+  if (job.sponsorReg || VISA_FOCUSED_SOURCES.has(job.source)) return "maybe";
+  return "unknown";
+}

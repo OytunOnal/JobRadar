@@ -107,6 +107,17 @@ model Job {
   visa        String   @default("unknown")
   // Company appears in its country's public sponsor register (see VisaSponsor).
   sponsorReg  Boolean  @default(false)
+  // Who established the posting-level visa signal: regex (ingest heuristic) |
+  // source (a board's structured flag) | llm (the model read the posting).
+  // Strength order llm > source > regex — a weaker layer never overwrites a
+  // stronger one. Same provenance pattern as scoredBy/seniorityBy/fitBy.
+  visaBy      String?
+  // DERIVED from visa + visaBy + sponsorReg + source + the profile's work
+  // authorization: not-needed | yes | maybe | no | unknown. Stored (not
+  // computed per query) because the radar filters and the fit queue sort on
+  // it over half a million rows. Every write goes through applyVisaEvidence()
+  // and `npm run doctor` audits the invariant.
+  visaTier    String   @default("unknown")
   // Application tracking (the /applied page): when it was applied to, the
   // next follow-up nudge, and a free-form note.
   appliedAt   DateTime?
@@ -158,6 +169,7 @@ model Job {
 
   content   JobContent?
   vector    JobEmbedding?
+  facts     PostingFacts?
   listings  JobListingHistory[]
   scores    KeywordScoreHistory[]
   judgments LlmJudgmentHistory[]
@@ -171,6 +183,7 @@ model Job {
   @@index([country])
   @@index([postedAt])
   @@index([lastSeenAt]) // poolNewest max() and freshness windows
+  @@index([visaTier])
 }
 
 // ── Layered architecture (see docs/ARCHITECTURE.md) ──────────────────────────
@@ -179,6 +192,25 @@ model Job {
 // Job stays the thin hot core; its score/fit/status columns are CURRENT-value
 // projections of the history tables below (CQRS-lite: SQLite sorts want the
 // current value on the hot row).
+
+// CV-INDEPENDENT extractions about the POSTING itself: what level is this
+// role, which languages does it demand, does it offer sponsorship, does it
+// smell like a ghost ad. These are facts about the text, so they stay valid
+// when the user edits their CV — unlike fit judgments, which must then be
+// redone. Hence a 1:1 current-value table (re-extract overwrites) rather than
+// a history: the posting didn't change, only our extractor might improve,
+// which extractorVersion records.
+model PostingFacts {
+  jobId            String  @id
+  job              Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  visaOffered      String? // yes | no | null (posting silent)
+  seniorityLevel   String? // intern|junior|mid|senior|staff|management|unknown
+  langReq          String? // comma-separated ISO codes required by the posting
+  ghostRisk        Boolean @default(false)
+  model            String
+  extractorVersion String
+  at               DateTime @default(now())
+}
 
 // Fat text, split from Job so list scans never page through 8KB descriptions
 // (measured: ~10KB rows made every filter click scan gigabytes).

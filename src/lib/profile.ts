@@ -122,7 +122,13 @@ export const profile = {
         "coder", "sde", "dev ",
       ],
 
-  // Roles from every UNSELECTED family — the mirror of roleSignals.
+  // Regions/countries where the candidate ALREADY has the right to work
+  // (ISO alpha-2, or "eu" for EU-wide rights). Jobs there need no sponsorship
+  // and drop out of the visa axis entirely — an EU citizen applying inside the
+  // EU should never see a visa chip. Empty = assume sponsorship is needed
+  // everywhere (the conservative default).
+  workAuthorization: generated?.workAuthorization ?? [],
+
   // Languages the candidate can work in (ISO codes). Detection of a posting's
   // language REQUIREMENTS is universal (lib/langreq.ts); whether a requirement
   // is a barrier is judged against this list.
@@ -135,6 +141,7 @@ export const profile = {
   seniorityBoost: generated?.seniority?.boost ?? ["senior", "lead", "staff"],
   seniorityAvoid: generated?.seniority?.avoid ?? [],
 
+  // Roles from every UNSELECTED family — the mirror of roleSignals.
   roleNegatives: (generated
     ? deriveRoleNegatives(generated.families)
     : [

@@ -47,6 +47,7 @@ import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
 import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
+import { visaFields } from "./visa-write";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "./locresolve";
@@ -460,7 +461,16 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       remote: job.remote,
       country: resolveWithCache(job.location, locationCache),
       workMode: deriveWorkMode(job),
-      visa: job.visa ?? detectVisa(job.description, job.title),
+      ...visaFields(
+        {
+          visa: job.visa ?? detectVisa(job.description, job.title),
+          // A source's own structured flag is stronger evidence than our regex.
+          visaBy: job.visa ? "source" : "regex",
+          sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
+          source: job.source,
+          country: resolveWithCache(job.location, locationCache),
+        },
+      ),
       // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
       sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
       salaryText: job.salaryText ?? null,
@@ -508,7 +518,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           salaryText: data.salaryText,
           workMode: data.workMode,
           country: data.country,
-          visa: data.visa,
+          ...visaFields(
+            { visa: existing.visa, visaBy: existing.visaBy, sponsorReg: data.sponsorReg, source: existing.source, country: data.country },
+            { visa: data.visa as any, by: data.visaBy === "source" ? "source" : "regex" },
+          ),
           contentKey: ck,
           langReq: data.langReq,
           // The LLM's level verdict outranks the detector — don't overwrite it.

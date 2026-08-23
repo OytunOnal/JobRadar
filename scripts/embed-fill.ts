@@ -28,6 +28,11 @@ const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
 // revive it, and the rescue lane mines it by similarity) but it is 445k rows
 // of work that must not stand between a text change and the judging queue.
 const CANDIDATES_ONLY = args.includes("--candidates");
+// --archive: the mirror image — ONLY the disqualified archive. Without it the
+// worker's idle lane said "filling the archive" while embed-fill walked the
+// live pool first, so the archive was never reached as long as one
+// non-judgeable candidate was stale, and the log said otherwise.
+const ARCHIVE_ONLY = args.includes("--archive");
 // --min-score / --max-score: embed one score chunk. The worker walks chunks
 // top-down and wants vectors for the chunk it is about to judge, not for the
 // whole pool — seconds of work instead of a quarter of an hour.
@@ -89,25 +94,6 @@ function log(line: string): void {
 
 interface Row { id: string; title: string; content: { description: string } | null }
 
-async function fetchBatch(): Promise<Row[]> {
-  return prisma.job.findMany({
-    // "Missing" is not the only kind of stale. A vector built from text we
-    // have since re-fetched, or from a projection we have since redesigned,
-    // is wrong in a way `vector IS NULL` cannot express — which is how the
-    // pool once reported zero pending work while every vector was outdated.
-    where: {
-      delistedAt: null, duplicateOfId: null,
-      ...chunkWhere(CHUNK),
-      // AND, not spread: VISA_MARKED and staleVectorWhere BOTH return an
-      // `OR` key, and spreading lets the second silently erase the first.
-      AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
-    },
-    orderBy: [{ disqualified: "asc" }, { score: "desc" }],
-    take: BATCH,
-    select: { id: true, title: true, content: { select: { description: true } } },
-  });
-}
-
 // One multi-row statement per batch — SQLite pays the commit cost once, not
 // N times. $executeRawUnsafe with placeholders (values parameterized).
 async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
@@ -147,6 +133,7 @@ async function main() {
     where: {
       delistedAt: null, duplicateOfId: null,
       ...(CANDIDATES_ONLY ? { disqualified: false } : {}),
+      ...(ARCHIVE_ONLY ? { disqualified: true } : {}),
       ...chunkWhere(CHUNK),
       AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
     },
@@ -170,7 +157,10 @@ async function main() {
   // Two phases keep the "candidates first" priority: phase 0 walks
   // disqualified=false, phase 1 the archive. Within a phase, id-cursor pages.
   let lastId = "";
-  let phase = 0;
+  // --archive starts at the archive phase and never touches the live pool;
+  // --candidates does the reverse. Both are needed: the worker's idle lane
+  // must be able to say "only the archive" and mean it.
+  let phase = ARCHIVE_ONLY ? 1 : 0;
   const fetchAfter = async (): Promise<Row[]> => {
     for (;;) {
       const rows = await prisma.job.findMany({

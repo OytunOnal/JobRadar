@@ -1,4 +1,4 @@
-import { analyzeFit, judgeableWhere, VISA_MARKED, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { analyzeFit, andWhere, judgeableWhere, unjudgedWhere, VISA_MARKED, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
 import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
@@ -57,11 +57,14 @@ const CHUNK = chunkFromArgs(args);
 // register, a source's structured flag, or the posting's own words). The
 // user's stated priority, and knowable without spending a second of GPU.
 const VISA_ONLY = args.includes("--visa-marked");
-const where = {
-  ...judgeableWhere(WIDE),
-  ...chunkWhere(CHUNK),
-  ...(VISA_ONLY ? { AND: [...((judgeableWhere(WIDE) as any).AND ?? []), VISA_MARKED] } : {}),
-};
+// Composed through andWhere, and judgeableWhere is called ONCE: it computes a
+// `new Date()` cut-off internally, so calling it twice in one expression made
+// two subtly different filters out of what reads as one.
+const where = andWhere(
+  judgeableWhere(WIDE),
+  chunkWhere(CHUNK),
+  VISA_ONLY ? VISA_MARKED : null,
+);
 
 // Blended queue: visa-positive tier first, then the measured 40/60
 // keyword/embedding rank blend (see src/lib/embed.ts). Jobs without a vector
@@ -98,7 +101,7 @@ function factsRuleOut(f: { ghostRisk: boolean; langReq: string | null; seniority
 
 async function buildQueue(): Promise<string[]> {
   const candidates = await prisma.job.findMany({
-    where: { ...where, id: { notIn: skipped } },
+    where: andWhere(where, { id: { notIn: skipped } }),
     select: {
       id: true, score: true, visaTier: true, track: true,
       vector: { select: { vector: true } },
@@ -143,10 +146,14 @@ while (done < LIMIT) {
   const ids = queue.slice(cursor, cursor + 25);
   cursor += ids.length;
   const rows = await prisma.job.findMany({
-    where: { id: { in: ids }, fitScore: null },
+    // The SAME "not judged by this system" test the queue was built from. A
+    // second, narrower copy here (`fitScore: null`) queued every stale-verdict
+    // posting and then dropped it from the batch, so nothing was ever
+    // re-judged and the loop just spun.
+    where: andWhere({ id: { in: ids } }, unjudgedWhere()),
     include: {
       content: { select: { description: true } },
-      facts: { select: { extractorVersion: true } },
+      facts: { select: { extractorVersion: true, ghostRisk: true, langReq: true, seniorityLevel: true } },
     },
   });
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -179,18 +186,16 @@ while (done < LIMIT) {
           });
           if (fresh) job = { ...j, ...fresh };
           factsDone++;
-          // Just-extracted facts can rule the posting out — talent-pool
-          // wording, a language the profile lacks, a level the track avoids.
-          // Spending ~50s judging it now would be a minute stolen from a live
-          // option; leave it unjudged and the next queue rebuild files it in
-          // the back tier, where it is still reachable.
-          if (factsRuleOut(facts as any, j.track)) {
-            ruledOut++;
-            skipped.push(j.id);
-            continue;
-          }
         }
       }
+      // Ruled out by its facts? It still gets judged — the user's rule is
+      // "last in line", not "never" — and buildQueue's tier 4 is what puts it
+      // there. This used to also skip the judgment right here, which looked
+      // like the same thing and was not: the skip only fired on the pass that
+      // extracted the facts, so the posting was judged normally on the next
+      // one. Two mechanisms for one rule, one of them accidental. Counting it
+      // keeps the effect visible without a second code path.
+      if (factsRuleOut(j.facts as any, j.track)) ruledOut++;
       const fit = await analyzeFit({ ...job, description: desc, visaTier: job.visaTier, seniorityLevel: job.seniorityLevel, langReq: job.langReq });
       if (!fit) {
         failStreak++;
@@ -241,5 +246,5 @@ while (done < LIMIT) {
   }
 }
 
-log(`=== Bitti: ${done} analiz, ${factsDone} çıkarım, ${ruledOut} ilan gerçeklerle elenip sona atıldı ===`);
+log(`=== Bitti: ${done} analiz, ${factsDone} çıkarım, ${ruledOut} ilan gerçekleriyle son kademede ===`);
 await prisma.$disconnect();

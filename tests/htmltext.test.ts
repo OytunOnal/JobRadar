@@ -36,3 +36,13 @@ test("looksLikeHtml: flags both raw and escaped markup, ignores plain text", () 
   assert.equal(looksLikeHtml("&lt;p&gt;hi&lt;/p&gt;"), true);
   assert.equal(looksLikeHtml("5 < 7 and a > b"), false);
 });
+
+test("empty list items are dropped, a real dash line is kept", () => {
+  // Brainlabs publishes `<li><strong>&nbsp;</strong></li>` placeholders; a
+  // bare "-" bullet costs prompt tokens and makes a section look populated.
+  const html = "<ul><li><strong>&nbsp;</strong></li><li>Ship features</li></ul>";
+  const out = htmlToText(html);
+  assert.equal(out, "- Ship features");
+  // But a dash the POSTING wrote is not ours to delete.
+  assert.match(htmlToText("<p>Salary band</p><p>-</p><p>Negotiable</p>"), /\n-\n/);
+});

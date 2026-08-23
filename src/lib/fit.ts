@@ -56,14 +56,31 @@ export const VISA_MARKED = {
   OR: [{ visaTier: "yes" }, { visaTier: "not-needed" }, { sponsorReg: true }, { visa: "yes" }],
 };
 
+// Combine Prisma filters without one silently erasing another.
+//
+// Spreading two filter objects into one looks like composition and is not:
+// `{...a, ...b}` keeps only b's `OR`, only b's `AND`, only b's `score`. That
+// cost us two silent bugs — a visa filter that vanished (the worker queued
+// 72,111 postings instead of 3,509) and a staleness check that matched
+// nothing. Every part lands in the AND list here, so nothing can be shadowed.
+export function andWhere(...parts: Array<Record<string, unknown> | null | undefined>) {
+  return { AND: parts.filter(Boolean) as Record<string, unknown>[] };
+}
+
+// "Not judged" is the wrong question; "not judged by THIS system" is the
+// right one. All 5,622 existing verdicts came from a pre-v7 prompt reading
+// markup-filled text through a blind head-slice — keeping them would freeze
+// the radar on a system we have replaced.
+//
+// Exported because the queue builder and the row fetch BOTH need it, and
+// when the fetch kept its own `fitScore: null` the stale-verdict postings
+// were queued and then silently dropped before they could be re-judged.
+export function unjudgedWhere() {
+  return { OR: [{ fitScore: null }, { fitPromptVersion: { not: FIT_PROMPT_VERSION } }] };
+}
+
 export function judgeableWhere(wide: boolean) {
-  // "Not judged" is the wrong question; "not judged by THIS system" is the
-  // right one. All 5,622 existing verdicts came from a pre-v7 prompt reading
-  // markup-filled text through a blind head-slice — keeping them would freeze
-  // the radar on a system we have replaced.
-  const unjudged = {
-    OR: [{ fitScore: null }, { fitPromptVersion: { not: FIT_PROMPT_VERSION } }],
-  };
+  const unjudged = unjudgedWhere();
   const base = {
     delistedAt: null, duplicateOfId: null, disqualified: false,
     ...OPEN,

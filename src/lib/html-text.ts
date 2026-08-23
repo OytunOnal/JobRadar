@@ -52,6 +52,16 @@ export function htmlToText(input: string | undefined | null): string {
   let s = decodeEntities(decodeEntities(input));
   // Script/style bodies carry no posting content but plenty of noise.
   s = s.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ");
+  // Empty list items are common in the wild — postings published with
+  // `<li><strong>&nbsp;</strong></li>` placeholders (verified on a live
+  // Greenhouse board). Rendering them as bare "-" lines spends prompt tokens
+  // on nothing and makes a section look populated when it is not.
+  //
+  // Removed HERE, while they are still list items, rather than by deleting
+  // lone "-" lines from the finished text: that later pass could not tell our
+  // own empty bullet from a dash the posting actually wrote.
+  s = s.replace(/<li[^>]*>[\s\S]*?<\/li>/gi, (item) =>
+    /[\p{L}\p{N}]/u.test(item.replace(/<[^>]+>/g, "")) ? item : "");
   // Turn structure into newlines BEFORE dropping tags.
   s = s.replace(BREAK, "\n");
   s = s.replace(LIST_ITEM, "\n- ");
@@ -63,12 +73,6 @@ export function htmlToText(input: string | undefined | null): string {
   // rescued. Cap blank runs at one so the text stays compact.
   s = s.replace(/[ \t ]+/g, " ");
   s = s.replace(/ *\n[ \t]*/g, "\n").replace(/\n{3,}/g, "\n\n");
-  // Empty list items are common in the wild — postings published with
-  // `<li><strong>&nbsp;</strong></li>` placeholders (verified on a live
-  // Greenhouse board). Faithfully rendering them as bare "-" lines spends
-  // prompt tokens on nothing and makes a section look populated when it is
-  // not. Drop the marker, keep the section.
-  s = s.replace(/^-\s*$/gm, "").replace(/\n{3,}/g, "\n\n");
   return s.trim();
 }
 

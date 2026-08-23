@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
 import { staleVectorWhere } from "../src/lib/embed";
-import { FIT_PROMPT_VERSION, judgeableWhere, VISA_MARKED } from "../src/lib/fit";
+import { andWhere, FIT_PROMPT_VERSION, judgeableWhere, VISA_MARKED } from "../src/lib/fit";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../src/lib/chunks";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 
@@ -81,10 +81,9 @@ const CANDIDATE = { disqualified: false, delistedAt: null, duplicateOfId: null }
 // The same rows the child will work on — used for the before/after progress
 // check, so "did that do anything" is asked about the right population.
 function laneWhere(lane: Lane) {
-  const q = judgeableWhere(true) as any;
   return lane.kind === "visa"
-    ? { ...q, AND: [...(q.AND ?? []), VISA_MARKED] }
-    : { ...q, ...chunkWhere(lane.chunk) };
+    ? andWhere(judgeableWhere(true), VISA_MARKED)
+    : andWhere(judgeableWhere(true), chunkWhere(lane.chunk));
 }
 
 // What the worker works on next, in one place.
@@ -103,8 +102,7 @@ type Lane =
   | { kind: "chunk"; chunk: Chunk };
 
 async function nextLane(): Promise<Lane | null> {
-  const q = judgeableWhere(true) as any;
-  const visa = await prisma.job.count({ where: { ...q, AND: [...(q.AND ?? []), VISA_MARKED] } });
+  const visa = await prisma.job.count({ where: andWhere(judgeableWhere(true), VISA_MARKED) });
   if (visa > 0) return { kind: "visa", n: visa };
   // The pending histogram, straight from SQL: 27k rows is too many to pull
   // into memory just to group them.
@@ -129,7 +127,7 @@ async function pass(): Promise<boolean> {
     // Scope both stages to the SAME selection: vectors for exactly what we
     // are about to judge, which is seconds of work, not the twenty minutes a
     // whole-pool embed would cost before the first verdict.
-    const args = lane.kind === "visa"
+    const childArgs = lane.kind === "visa"
       ? ["--visa-marked"]
       : ["--min-score", String(lane.chunk.lo), "--max-score", String(lane.chunk.hi)];
     const label = lane.kind === "visa"
@@ -138,24 +136,29 @@ async function pass(): Promise<boolean> {
 
     const before = await prisma.job.count({ where: laneWhere(lane) });
 
-    if (!acquireGpu("worker/embed")) return false;
+    // ONE acquire for the whole lane. Releasing between embedding and judging
+    // let a manual script slip into the gap and start swapping models against
+    // us — the exact thrash the lock exists to prevent.
+    if (!acquireGpu("worker/lane")) return false;
     try {
-      const lw = laneWhere(lane) as any;
       const stale = await prisma.job.count({
-        // Same trap: laneWhere already carries an AND list, and
-        // staleVectorWhere returns an OR — merge, never spread over.
-        where: { ...lw, AND: [...(lw.AND ?? []), staleVectorWhere()] },
+        where: andWhere(laneWhere(lane), staleVectorWhere()),
       });
       if (stale > 0) {
         log(`${label} — ${stale.toLocaleString("tr")} vektör eksik/bayat, önce onlar`);
-        await run("scripts/embed-fill.ts", ["--candidates", ...args]);
+        const code = await run("scripts/embed-fill.ts", ["--candidates", ...childArgs]);
+        // A crashed embed pass must not be followed by judging on the stale
+        // vectors it failed to replace: that is a whole batch ordered by a
+        // queue we know is wrong, and nothing would say so.
+        if (code !== 0) {
+          log(`  embed:fill çıkış kodu ${code} — bu turda yargılamayı atlıyorum`);
+          return false;
+        }
       }
-    } finally { releaseGpu(); }
 
-    if (!acquireGpu("worker/judge")) return false;
-    log(`${label} — ${BATCH} ilan yargılanıyor`);
-    try {
-      await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...args]);
+      log(`${label} — ${BATCH} ilan yargılanıyor`);
+      const code = await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]);
+      if (code !== 0) log(`  fit:fill çıkış kodu ${code}`);
     } finally { releaseGpu(); }
 
     // Did anything actually happen? A child that exits without judging —
@@ -174,12 +177,20 @@ async function pass(): Promise<boolean> {
   // scorer fix can requalify those rows, and the rescue lane mines them by
   // similarity — but they must never delay live work, so they run last.
   const archive = await prisma.job.count({
-    where: { disqualified: true, delistedAt: null, duplicateOfId: null, ...staleVectorWhere() },
+    where: andWhere(
+      { disqualified: true, delistedAt: null, duplicateOfId: null },
+      staleVectorWhere(),
+    ),
   });
   if (archive > 0) {
     if (!acquireGpu("worker/archive")) return false;
     log(`boşta: arşivde ${archive.toLocaleString("tr")} vektör eksik — sırayı tıkamadan dolduruluyor`);
-    try { await run("scripts/embed-fill.ts", ["--budget", "2000"]); } finally { releaseGpu(); }
+    try {
+      // --archive, or embed-fill walks the live pool first and this message
+      // describes work it is not doing.
+      const code = await run("scripts/embed-fill.ts", ["--archive", "--budget", "2000"]);
+      if (code !== 0) log(`  embed:fill (arşiv) çıkış kodu ${code}`);
+    } finally { releaseGpu(); }
     return true;
   }
 

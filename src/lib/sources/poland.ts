@@ -38,10 +38,22 @@ export function mapJustJoin(o: any): RawJob | null {
       : undefined,
     // The list payload carries no body, only a skills array — present it as a
     // requirements list so the scorer and the section parser can read it.
+    //
+    // The entries are objects ({name, level} verified live), and joining them
+    // as text is what produced "Mid PHP Symfony Developer, [object Object],
+    // [object Object]" in 326 stored postings. The level is real signal the
+    // source hands us — "ITIL 5/5" is a harder requirement than "Jira 3/5" —
+    // so keep it rather than flattening to a bare name.
     description: labelledSections([
       ["", title],
       ["Requirements", (Array.isArray(o.requiredSkills) ? o.requiredSkills : [])
-        .map((s: any) => `- ${typeof s === "string" ? s : s?.name ?? ""}`).join("\n")],
+        .map((s: any) => {
+          if (typeof s === "string") return `- ${s}`;
+          const name = String(s?.name ?? "").trim();
+          if (!name) return "";
+          return s?.level ? `- ${name} (${s.level}/5)` : `- ${name}`;
+        })
+        .filter(Boolean).join("\n")],
     ]),
     postedAt: o.publishedAt && !Number.isNaN(Date.parse(o.publishedAt)) ? new Date(o.publishedAt) : undefined,
   };

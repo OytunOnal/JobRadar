@@ -6,7 +6,17 @@ import type { RawJob } from "./sources/types";
 
 // Bumped MANUALLY when scoring rules change — KeywordScoreHistory rows carry
 // it, and a re-score means "fill where scorerVersion < this".
-export const SCORER_VERSION = "v6-layered";
+//
+// v7 bumps for a change in INPUT rather than in rules, which is the same
+// thing from a score's point of view. Every detector here reads the posting
+// text, and 26,427 postings were just re-fetched: half the pool had no line
+// breaks at all (the old stripHtml collapsed them) and a quarter carried raw
+// markup. detectSeniority reads bullet structure, detectLanguageRequirements
+// reads sentences, detectVisa reads phrases that were sitting inside
+// `<span style=...>` noise. A score computed from that text is not the score
+// this code produces today, so the version has to say so or the rescue is
+// invisible to a version-gated queue.
+export const SCORER_VERSION = "v7-cleantext";
 
 export interface Scored {
   score: number; // 0-100

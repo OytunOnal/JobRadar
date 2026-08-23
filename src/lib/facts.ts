@@ -20,7 +20,7 @@ import { trimBoilerplate } from "./fit";
 // and remain the fallback; this stage is the authoritative upgrade for jobs
 // that reach the queue.
 
-export const EXTRACTOR_VERSION = "f1";
+export const EXTRACTOR_VERSION = "f2";
 
 export interface PostingFactsResult {
   visaOffered: "yes" | "no" | null;
@@ -40,7 +40,8 @@ export function factsPrompt(): string {
     'visaOffered: "yes" only if the posting states it sponsors visas / work permits / offers relocation support; "no" if it rules sponsorship out or demands an existing local permit; "unclear" if the posting is silent (the usual case — never infer from the company or country).',
     'seniorityLevel: the POSTING\'s level. "staff" covers staff/principal/distinguished; "management" means people management (direct reports), not technical leadership; use the stated years of experience when no level word appears; "unknown" if truly unstated.',
     'languages: ISO 639-1 codes the posting REQUIRES fluency in beyond English (e.g. ["de"]). A "nice to have" is not a requirement. Empty array when none.',
-    "ghostRisk: true when the posting is unlikely to be one real, active opening — talent-pool/evergreen voice, staffing-agency phrasing ('our client', many unrelated stacks), or contradictory requirements. Two weak signals or one strong one.",
+    "ghostRisk: DEFAULT FALSE. Set true only when the posting is unlikely to be one real, active opening. Strong signals (one is enough): explicit talent-pool voice ('we are always looking', 'join our talent community', 'speculative application'); a staffing agency or consultancy advertising an unnamed employer ('our client', 'on behalf of'); requirements that contradict each other ('junior' asking 8+ years).",
+    "NOT ghost risk, do not flag these: a small or unknown company; a startup describing its product and funding; ONE posting that opens SEVERAL named roles at the same company; a remote or freelance arrangement; a short or plainly written description. When only weak hints are present, answer false — a false ghost flag hides a real job.",
   ].join("\n");
 }
 

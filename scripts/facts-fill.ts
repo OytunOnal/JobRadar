@@ -33,7 +33,10 @@ const where = {
   disqualified: false,
   status: { in: ["new", "interested"] },
   score: { gte: 40 },
-  facts: { is: null },
+  // Queue = "no facts yet, or facts from an older extractor". Version-aware
+  // like the keyword rescore: improving the extractor re-runs only what it
+  // must, and the improvement reaches existing rows without a manual sweep.
+  OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }],
   ...(JUDGED_FIRST ? { fitScore: { not: null } } : {}),
 };
 

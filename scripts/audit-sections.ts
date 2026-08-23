@@ -1,5 +1,5 @@
 import { prisma } from "../src/lib/db";
-import { parseSections, postingView, type SectionKind } from "../src/lib/sections";
+import { parseSections, postingView, viewParts, type SectionKind } from "../src/lib/sections";
 import { factsUserPrompt } from "../src/lib/facts";
 
 // A full audit of the sectioning, not a single headline number. Four
@@ -37,6 +37,10 @@ const MARKERS: Record<string, RegExp> = {
 const sample = <T,>(xs: T[], k: number) => xs.slice(0, k);
 
 interface LossRow { kind: string; lost: number; had: number }
+interface RetainRow { kept: number; full: number; cut: number; whole: number }
+
+// The sections a wrong verdict actually turns on.
+const CRITICAL: SectionKind[] = ["requirements", "responsibilities", "niceToHave"];
 
 async function main() {
   const rows = await prisma.job.findMany({
@@ -60,6 +64,8 @@ async function main() {
     for (const m of Object.keys(MARKERS)) loss[v][m] = { kind: m, lost: 0, had: 0 };
     lossSamples[v] = [];
   }
+
+  const retain: Record<string, Record<string, RetainRow>> = { fit: {}, embed: {} };
 
   // ── C. misfiling ───────────────────────────────────────────────────────
   // Only kinds the fit view DROPS can cost us anything.
@@ -133,6 +139,29 @@ async function main() {
       }
     }
 
+    // B2: RETENTION. "The requirements reached the model" and "ALL of the
+    // requirements reached the model" are different claims, and only the
+    // second one means the judge saw the whole list. Measure kept vs full
+    // characters for the sections that decide the verdict.
+    for (const v of VIEWS) {
+      if (v === "facts") continue; // facts adds signal excerpts; not a clean projection
+      for (const p of viewParts(d, v)) {
+        const acc = (retain[v][p.kind] ??= { kept: 0, full: 0, cut: 0, whole: 0 });
+        acc.kept += p.text.length;
+        acc.full += p.full;
+        if (p.text.length < p.full) acc.cut++; else acc.whole++;
+      }
+      // A section the view never opened at all is retention 0, and dropping
+      // it from the average would flatter the number.
+      const opened = new Set(viewParts(d, v).map((p) => p.kind));
+      for (const s of secs) {
+        if (opened.has(s.kind) || !CRITICAL.includes(s.kind) || !s.body.trim()) continue;
+        const acc = (retain[v][s.kind] ??= { kept: 0, full: 0, cut: 0, whole: 0 });
+        acc.full += s.body.length;
+        acc.cut++;
+      }
+    }
+
     // C: is evidence sitting in a section fit throws away?
     for (const s of secs) {
       if (!DROPPED_BY_FIT.includes(s.kind)) continue;
@@ -189,7 +218,15 @@ async function main() {
       .join("  ");
     console.log(`  ${v.padEnd(6)} ${parts}`);
   }
-  console.log("  fit görünümünde gereksinim kaybı örnekleri:");
+  console.log("\n  TUTULMA: kritik bölümün kaç karakteri modele ulaşıyor?");
+  for (const v of ["fit", "embed"]) {
+    for (const k of CRITICAL) {
+      const r = retain[v][k];
+      if (!r || !r.full) continue;
+      console.log(`    ${v.padEnd(6)} ${k.padEnd(17)} ${pct(r.kept, r.full).padStart(6)} tutuldu  |  tam geçen bölüm ${pct(r.whole, r.whole + r.cut)}`);
+    }
+  }
+  console.log("\n  fit görünümünde gereksinim kaybı örnekleri:");
   sample(lossSamples.fit, SHOW).forEach((s) => console.log("   • " + s));
 
   console.log("\n── C. YANLIŞ ATAMA: fit'in attığı bölümlerde gereksinim var mı? ──");

@@ -67,7 +67,7 @@ test("sections come back in document order, not priority order", () => {
 test("a posting with no headings degrades to the old head slice", () => {
   const flat = "We need a Unity developer. ".repeat(200);
   const v = postingView(flat, "fit");
-  assert.ok(v.length > 2900 && v.length <= 3000, `filled the budget, got ${v.length}`);
+  assert.ok(v.length > 3800 && v.length <= 4000, `filled the budget, got ${v.length}`);
   assert.match(v, /Unity developer/);
 });
 

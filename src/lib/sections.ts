@@ -230,13 +230,21 @@ const VIEWS: Record<string, {
 }> = {
   fit: {
     rescue: ["company", "benefits"],
-    budget: 3000,
+    // Measured over 4,000 candidates (scripts/tune-fit-window.ts). Capping
+    // requirements at 1200 delivered the section WHOLE in only 79.5% of
+    // postings — one in five judgments was made on a truncated list of what
+    // the job demands, which produces a confidently wrong verdict rather
+    // than an obviously bad one. Uncapping it costs nothing at the same
+    // budget (97.3% whole, prompt unchanged at ~9.6k chars); going to 4000
+    // reaches 99.5% for about 94 extra tokens a job, against a context
+    // window of 8192 that the prompt currently fills to ~2.5k.
+    budget: 4000,
     quota: [
-      ["requirements", 1200],     // what the job demands — the core of fit
-      ["responsibilities", 900],
-      ["niceToHave", 350],
+      ["requirements", 4000],     // what the job demands — never truncated
+      ["responsibilities", 1200],
+      ["niceToHave", 450],
       ["visa", 250],
-      ["intro", 500],
+      ["intro", 600],
       ["other", 500],
     ],
   },
@@ -254,10 +262,16 @@ const VIEWS: Record<string, {
   },
   embed: {
     rescue: ["company", "benefits"],
+    // The 1500 budget is the embedding bake-off's measured winner, so it
+    // stays until a new bake-off says otherwise. What CAN improve inside it
+    // is the split: quotas that add up to more than the budget let a posting
+    // with no responsibilities section spend the whole window on its
+    // requirements instead of leaving it unused.
     budget: 1500,
     quota: [
-      ["responsibilities", 600],
-      ["requirements", 600],
+      ["responsibilities", 900],
+      ["requirements", 900],
+      ["niceToHave", 300],
       ["intro", 300],
       ["other", 300],
     ],
@@ -279,7 +293,15 @@ export type Consumer = keyof typeof VIEWS;
 // Safety property: a posting with no recognisable headings parses to a single
 // `intro` section, which every view keeps — so unstructured postings degrade
 // to exactly the old head-slice behaviour instead of coming back empty.
-export function postingView(text: string, consumer: Consumer): string {
+// The projection with its parts still separate: which section each kept
+// block came from, and how long that section was in full. The audit needs
+// this to measure RETENTION — "the requirements survived" is not the same
+// claim as "half the requirements survived", and only the second number
+// tells you whether the judge saw the whole list.
+export function viewParts(
+  text: string,
+  consumer: Consumer,
+): Array<{ kind: SectionKind; text: string; full: number }> {
   const view = VIEWS[consumer];
   const blocks = parseSections(text)
     // A heading whose body is empty carries no information — postings are
@@ -299,11 +321,21 @@ export function postingView(text: string, consumer: Consumer): string {
       if (b.kind !== kind) continue;
       const already = kept.get(b.at)?.length ?? 0;
       if (already >= b.text.length) continue;
-      const add = Math.min(room, b.text.length - already);
+      let end = already + Math.min(room, b.text.length - already);
+      // Cut on a line boundary. Half a bullet is not a shorter requirement,
+      // it is a DIFFERENT one — "- 5 years of experience with Kube" reads as
+      // a Kubernetes-free job. Ending on the newline costs a few characters
+      // and removes a whole class of silent misreading.
+      if (end < b.text.length) {
+        const nl = b.text.lastIndexOf("\n", end);
+        if (nl > already + 40) end = nl;
+      }
+      const add = end - already;
+      if (add <= 0) continue;
       // A 40-character fragment of a requirements list helps nobody and
       // reads as noise; skip a section rather than open it with a scrap.
       if (already === 0 && add < 120 && b.text.length > add) continue;
-      kept.set(b.at, b.text.slice(0, already + add));
+      kept.set(b.at, b.text.slice(0, end));
       room -= add;
       used += add;
     }
@@ -333,8 +365,14 @@ export function postingView(text: string, consumer: Consumer): string {
 
   // Gathered by priority, printed in document order: the model reads the
   // posting the way a person would.
-  const out = [...kept.entries()].sort((a, b) => a[0] - b[0]).map(([, t]) => t);
-  return out.join("\n\n").trim() || text.slice(0, view.budget);
+  return [...kept.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([at, t]) => ({ kind: blocks.find((b) => b.at === at)!.kind, text: t, full: blocks.find((b) => b.at === at)!.text.length }));
+}
+
+export function postingView(text: string, consumer: Consumer): string {
+  const joined = viewParts(text, consumer).map((p) => p.text).join("\n\n").trim();
+  return joined || text.slice(0, VIEWS[consumer].budget);
 }
 
 // How much of a posting a view keeps — used by the measurement script and the

@@ -35,7 +35,8 @@
     "measure:sections": "tsx --env-file=.env scripts/measure-sections.ts",
     "diagnose:sections": "tsx --env-file=.env scripts/diagnose-sections.ts",
     "audit:sections": "tsx --env-file=.env scripts/audit-sections.ts",
-    "diagnose:requirements": "tsx --env-file=.env scripts/diagnose-requirements.ts"
+    "diagnose:requirements": "tsx --env-file=.env scripts/diagnose-requirements.ts",
+    "tune:fitwindow": "tsx --env-file=.env scripts/tune-fit-window.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",

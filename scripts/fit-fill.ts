@@ -122,7 +122,7 @@ while (done < LIMIT) {
       continue;
     }
     try {
-      const fit = await analyzeFit({ ...j, description: desc });
+      const fit = await analyzeFit({ ...j, description: desc, visaTier: j.visaTier, seniorityLevel: j.seniorityLevel, langReq: j.langReq });
       if (!fit) {
         failStreak++;
       } else {
@@ -135,15 +135,11 @@ while (done < LIMIT) {
             // Single-tier regime (user decision 2026-08-21): the 27B judges
             // directly — no 8B triage, no separate review pass to await.
             fitBy: "qwen27b",
-            // The LLM's level verdict outranks the regex detector.
-            ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown"
-              ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
-            ...(fit.visaOffered === "yes" ? { visa: "yes" } : {}),
-            ...(fit.category === "NO_VISA" || fit.visaOffered === "no" ? { visa: "no" } : {}),
+            ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
             judgments: {
               create: {
                 model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-                verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+                verdict: fit.verdict, category: fit.category, seniorityLevel: j.seniorityLevel,
                 ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
               },
             },

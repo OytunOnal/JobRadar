@@ -61,7 +61,7 @@ while (true) {
   if (batch.length === 0) break;
   for (const j of batch) {
     try {
-      const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
+      const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title, visaTier: j.visaTier, seniorityLevel: j.seniorityLevel, langReq: j.langReq });
       if (!fit) {
         failStreak++;
       } else {
@@ -72,14 +72,11 @@ while (true) {
           data: {
             fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
             fitCategory: fit.category, ghostRisk: fit.ghostRisk, fitBy: MARK,
-            ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown"
-              ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
-            ...(fit.visaOffered === "yes" ? { visa: "yes" } : {}),
-            ...(fit.category === "NO_VISA" || fit.visaOffered === "no" ? { visa: "no" } : {}),
+            ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
             judgments: {
               create: {
                 model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-                verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+                verdict: fit.verdict, category: fit.category, seniorityLevel: j.seniorityLevel,
                 ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
               },
             },

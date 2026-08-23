@@ -109,19 +109,17 @@ export async function analyzeFitAction(formData: FormData) {
   const job = await prisma.job.findUnique({ where: { id }, include: { content: true } });
   if (!job) return;
   // Deliberate per-job check from the dashboard — use the strong model.
-  const fit = await analyzeFit({ ...job, description: job.content?.description ?? job.title }, "strong");
+  const fit = await analyzeFit({ ...job, description: job.content?.description ?? job.title, visaTier: job.visaTier, seniorityLevel: job.seniorityLevel, langReq: job.langReq }, "strong");
   if (!fit) return;
   await prisma.job.update({
     where: { id },
     data: {
       fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk,
-      ...(fit.seniorityLevel && fit.seniorityLevel !== "unknown" ? { seniorityLevel: fit.seniorityLevel, seniorityBy: "llm" } : {}),
-      ...(fit.visaOffered === "yes" ? { visa: "yes" } : {}),
-      ...(fit.category === "NO_VISA" || fit.visaOffered === "no" ? { visa: "no" } : {}),
+      ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
       judgments: {
         create: {
           model: "on-demand-strong", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-          verdict: fit.verdict, category: fit.category, seniorityLevel: fit.seniorityLevel,
+          verdict: fit.verdict, category: fit.category, seniorityLevel: job.seniorityLevel,
           ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
         },
       },

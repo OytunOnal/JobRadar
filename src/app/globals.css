@@ -254,3 +254,13 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .fieldrow.chk { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
 .fieldrow.chk input { width: 14px; height: 14px; margin: 0; }
 .fieldrow.chk em { grid-column: 2; }
+
+/* A verdict from an older prompt version. Kept in its verdict colour so the
+   card still reads at a glance, but faded and labelled "eski": the number is
+   real, it just came from a system we have replaced (pre-v7 judgments were
+   formed on markup-filled text through a blind head-slice). The worker
+   re-judges these, and until it does they must not look fresh. */
+.stale { opacity: 0.45; }
+.stale .fitnum { font-weight: 500; }
+.stale .vlabel { font-style: italic; }
+.fitnum-inline.stale { opacity: 0.45; font-weight: 500; }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { profile } from "@/lib/profile";
+import { FIT_PROMPT_VERSION } from "@/lib/fit";
 import {
   ageLabel,
   classifyFreshness,
@@ -358,7 +359,12 @@ export default async function Page({
             <article className="job trackrow" key={j.id}>
               <div className="jobmain">
                 <p className="title">
-                  {j.fitScore != null && <span className={`fitnum-inline v-${j.fitVerdict}`}>{j.fitScore}</span>}{" "}
+                  {j.fitScore != null && (
+                    <span
+                      className={`fitnum-inline v-${j.fitVerdict}${j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " stale"}`}
+                      title={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "Judged by an older version — waiting to be re-judged."}
+                    >{j.fitScore}</span>
+                  )}{" "}
                   <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
                 </p>
                 <div className="meta">
@@ -400,16 +406,30 @@ export default async function Page({
             <div className="fitcell">
               {j.fitScore != null ? (
                 (j.fitBy ?? "").startsWith("qwen27b") ? (
-                  <>
+                  // A verdict is only "current" if THIS prompt produced it.
+                  // Every pre-v7 judgment was formed on markup-filled text
+                  // read through a blind head-slice, with no salary line and
+                  // visa wording reaching the model 24% of the time — a
+                  // different system wearing the same number. Faded until the
+                  // worker re-judges it, so a stale verdict never reads as a
+                  // fresh one.
+                  <div
+                    className={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "stale"}
+                    title={j.fitPromptVersion === FIT_PROMPT_VERSION
+                      ? undefined
+                      : `Judged by an older version (${j.fitPromptVersion ?? "?"}) on text we have since repaired — waiting to be re-judged by ${FIT_PROMPT_VERSION}.`}
+                  >
                     <div className={`fitnum v-${j.fitVerdict}`}>{j.fitScore}</div>
                     <div className="gauge"><span className={`v-${j.fitVerdict}`} style={{ width: `${j.fitScore}%` }} /></div>
-                    <div className={`vlabel v-${j.fitVerdict}`}>{j.fitVerdict}</div>
-                  </>
+                    <div className={`vlabel v-${j.fitVerdict}`}>
+                      {j.fitVerdict}{j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " · old"}
+                    </div>
+                  </div>
                 ) : (
                   // Pre-27B triage score (8B/free-cloud era, measured ~29%
                   // optimistic): shown muted with a "pre" label until the
                   // 27B pass upgrades it. Ordering is untouched by design.
-                  <div title="Ön triyaj puanı (8B dönemi) — 27B incelemesi bekliyor">
+                  <div title="Pre-triage score (8B era, measured ~29% optimistic) — waiting for the 27B pass.">
                     <div className="fitnum prescore">{j.fitScore}</div>
                     <div className="gauge"><span className="prescore" style={{ width: `${j.fitScore}%` }} /></div>
                     <div className="vlabel prescore">{j.fitVerdict} · pre</div>

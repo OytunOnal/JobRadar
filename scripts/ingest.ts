@@ -2,7 +2,19 @@ import { runIngest } from "../src/lib/ingest";
 import { generatedProfileStale } from "../src/lib/profile";
 import { prisma } from "../src/lib/db";
 
-const report = await runIngest();
+// --only recruitee,eures,freehire — fetch just these sources and do nothing
+// else (no discovery, no probes, no liveness, no LLM). The reason it exists
+// is text repair: postings whose connector has since been fixed are rewritten
+// on re-sighting, and a targeted run does that in minutes where a full sweep
+// takes hours and pulls half a million postings nobody asked for.
+const argv = process.argv.slice(2);
+const onlyIdx = argv.indexOf("--only");
+const only = onlyIdx !== -1 && argv[onlyIdx + 1]
+  ? argv[onlyIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
+  : undefined;
+if (only) console.log(`(yalnızca ${only.length} kaynak: ${only.join(", ")})`);
+
+const report = await runIngest(only ? { only } : {});
 
 console.log("\n=== JobRadar ingest ===");
 // Discovered-board sources can number in the hundreds — summarize them.

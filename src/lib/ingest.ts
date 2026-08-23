@@ -210,6 +210,17 @@ export interface IngestOptions {
   // stalest-first rotation advances the pool one slice per call.
   boardsOnly?: boolean;
   boardLimit?: number;
+  // Run only these sources. Names are matched against the source's own name
+  // ("eures", "freehire") and against a board's platform prefix
+  // ("recruitee" matches every recruitee:token board), because the two kinds
+  // of source are named differently but a user thinks of both as "recruitee".
+  //
+  // The reason this exists: repairing text. 5,667 postings still hold what
+  // the old stripHtml wrote, and their connectors have since been fixed — so
+  // a re-fetch of THOSE sources rewrites them (ingest keeps the better text).
+  // A full sweep would do it too, in hours, while also pulling half a million
+  // postings nobody asked for.
+  only?: string[];
 }
 
 export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport> {
@@ -232,19 +243,36 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // Source order decides who wins dedupe: curated ATS feeds first, then
   // discovered boards (also direct-apply), aggregators last — so when the same
   // role arrives from several places, the official ATS listing is the one kept.
+  // "Lean" runs do the fetch/store/delist core and nothing else: no sponsor
+  // refresh, no discovery harvest, no name/deep probes, no liveness sweep, no
+  // LLM auto-fit. boardsOnly meant that already; a targeted --only run wants
+  // exactly the same thing, since its whole purpose is to rewrite the text of
+  // a handful of sources in minutes rather than hours.
+  const lean = Boolean(opts.boardsOnly || opts.only?.length);
+
   let discovered: Source[] = [];
   try {
     discovered = await boardSources(opts.boardLimit);
   } catch (e: any) {
     report.errors.push(`boardSources: ${e.message}`);
   }
-  const sources: Source[] = opts.boardsOnly
+  let sources: Source[] = opts.boardsOnly
     ? discovered
     : [...companySources(), ...discovered, ...aggregators];
 
+  if (opts.only?.length) {
+    const wanted = new Set(opts.only.map((s) => s.trim().toLowerCase()).filter(Boolean));
+    sources = sources.filter((s) => {
+      const name = s.name.toLowerCase();
+      // "recruitee" must select recruitee:acme, recruitee:foo, ... while
+      // "eures" selects the aggregator of that exact name.
+      return wanted.has(name) || wanted.has(name.split(":")[0]);
+    });
+  }
+
   // Visa-sponsor registers: refresh when older than two weeks (isolated —
   // a register outage never sinks the ingest).
-  if (!opts.boardsOnly) {
+  if (!lean) {
     try {
       if (await sponsorsStale()) report.sponsors = await refreshSponsors();
     } catch (e: any) {
@@ -626,7 +654,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   // Discovery harvest: mine ATS board candidates from the aggregator URLs.
   // Isolated so no harvest failure can sink the ingest.
-  if (opts.boardsOnly) return report; // sweep mode: store + delist only
+  if (lean) return report; // fetch + store + delist only
   try {
     report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
   } catch (e: any) {

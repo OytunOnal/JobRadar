@@ -280,18 +280,28 @@ const VIEWS: Record<string, {
   },
   embed: {
     rescue: ["company", "benefits"],
-    // The 1500 budget is the embedding bake-off's measured winner, so it
-    // stays until a new bake-off says otherwise. What CAN improve inside it
-    // is the split: quotas that add up to more than the budget let a posting
-    // with no responsibilities section spend the whole window on its
-    // requirements instead of leaving it unused.
-    budget: 1500,
+    // 1500 was the old bake-off's winner, measured against the raw first
+    // 1500 characters. Re-run with the sectioned view as a variant
+    // (embed-eval --variants td,v1500,v2500,v4000, scored against 5,800
+    // existing fit verdicts, so no new LLM cost), it lost twice over:
+    //
+    //   cv query, confirm split   p@100   rho    gold p@100
+    //   td   raw 1500             0.730   0.387   0.490
+    //   v1500 sectioned           0.760   0.443   0.570
+    //   v2500 sectioned           0.770   0.466   0.610
+    //   v4000 sectioned           0.760   0.468   0.600
+    //
+    // Two separate findings. Sectioning wins at the SAME budget, so the gain
+    // is in what the characters are spent on, not how many there are. And
+    // the window then saturates at 2500 — 4000 leads on the tune split but
+    // not on confirm, which is where selection noise lives.
+    budget: 2500,
     quota: [
-      ["responsibilities", 900],
-      ["requirements", 900],
-      ["niceToHave", 300],
-      ["intro", 300],
-      ["other", 300],
+      ["responsibilities", 1400],
+      ["requirements", 1400],
+      ["niceToHave", 500],
+      ["intro", 500],
+      ["other", 500],
     ],
   },
   keyword: {

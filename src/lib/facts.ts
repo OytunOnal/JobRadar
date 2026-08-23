@@ -1,7 +1,7 @@
 import { chat } from "./llm";
 import { detectLanguageRequirements } from "./langreq";
 import { detectSeniority } from "./seniority";
-import { trimBoilerplate } from "./fit";
+import { signalExcerpts, trimBoilerplate } from "./posting-text";
 
 // CV-INDEPENDENT extraction: facts about the POSTING, not about the candidate.
 //
@@ -20,7 +20,7 @@ import { trimBoilerplate } from "./fit";
 // and remain the fallback; this stage is the authoritative upgrade for jobs
 // that reach the queue.
 
-export const EXTRACTOR_VERSION = "f2";
+export const EXTRACTOR_VERSION = "f3";
 
 export interface PostingFactsResult {
   visaOffered: "yes" | "no" | null;
@@ -46,13 +46,20 @@ export function factsPrompt(): string {
 }
 
 export function factsUserPrompt(title: string, company: string, description: string): string {
+  const head = trimBoilerplate(description).slice(0, 1800);
+  const extra = signalExcerpts(description);
   return [
     "<JOB_POSTING>",
-    `Title: ${title}\nCompany: ${company}`,
-    `Description:\n${trimBoilerplate(description).slice(0, 3000)}`,
+    `Title: ${title}
+Company: ${company}`,
+    `Description:
+${head}`,
+    extra ? `
+Further lines from the same posting (visa / language / experience):
+${extra}` : "",
     "</JOB_POSTING>",
     "Extract the facts as strict JSON.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 export function parseFacts(raw: string, title: string, description: string): PostingFactsResult {

@@ -3,6 +3,9 @@ import { CV_CONTEXT } from "./cv";
 import { user } from "../../config/user";
 import { profile, seniorityFor } from "./profile";
 import { detectLanguageRequirements, LANG_NAMES } from "./langreq";
+import { signalExcerpts, trimBoilerplate } from "./posting-text";
+
+export { trimBoilerplate };
 
 function languageNames(codes: readonly string[]): string {
   return codes.map((c) => LANG_NAMES[c] ?? c).join(", ");
@@ -68,30 +71,6 @@ export interface JobForFit {
   visaTier?: string | null;
   seniorityLevel?: string | null;
   langReq?: string | null;
-}
-
-// Trailing boilerplate (EEO declarations, benefits lists) wastes tokens and
-// adds no fit signal. Cut from the earliest marker onward — but ignore matches
-// in the leading window, where an "about us" blurb is real company context.
-// Visa/sponsorship language is deliberately NOT cut: it IS a fit signal.
-const BOILERPLATE_MARKERS: RegExp[] = [
-  /\bequal[\s-]opportunity[\s-](employer|employment)\b/i,
-  /\bwithout regard to\b.{0,60}(race|colou?r|sex|age|national origin|disability|veteran)/i,
-  /\breasonable accommodations?\b/i,
-  /\bwe (celebrate|embrace|champion|welcome)\b.{0,40}\bdiversity\b/i,
-  /(?:^|\n)\s*(benefits|perks( and benefits)?|what we offer|total rewards)\s*[:\n]/im,
-];
-const BOILERPLATE_LEAD_WINDOW = 600;
-
-export function trimBoilerplate(text: string): string {
-  let cutAt = text.length;
-  for (const marker of BOILERPLATE_MARKERS) {
-    const m = marker.exec(text);
-    if (m && m.index >= BOILERPLATE_LEAD_WINDOW && m.index < cutAt) cutAt = m.index;
-  }
-  // Safety floor: if trimming would gut the posting, keep it whole.
-  if (cutAt < 300 || cutAt < text.length * 0.3) return text.trimEnd();
-  return text.slice(0, cutAt).trimEnd();
 }
 
 // Prompt building is shared between the sync path (analyzeFit) and the batch

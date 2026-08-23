@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseFacts } from "../src/lib/facts";
+import { signalExcerpts, trimBoilerplate } from "../src/lib/posting-text";
 
 test("parseFacts: reads the model's structured answer", () => {
   const f = parseFacts('{"visaOffered":"yes","seniorityLevel":"senior","languages":["de"],"ghostRisk":false}', "AI Engineer", "");
@@ -20,4 +21,19 @@ test("parseFacts: a broken answer degrades to the deterministic detectors", () =
   assert.equal(f.visaOffered, null);
   assert.equal(f.seniorityLevel, "staff");  // regex floor
   assert.equal(f.langReq, "de");            // regex floor
+});
+
+test("signalExcerpts: rescues sponsorship stated at the END of a posting", () => {
+  // The measured failure: 66% of postings containing "sponsor" never reached
+  // the model — cut by the boilerplate trimmer or past the prompt window.
+  const posting = "Head of the posting. ".repeat(120) +
+    "\nWhat we offer:\n- Competitive salary\n- We provide full visa sponsorship and relocation support for international hires.";
+  const excerpt = signalExcerpts(posting);
+  assert.match(excerpt, /visa sponsorship/);
+  // ...and the trimmer alone would indeed have destroyed it
+  assert.doesNotMatch(trimBoilerplate(posting), /visa sponsorship/);
+});
+
+test("signalExcerpts: silent postings produce nothing (no filler in the prompt)", () => {
+  assert.equal(signalExcerpts("We build web apps. ".repeat(200)), "");
 });

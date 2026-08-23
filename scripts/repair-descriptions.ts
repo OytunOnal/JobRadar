@@ -45,15 +45,19 @@ async function main() {
     if (rows.length === 0) break;
     cursor = rows[rows.length - 1].jobId;
     scanned += rows.length;
+    // One transaction per batch, not per row: SQLite fsyncs on commit, and
+    // ~360k individual commits is hours of disk sync for minutes of work.
+    const writes = [];
     for (const r of rows) {
       if (!looksLikeHtml(r.description)) continue;
       const clean = safeSlice(htmlToText(r.description), 8000);
       // Guard against a conversion that would gut a posting (malformed markup).
       if (clean.length < Math.min(120, r.description.length * 0.15)) continue;
-      await prisma.jobContent.update({ where: { jobId: r.jobId }, data: { description: clean } });
+      writes.push(prisma.jobContent.update({ where: { jobId: r.jobId }, data: { description: clean } }));
       bytesSaved += r.description.length - clean.length;
       repaired++;
     }
+    if (writes.length) await prisma.$transaction(writes);
     if (scanned % 25000 < BATCH) {
       log(`  ${scanned} tarandı, ${repaired} onarıldı, ${(bytesSaved / 1e6).toFixed(1)} MB işaretleme atıldı`);
     }

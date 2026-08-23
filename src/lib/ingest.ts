@@ -145,6 +145,27 @@ function norm(s: string): string {
     .trim();
 }
 
+// Should a re-sighting overwrite the description we already stored?
+//
+// Not unconditionally. Several connectors put only the TITLE in the list
+// payload because the board's list endpoint carries no body, and desc:fill
+// enriches those later from the detail page. A blind overwrite would throw
+// that enrichment away on every sweep. The reverse case matters too: a posting
+// really is edited at its source, and until now we kept our first sighting of
+// it forever.
+//
+// So take the incoming text only when it is better, and treat STRUCTURE as
+// quality — a version with headings and bullets beats a longer flat one,
+// because the section parser can only read what has line breaks.
+export function betterText(incoming: string, current: string | null | undefined): boolean {
+  if (!current?.trim()) return true;
+  const inStruct = incoming.includes("\n");
+  const curStruct = current.includes("\n");
+  if (!inStruct && curStruct) return false; // never flatten what we already have
+  if (inStruct && !curStruct) return incoming.length >= current.length * 0.8;
+  return incoming.length > current.length * 1.1; // meaningfully richer
+}
+
 function contentKey(job: RawJob): string {
   return createHash("sha1")
     .update(`${norm(job.title)}|${norm(job.company)}`)
@@ -502,9 +523,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     try {
 
     // Exact same-source match, or the same role stored under a different source.
+    const withText = { include: { content: { select: { description: true } } } } as const;
     const existing =
-      (await prisma.job.findUnique({ where: { dedupeKey: key } })) ??
-      (await prisma.job.findFirst({ where: { contentKey: ck } }));
+      (await prisma.job.findUnique({ where: { dedupeKey: key }, ...withText })) ??
+      (await prisma.job.findFirst({ where: { contentKey: ck }, ...withText }));
 
     if (existing) {
       // Refresh score/text but never clobber the user's pipeline status/notes.
@@ -524,6 +546,20 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           ),
           contentKey: ck,
           langReq: data.langReq,
+          // Refresh the stored text when the board now offers a better one.
+          // This is how structure comes back to postings ingested before
+          // htmlToText: the old stripHtml collapsed every newline, so ~half
+          // the pool is flat prose that only a re-sighting can repair.
+          ...(betterText(job.description, existing.content?.description)
+            ? {
+                content: {
+                  upsert: {
+                    create: { description: safeSlice(job.description, 8000) },
+                    update: { description: safeSlice(job.description, 8000) },
+                  },
+                },
+              }
+            : {}),
           // The LLM's level verdict outranks the detector — don't overwrite it.
           ...(existing.seniorityBy === "llm" ? {} : { seniorityLevel: data.seniorityLevel, seniorityBy: data.seniorityBy }),
           // A re-score can flip the gate verdict in either direction.

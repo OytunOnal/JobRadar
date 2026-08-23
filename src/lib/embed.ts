@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { postingView } from "./sections";
 
 // Embedding layer for the blended fit-queue priority (bake-off winner:
 // qwen3-embedding:0.6b, whole-CV query, measured 2026-08-21 — see
@@ -49,10 +50,16 @@ export function cosine(a: number[], b: number[]): number {
   return s; // inputs are normalized
 }
 
-// The job-side embed text: title + head of the body (the bake-off's "td"
+// The job-side embed text: title + what the job IS (the bake-off's "td"
 // variant — tune winner; title-only rows embed on their title alone).
+//
+// The body is now the sectioned view rather than the first 1500 characters.
+// A blind head slice meant a posting opening with company history produced a
+// vector describing the COMPANY, and every such job sat near every other one
+// no matter what the role was. Benefits blurbs do the same thing: they are
+// near-identical across postings, so they pull all vectors toward one point.
 export function jobEmbedText(title: string, description: string | null): string {
-  const desc = (description ?? "").slice(0, 1500);
+  const desc = description ? postingView(description, "embed") : "";
   return desc && desc.length > title.length + 20 ? `${title}\n${desc}` : title;
 }
 

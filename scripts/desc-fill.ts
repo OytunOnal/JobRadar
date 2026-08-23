@@ -74,15 +74,34 @@ function ogDescription(html: string): string {
   return m ? stripHtml(m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&")) : "";
 }
 
+// Several detail endpoints hand us NAMED sections, and we used to join them
+// with a newline and throw the names away. Emitting each name as a heading
+// gives the section parser ground truth instead of an inference — it is what
+// lets the fit view drop the company blurb and the embedding skip the perks.
+function labelled(parts: Array<[string, unknown]>): string {
+  const blocks: string[] = [];
+  for (const [heading, raw] of parts) {
+    const body = stripHtml(typeof raw === "string" ? raw : "");
+    if (!body.trim()) continue;
+    blocks.push(heading ? `${heading}:\n${body}` : body);
+  }
+  return blocks.join("\n\n");
+}
+
 // Per-platform detail fetch → plain-text description ("" = unavailable).
-async function fetchDescription(source: string, externalId: string, url: string): Promise<string> {
+export async function fetchDescription(source: string, externalId: string, url: string): Promise<string> {
   const [platform, ...rest] = source.split(":");
   const token = rest.join(":");
   switch (platform) {
     case "sr": {
       const d = await getJson(`https://api.smartrecruiters.com/v1/companies/${token}/postings/${externalId}`);
       const s = d?.jobAd?.sections ?? {};
-      return stripHtml([s.companyDescription?.text, s.jobDescription?.text, s.qualifications?.text, s.additionalInformation?.text].filter(Boolean).join("\n"));
+      return labelled([
+        ["About the company", s.companyDescription?.text],
+        ["Responsibilities", s.jobDescription?.text],
+        ["Requirements", s.qualifications?.text],
+        ["Additional information", s.additionalInformation?.text],
+      ]);
     }
     case "workday": {
       // token = tenant@wdN/site; url pathname already starts with /site/...
@@ -94,7 +113,11 @@ async function fetchDescription(source: string, externalId: string, url: string)
     }
     case "workable": {
       const d = await getJson(`https://apply.workable.com/api/v2/accounts/${token}/jobs/${externalId}`);
-      return stripHtml([d?.description, d?.requirements, d?.benefits].filter(Boolean).join("\n"));
+      return labelled([
+        ["", d?.description], // the intro carries no heading of its own
+        ["Requirements", d?.requirements],
+        ["Benefits", d?.benefits],
+      ]);
     }
     case "bamboohr": {
       const d = await getJson(`https://${token}.bamboohr.com/careers/${externalId}/detail`);
@@ -111,7 +134,11 @@ async function fetchDescription(source: string, externalId: string, url: string)
       const desc = d?.description;
       if (typeof desc === "string") return stripHtml(desc);
       if (desc && typeof desc === "object") {
-        return stripHtml(Object.values(desc).filter((v) => typeof v === "string").join("\n"));
+        // The keys ARE the section names ("aboutUs", "theRole", ...).
+        return labelled(Object.entries(desc).map(([k, v]) => [
+          k.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase()),
+          v,
+        ]));
       }
       return "";
     }
@@ -163,6 +190,14 @@ async function fetchDescription(source: string, externalId: string, url: string)
 }
 
 const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:"];
+
+// The backfill runs only when this file is the entry point. Without the
+// guard, importing fetchDescription — to check one platform's shape, or from
+// a test — silently launches a full pool backfill, which is exactly what
+// happened once.
+const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("desc-fill.ts");
+
+async function main() {
 const rows = await prisma.job.findMany({
   where: {
     delistedAt: null,
@@ -228,3 +263,6 @@ for (const r of queue) {
 }
 log(`=== Bitti: ${done} denendi, ${filled} açıklama dolduruldu, ${crossed} ilan fit eşiğini aştı ===`);
 await prisma.$disconnect();
+}
+
+if (isEntryPoint) await main();

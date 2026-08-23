@@ -39,9 +39,30 @@ export async function lever(token: string, company: string, region = ""): Promis
     workMode: j.workplaceType === "remote" ? "remote" as const
       : j.workplaceType === "hybrid" ? "hybrid" as const
       : j.workplaceType === "onsite" ? "onsite" as const : undefined,
-    description: j.descriptionPlain ?? stripHtml(j.description),
+    description: leverBody(j),
     postedAt: j.createdAt ? new Date(j.createdAt) : undefined,
   }));
+}
+
+// Lever does not ship one description — it ships an intro, an ARRAY of titled
+// lists, and a closing block. We used to take `descriptionPlain` alone, which
+// is the intro only, flattened. Verified against the live API: the `lists`
+// entries are titled "Responsibilities" and "Requirements" and hold the
+// bullets. So every Lever posting reached the fit judge as a paragraph of
+// marketing prose with the actual job requirements discarded at ingest.
+//
+// Rebuild the document instead, keeping Lever's own headings — they are
+// better section labels than anything we could infer.
+function leverBody(j: any): string {
+  const parts: string[] = [stripHtml(j.description ?? "")];
+  for (const list of Array.isArray(j.lists) ? j.lists : []) {
+    const heading = String(list?.text ?? "").trim();
+    const body = stripHtml(list?.content ?? "");
+    if (body) parts.push(heading ? `${heading}:\n${body}` : body);
+  }
+  parts.push(stripHtml(j.additional ?? ""));
+  const doc = parts.filter((p) => p.trim()).join("\n\n").trim();
+  return doc || String(j.descriptionPlain ?? "");
 }
 
 export async function ashby(token: string, company: string): Promise<RawJob[]> {
@@ -54,7 +75,9 @@ export async function ashby(token: string, company: string): Promise<RawJob[]> {
     company,
     location: j.location ?? j.locationName ?? "",
     remote: Boolean(j.isRemote) || /remote/i.test(j.location ?? ""),
-    description: j.descriptionPlain ?? stripHtml(j.descriptionHtml ?? j.description),
+    // HTML first: `descriptionPlain` is the same text with its headings and
+    // bullets flattened away, and the section parser needs that structure.
+    description: stripHtml(j.descriptionHtml ?? j.description) || String(j.descriptionPlain ?? ""),
     postedAt: j.publishedAt ? new Date(j.publishedAt) : undefined,
   }));
 }

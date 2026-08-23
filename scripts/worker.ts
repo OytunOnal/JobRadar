@@ -36,13 +36,28 @@ import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-
 
 const args = process.argv.slice(2);
 const ONCE = args.includes("--once");
-// How many judgments before the loop returns to re-check priorities. Each is
-// ~62s (facts + judgment), so 50 means new text waits at most ~52 minutes for
-// its vectors instead of the ~3.4 hours a 200-job batch would impose. The
-// cost of returning is one queue rebuild, which fit-fill does every 100
-// analyses anyway.
-const BATCH = Number(args[args.indexOf("--batch") + 1]) || 50;
+// How many judgments before the loop returns to re-check priorities.
+//
+// 50 was chosen for preemption latency and turned out to be the wrong axis to
+// optimise on THIS machine. The GPU holds 6 GB and the model needs 17.7, so
+// llama-server keeps ~15.5 GB of system RAM resident; with a dev server and a
+// browser running, that leaves about 5 GB. Spawning a fresh node+tsx (Prisma,
+// esbuild, ~400 MB) into that gap failed with 0xC0000142 — DLL init under
+// memory pressure — and every spawn is another chance to hit it.
+//
+// So spawn rarely: 250 judgments is roughly four hours of work per process.
+// Nothing is lost by it, because fit-fill rebuilds its own queue every 100
+// analyses; what the worker adds on return is the lane decision, and a lane
+// currently lasts ~50 hours.
+const BATCH = Number(args[args.indexOf("--batch") + 1]) || 250;
 const IDLE_MS = 60_000;
+// A child that cannot even start is not a transient hiccup to retry a minute
+// later — the machine is out of room, and hammering it every 60s neither
+// helps nor lets the pressure clear. Back off instead. (It cost us real work:
+// the retry loop held the GPU idle long enough for Ollama to unload the 27B,
+// so the next successful batch had to pay the 17.7 GB reload.)
+const BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000];
+let failStreak = 0;
 
 function log(line: string): void {
   const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
@@ -158,7 +173,7 @@ async function pass(): Promise<boolean> {
 
       log(`${label} — ${BATCH} ilan yargılanıyor`);
       const code = await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]);
-      if (code !== 0) log(`  fit:fill çıkış kodu ${code}`);
+      if (code !== 0) log(`  fit:fill çıkış kodu ${code}${code === 3221225794 ? " (0xC0000142 — süreç başlayamadı, bellek dar)" : ""}`);
     } finally { releaseGpu(); }
 
     // Did anything actually happen? A child that exits without judging —
@@ -207,7 +222,14 @@ async function main() {
   for (;;) {
     const did = await pass();
     if (ONCE) break;
-    if (!did) await sleep(IDLE_MS);
+    if (did) {
+      failStreak = 0;
+      continue;
+    }
+    const wait = BACKOFF_MS[Math.min(failStreak, BACKOFF_MS.length - 1)];
+    failStreak++;
+    if (failStreak > 1) log(`  ${Math.round(wait / 60000)} dk bekleniyor (${failStreak}. boş tur)`);
+    await sleep(wait);
   }
   releaseGpu();
   await prisma.$disconnect();

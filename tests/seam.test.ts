@@ -98,3 +98,45 @@ test("a connector that produces descriptions can convert them", () => {
       + "or add them to NO_BODY with a reason: " + offenders.join(", "),
   );
 });
+
+// ── The sections half of the seam ────────────────────────────────────────
+
+test("a source's named blocks travel as parts, and ingest assembles them", async () => {
+  const { leverSections } = await import("../src/lib/sources/ats");
+  const { labelledSections } = await import("../src/lib/sections");
+
+  const parts = leverSections({
+    description: "<p>We build tools.</p>",
+    lists: [{ text: "Requirements", content: "<ul><li>5 years Go</li></ul>" }],
+    additional: "<p>Equal opportunity employer.</p>",
+  });
+  // The connector's answer is which blocks the SOURCE named — nothing about
+  // headings, order or format, which are ours and move with the parser.
+  assert.deepEqual(parts.map((p) => p[0]), ["", "Requirements", ""]);
+
+  const text = labelledSections(parts);
+  assert.match(text, /Requirements:\n/);
+  assert.ok(text.includes("5 years Go"));
+});
+
+test("an adapter's own description survives as the fallback", async () => {
+  const { leverSections } = await import("../src/lib/sources/ats");
+  const { labelledSections } = await import("../src/lib/sections");
+  // Every named block empty: the assembly is empty, so ingest keeps whatever
+  // the adapter put in `description` — Lever's structure-destroyed plain text,
+  // Personio's unpaired <value> blocks, or a bare title.
+  assert.equal(labelledSections(leverSections({ lists: [] })), "");
+});
+
+test("no connector assembles sections itself", () => {
+  // Eight did, which meant eight places to change when the parser changed and
+  // a ninth that would have done it differently.
+  const offenders: string[] = [];
+  for (const rel of readdirSync("src/lib/sources", { recursive: true }) as string[]) {
+    const name = String(rel);
+    if (!name.endsWith(".ts")) continue;
+    const src = readFileSync(join("src/lib/sources", name), "utf8");
+    if (/\blabelledSections\s*\(/.test(src)) offenders.push(`sources/${name}`);
+  }
+  assert.deepEqual(offenders, [], "report sections; let ingest assemble: " + offenders.join(", "));
+});

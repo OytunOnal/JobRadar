@@ -1,5 +1,4 @@
 import { scoreJob } from "../score";
-import { labelledSections } from "../sections";
 import { type RawJob, type Source } from "./types";
 
 // Manfred — Spanish tech job platform with a genuinely open public API:
@@ -42,18 +41,18 @@ export function mapOffer(o: any, description = ""): RawJob | null {
 }
 
 // Detail sections → one readable description.
-export function detailToText(d: any): string {
-  // Manfred names every block; keep the names so the section parser reads
-  // them as headings instead of guessing from one run-on wall of text.
+// Manfred names every block; report the names so the section parser reads
+// them as headings instead of guessing from one run-on wall of text.
+export function detailSections(d: any): Array<[string, unknown]> {
   const flatten = (v: unknown) =>
     Array.isArray(v) ? v.filter((x) => typeof x === "string").join("\n") : v;
-  return labelledSections([
+  return [
     ["", flatten(d?.introduction)],
     ["Responsibilities", flatten(d?.whatWillYouDo)],
     ["Requirements", flatten(d?.whatTheyAskFor)],
     ["Responsibilities", flatten(d?.responsibilities)],
     ["Tech stack", Array.isArray(d?.techs) ? d.techs.map((t: any) => t?.name ?? t).join(", ") : ""],
-  ]).slice(0, 8000);
+  ];
 }
 
 async function getJson(url: string, fetchImpl: typeof fetch): Promise<any | null> {
@@ -84,7 +83,7 @@ export async function fetchManfred(fetchImpl: typeof fetch = fetch): Promise<Raw
   const out: RawJob[] = [];
   for (const { o, job } of scored.slice(0, DETAIL_MAX)) {
     const detail = await getJson(`${DETAIL_URL}/${o.id}?lang=EN`, fetchImpl);
-    out.push(detail ? { ...job, description: detailToText(detail) } : job);
+    out.push(detail ? { ...job, sections: detailSections(detail) } : job);
     await sleep(300);
   }
   return out;

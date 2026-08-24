@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { parseEnvPayload, mapHit } from "../src/lib/sources/wttj";
 import { buildSearchBody, mapResult } from "../src/lib/sources/vdab";
 import { mapJustJoin, mapNoFluff } from "../src/lib/sources/poland";
+import { labelledSections } from "../src/lib/sections";
 import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
 import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
@@ -77,7 +78,9 @@ test("justjoin mapJustJoin: workplace mapping, skills folded into description", 
   })!;
   assert.equal(job.workMode, "hybrid");
   assert.equal(job.location, "Warsaw, Poland");
-  assert.ok(job.description.includes("Kotlin"));
+  // The connector reports the named blocks; the shared assembler makes the
+  // text. Asserting on the assembly here would be asserting on ingest's job.
+  assert.ok(labelledSections(job.sections!).includes("Kotlin"));
   assert.equal(mapJustJoin({ title: "no slug" }), null);
 });
 

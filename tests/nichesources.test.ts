@@ -4,7 +4,8 @@ import { firstLink, parseComment } from "../src/lib/sources/hn";
 import { mapJob as landingMap } from "../src/lib/sources/landingjobs";
 import { mapJob as sdjMap } from "../src/lib/sources/swissdevjobs";
 import { parseFeed as bsjParse } from "../src/lib/sources/berlinstartupjobs";
-import { mapOffer, detailToText } from "../src/lib/sources/manfred";
+import { mapOffer, detailSections } from "../src/lib/sources/manfred";
+import { labelledSections } from "../src/lib/sections";
 import { parseFeed as neParse } from "../src/lib/sources/netempregos";
 
 // ── HN Who is hiring ─────────────────────────────────────────────────────────
@@ -60,7 +61,10 @@ test("landing.jobs mapJob: company from URL path, relocation flag -> visa", () =
   assert.equal(job.location, "Lisbon, PT");
   assert.equal(job.salaryText, "40000–55000 EUR");
   assert.equal(job.visa, "yes");
-  assert.ok(job.description.includes("Build backend services"));
+  // Landing.Jobs names all four of its blocks; the connector reports the
+  // names and the shared assembler turns them into headings.
+  assert.deepEqual(job.sections!.map((p) => p[0]), ["", "Requirements", "Nice to have", "Benefits"]);
+  assert.ok(labelledSections(job.sections!).includes("Build backend services"));
   // relocation_paid false is "not offered", never a refusal:
   const noReloc = landingMap({ id: 2, title: "X", url: "https://landing.jobs/at/acme/x", relocation_paid: false })!;
   assert.equal(noReloc.visa, undefined);
@@ -135,16 +139,19 @@ test("manfred mapOffer: remote percentage -> work mode, ACTIVE only", () => {
   assert.equal(mapOffer({ ...base, status: "CLOSED" }), null);
 });
 
-test("manfred detailToText joins sections and stack", () => {
-  const text = detailToText({
+test("manfred reports its named blocks, and ingest's assembler keeps the names", () => {
+  const parts = detailSections({
     introduction: "<p>Great team.</p>",
     whatWillYouDo: ["Ship features", "Review code"],
     techs: [{ name: "TypeScript" }, { name: "React" }],
   });
+  // The connector's job now ends here: which blocks the SOURCE named.
+  assert.deepEqual(parts.map((p) => p[0]), ["", "Responsibilities", "Requirements", "Responsibilities", "Tech stack"]);
+
+  // How they become one text is ingest's, through the shared assembler — the
+  // same one every other named source now goes through.
+  const text = labelledSections(parts);
   assert.ok(text.includes("Great team."));
-  assert.ok(text.includes("Ship features"));
-  // Manfred's own block names are kept as headings now — the section parser
-  // reads them instead of guessing from one run-on wall of text.
   assert.match(text, /Responsibilities:\nShip features\nReview code/);
   assert.match(text, /Tech stack:\nTypeScript, React/);
 });

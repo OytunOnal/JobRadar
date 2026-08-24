@@ -48,6 +48,7 @@ import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
 import { safeSlice, type RawJob, type Source } from "./sources/types";
 import { htmlToText, looksLikeHtml, TEXT_VERSION } from "./html-text";
+import { labelledSections } from "./sections";
 import { invalidateVector } from "./embed";
 import { andWhere, openWhere } from "./pool";
 import { derivedFields, statedFields, STORE_THRESHOLD } from "./derive";
@@ -560,6 +561,17 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   }
 
   for (const job of all) {
+    // A source that splits its body into named blocks told us so; assembling
+    // those blocks into one text is OUR decision, and it moves whenever the
+    // section parser does. Eight adapters used to make it themselves.
+    //
+    // The adapter's own `description` stays as the fallback for when every
+    // block came back empty — Lever's structure-destroyed descriptionPlain,
+    // Personio's unpaired <value> blocks, a bare title.
+    if (job.sections?.length) {
+      const assembled = labelledSections(job.sections);
+      if (assembled) job.description = assembled;
+    }
     // A LAST LINE, NOT A CONVERSION STEP.
     //
     // Converting here unconditionally would be wrong: several connectors

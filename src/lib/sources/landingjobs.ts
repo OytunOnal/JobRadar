@@ -1,5 +1,4 @@
 import { type RawJob, type Source } from "./types";
-import { labelledSections } from "../sections";
 
 // Landing.Jobs — Portugal-centric European tech board with a relocation
 // focus. Keyless JSON API. Pagination is OFFSET-based: `page` and `sort` are
@@ -29,13 +28,13 @@ export function mapJob(j: any): RawJob | null {
     j.gross_salary_low != null
       ? `${j.gross_salary_low}–${j.gross_salary_high ?? j.gross_salary_low} ${j.currency_code ?? ""}`.trim()
       : undefined;
-  // Landing.Jobs names all four blocks — keep the names as headings.
-  const description = labelledSections([
+  // Landing.Jobs names all four blocks — report the names; ingest assembles.
+  const sections: Array<[string, unknown]> = [
     ["", j.role_description],
     ["Requirements", j.main_requirements],
     ["Nice to have", j.nice_to_have],
     ["Benefits", j.perks],
-  ]);
+  ];
   return {
     source: "landingjobs",
     externalId: String(j.id),
@@ -45,7 +44,8 @@ export function mapJob(j: any): RawJob | null {
     location: locations.join("; ") || "Portugal",
     remote: Boolean(j.remote),
     salaryText: salary,
-    description,
+    sections,
+    description: String(j.title ?? ""),
     postedAt: j.published_at ? new Date(j.published_at) : undefined,
     // The board's own relocation flag; false is "not offered", not a refusal.
     visa: j.relocation_paid === true ? "yes" : undefined,

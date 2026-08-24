@@ -14,6 +14,20 @@ export interface RawJob {
   workMode?: WorkMode;
   salaryText?: string;
   description: string;
+  // The posting's body as the SOURCE splits it: [heading, value] pairs, values
+  // still in whatever markup the source shipped.
+  //
+  // A source knowing that its body arrives in named blocks — SmartRecruiters'
+  // jobAd.sections, Lever's lists, Personio's <name>/<value> pairs — is a fact
+  // about that source. How those blocks become one text, in what order, under
+  // which headings, is OUR decision, and it changes whenever the section
+  // parser does. Eight adapters used to make that decision themselves, which
+  // meant eight places to update and a ninth that would do it differently.
+  //
+  // `description` stays required and carries the adapter's own fallback for
+  // when the parts come back empty; ingest prefers the assembly when there is
+  // one.
+  sections?: Array<[string, unknown]>;
   postedAt?: Date;
   // Set only when the source states sponsorship EXPLICITLY as data (e.g.
   // SwissDevJobs' hasVisaSponsorship field); otherwise ingest derives the

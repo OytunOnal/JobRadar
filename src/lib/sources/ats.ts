@@ -40,7 +40,10 @@ export async function lever(token: string, company: string, region = ""): Promis
     workMode: j.workplaceType === "remote" ? "remote" as const
       : j.workplaceType === "hybrid" ? "hybrid" as const
       : j.workplaceType === "onsite" ? "onsite" as const : undefined,
-    description: leverBody(j),
+    sections: leverSections(j),
+    // The fallback when every named block is empty. Structure-destroyed, but
+    // better than nothing.
+    description: String(j.descriptionPlain ?? ""),
     postedAt: j.createdAt ? new Date(j.createdAt) : undefined,
   }));
 }
@@ -54,13 +57,15 @@ export async function lever(token: string, company: string, region = ""): Promis
 //
 // Rebuild the document instead, keeping Lever's own headings — they are
 // better section labels than anything we could infer.
-function leverBody(j: any): string {
+// Lever names each of its `lists` blocks — those names ARE headings. The
+// assembly is ingest's; this only reports what the source gave us.
+export function leverSections(j: any): Array<[string, unknown]> {
   const parts: Array<[string, unknown]> = [["", j.description]];
   for (const list of Array.isArray(j.lists) ? j.lists : []) {
     parts.push([String(list?.text ?? "").trim(), list?.content]);
   }
   parts.push(["", j.additional]);
-  return labelledSections(parts) || String(j.descriptionPlain ?? "");
+  return parts;
 }
 
 export async function ashby(token: string, company: string): Promise<RawJob[]> {
@@ -173,11 +178,12 @@ export async function personio(token: string, company: string): Promise<RawJob[]
       if (value.trim()) sections.push([heading, value]);
     }
     // Older feeds carry bare <value> blocks with no pairing — fall back to
-    // those rather than returning an empty body.
-    const description = sections.length
-      ? labelledSections(sections)
-      : stripHtml([...block.matchAll(/<value>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/value>/g)]
-          .map((m) => m[1]).join("\n\n"));
+    // those rather than returning an empty body. The paired case now travels
+    // as sections and is assembled at ingest.
+    const description = stripHtml(
+      [...block.matchAll(/<value>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/value>/g)]
+        .map((m) => m[1]).join("\n\n"),
+    );
     const title = stripHtml(tag("name"));
     jobs.push({
       source: `personio:${token}`,
@@ -187,6 +193,7 @@ export async function personio(token: string, company: string): Promise<RawJob[]
       company: stripHtml(tag("subcompany")) || company,
       location: office,
       remote: /remote|home\s*office/i.test(`${office} ${tag("schedule")} ${title}`),
+      sections,
       description: description || title,
       postedAt: tag("createdAt") ? new Date(tag("createdAt")) : undefined,
     });
@@ -436,11 +443,12 @@ export async function oracle(token: string, company: string): Promise<RawJob[]> 
         remote: /remote/i.test(`${j.WorkplaceType ?? ""} ${j.PrimaryLocation ?? ""}`),
         // ShortDescriptionStr is a real summary (not a title echo); the full
         // body lives behind the details endpoint (desc-fill territory).
-        description: labelledSections([
+        sections: [
           ["", j.ShortDescriptionStr],
           ["Responsibilities", j.ExternalResponsibilitiesStr],
           ["Requirements", j.ExternalQualificationsStr],
-        ]) || String(j.Title),
+        ],
+        description: String(j.Title),
         postedAt: j.PostedDate ? new Date(j.PostedDate) : undefined,
       });
     }
@@ -747,11 +755,11 @@ export async function comeet(token: string, company: string): Promise<RawJob[]> 
         company,
         location: locStr,
         remote: Boolean(loc.is_remote) || /remote/i.test(String(j.workplace_type ?? "")),
-        description:
-          labelledSections([
-            ["", j.details?.description],
-            ["Requirements", j.details?.requirements],
-          ]) || String(j.name),
+        sections: [
+          ["", j.details?.description],
+          ["Requirements", j.details?.requirements],
+        ],
+        description: String(j.name),
         postedAt: j.time_updated ? new Date(j.time_updated) : undefined,
       };
     });

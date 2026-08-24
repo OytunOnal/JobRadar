@@ -1,5 +1,4 @@
 import { type RawJob, type Source } from "./types";
-import { labelledSections } from "../sections";
 
 // Poland's two big tech boards, both with keyless JSON APIs (contracts
 // learned from career-ops' providers). Neither takes a keyword parameter the
@@ -44,7 +43,7 @@ export function mapJustJoin(o: any): RawJob | null {
     // [object Object]" in 326 stored postings. The level is real signal the
     // source hands us — "ITIL 5/5" is a harder requirement than "Jira 3/5" —
     // so keep it rather than flattening to a bare name.
-    description: labelledSections([
+    sections: [
       ["", title],
       ["Requirements", (Array.isArray(o.requiredSkills) ? o.requiredSkills : [])
         .map((s: any) => {
@@ -54,7 +53,8 @@ export function mapJustJoin(o: any): RawJob | null {
           return s?.level ? `- ${name} (${s.level}/5)` : `- ${name}`;
         })
         .filter(Boolean).join("\n")],
-    ]),
+    ],
+    description: title,
     postedAt: o.publishedAt && !Number.isNaN(Date.parse(o.publishedAt)) ? new Date(o.publishedAt) : undefined,
   };
 }
@@ -117,11 +117,12 @@ export function mapNoFluff(p: any): RawJob | null {
     location: city && !/remote/i.test(city) ? `${city}, Poland` : "Poland",
     remote,
     salaryText: salary,
-    description: labelledSections([
+    sections: [
       ["", title],
       ["Requirements", (Array.isArray(p.tiles?.values) ? p.tiles.values : [])
         .map((v: any) => v?.value).filter(Boolean).map((v: string) => `- ${v}`).join("\n")],
-    ]),
+    ],
+    description: title,
     postedAt: typeof p.posted === "number" ? new Date(p.posted) : undefined,
   };
 }

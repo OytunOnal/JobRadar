@@ -1,4 +1,3 @@
-import { scoreJob } from "../score";
 import { type RawJob, type Source } from "./types";
 
 // Manfred — Spanish tech job platform with a genuinely open public API:
@@ -7,14 +6,16 @@ import { type RawJob, type Source } from "./types";
 // is two-stage: the free title score gates which offers get a detail call
 // (introduction / responsibilities / requirements / tech stack).
 //
-// Config: MANFRED_DETAIL_MAX (40)
+// The list carries a summary; the named blocks live behind the detail
+// endpoint, which desc:fill calls.
 
 const LIST_URL = "https://www.getmanfred.com/api/v2/public/offers?lang=EN";
 const DETAIL_URL = "https://www.getmanfred.com/api/v2/public/offers";
 const UA = "JobRadar/0.1 (personal job search)";
-const DETAIL_MAX = Number(process.env.MANFRED_DETAIL_MAX) || 40;
-// Mirrors ingest's STORE_THRESHOLD (importing it would be circular).
-const SCORE_GATE = 20;
+// The store gate used to live here too, as a fourth copy of `20` — one per
+// connector that fetched detail pages. It decided what the pool may contain,
+// which is ingest's decision; the number now exists once, in derive.ts, and
+// this connector no longer needs it.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -68,25 +69,21 @@ async function getJson(url: string, fetchImpl: typeof fetch): Promise<any | null
   }
 }
 
+// Called by desc:fill, which owns detail fetching for every platform. It
+// returns the source's named PARTS, not an assembled text — assembling is the
+// consumer's decision, the same rule the connector seam follows.
+export async function fetchDetailSections(id: string, fetchImpl: typeof fetch = fetch): Promise<Array<[string, unknown]>> {
+  const detail = await getJson(`${DETAIL_URL}/${id}?lang=EN`, fetchImpl);
+  return detail ? detailSections(detail) : [];
+}
+
 export async function fetchManfred(fetchImpl: typeof fetch = fetch): Promise<RawJob[]> {
   const list = await getJson(LIST_URL, fetchImpl);
   if (!Array.isArray(list)) return [];
 
-  // Detail budget goes to the best title scores first (two-stage cost model).
-  const scored = list
-    .map((o) => ({ o, job: mapOffer(o) }))
-    .filter((x): x is { o: any; job: RawJob } => x.job !== null)
-    .map(({ o, job }) => ({ o, job, score: scoreJob(job) }))
-    .filter(({ score }) => !score.disqualified && score.score >= SCORE_GATE)
-    .sort((a, b) => b.score.score - a.score.score);
-
-  const out: RawJob[] = [];
-  for (const { o, job } of scored.slice(0, DETAIL_MAX)) {
-    const detail = await getJson(`${DETAIL_URL}/${o.id}?lang=EN`, fetchImpl);
-    out.push(detail ? { ...job, sections: detailSections(detail) } : job);
-    await sleep(300);
-  }
-  return out;
+  // Every offer the list carried. The named blocks behind the detail endpoint
+  // are desc:fill's to fetch, ordered by the stored score.
+  return list.map((o) => mapOffer(o)).filter((j): j is RawJob => j !== null);
 }
 
 export const manfred: Source = {

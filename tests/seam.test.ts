@@ -140,3 +140,31 @@ test("no connector assembles sections itself", () => {
   }
   assert.deepEqual(offenders, [], "report sections; let ingest assemble: " + offenders.join(", "));
 });
+
+// ── Detail fetching belongs to one place ─────────────────────────────────
+
+test("no connector scores a posting or keeps a copy of the store gate", () => {
+  // Four did, each with its own `const SCORE_GATE = 20` and the same comment
+  // explaining why importing the real one was impossible. They used it to
+  // decide which cards deserved a detail call — and, in doing so, which cards
+  // the pool was allowed to contain at all.
+  const offenders: string[] = [];
+  for (const rel of readdirSync("src/lib/sources", { recursive: true }) as string[]) {
+    const name = String(rel);
+    if (!name.endsWith(".ts")) continue;
+    const src = readFileSync(join("src/lib/sources", name), "utf8");
+    if (/\bscoreJob\b/.test(src)) offenders.push(`sources/${name} — scores`);
+    if (/SCORE_GATE\s*=/.test(src)) offenders.push(`sources/${name} — own store gate`);
+  }
+  assert.deepEqual(offenders, [], "the store gate is derive.ts's: " + offenders.join(", "));
+});
+
+test("the four sources that deferred their bodies are in desc:fill's queue", () => {
+  // Removing the in-connector detail fetch is only half the change; if the
+  // backfill does not claim those sources, the postings simply never get a
+  // body. Both halves or neither.
+  const src = readFileSync(join("scripts", "desc-fill.ts"), "utf8");
+  for (const s of ["arbeitsagentur", "ch-jobroom", "manfred", "linkedin"]) {
+    assert.ok(src.includes(`"${s}"`), `${s} must appear in desc-fill`);
+  }
+});

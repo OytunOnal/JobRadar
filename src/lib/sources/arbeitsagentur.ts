@@ -1,5 +1,4 @@
 import { profileSearchGroups } from "../profile";
-import { scoreJob } from "../score";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Bundesagentur für Arbeit (the German federal employment agency) Jobsuche
@@ -8,13 +7,12 @@ import { stripHtml, type RawJob, type Source } from "./types";
 // listing pool; local-language titles from searchVariants.de matter here,
 // since the corpus is overwhelmingly German-titled.
 //
-// Two-stage like LinkedIn: the v6 search returns cards (title, company,
-// location, salary range — no description), the free title score gates which
-// cards get a v4 jobdetails call (description + the employer's own URL when
-// the posting has one).
+// The v6 search returns cards (title, company, location, salary range — no
+// description); the v4 jobdetails call carries the body and the employer's own
+// URL. This connector returns every card it sees; desc:fill makes the detail
+// call, ordered by the stored score.
 //
 // Config: BA_WINDOW_DAYS (7)  BA_SIZE (100/page)  BA_MAX_PAGES (4)
-//         BA_DETAIL_MAX (60)
 
 const SEARCH_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs";
 const DETAIL_URL = "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v4/jobdetails";
@@ -24,9 +22,10 @@ const UA = "JobRadar/0.1 (personal job search)";
 const WINDOW_DAYS = Number(process.env.BA_WINDOW_DAYS) || 7;
 const SIZE = Number(process.env.BA_SIZE) || 100;
 const MAX_PAGES = Number(process.env.BA_MAX_PAGES) || 4;
-const DETAIL_MAX = Number(process.env.BA_DETAIL_MAX) || 60;
-// Mirrors ingest's STORE_THRESHOLD (importing it would be circular).
-const SCORE_GATE = 20;
+// The store gate used to live here too, as a fourth copy of `20` — one per
+// connector that fetched detail pages. It decided what the pool may contain,
+// which is ingest's decision; the number now exists once, in derive.ts, and
+// this connector no longer needs it.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -106,9 +105,10 @@ export function cardToRawJob(card: BaCard, detail?: { description?: string; exte
   };
 }
 
+// Called by desc:fill, which owns detail fetching for every platform.
 export async function fetchDetail(
   refnr: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<{ description?: string; externalUrl?: string }> {
   // The detail path takes the refnr base64-encoded (bund.dev-documented).
   const encoded = encodeURIComponent(Buffer.from(refnr).toString("base64"));
@@ -151,19 +151,19 @@ export async function fetchArbeitsagentur(fetchImpl: typeof fetch = fetch): Prom
     }
   }
 
-  // Detail budget goes to the best title scores first (two-stage cost model).
-  const scored = [...cards.values()]
-    .map((card) => ({ card, score: scoreJob(cardToRawJob(card)) }))
-    .filter(({ score }) => !score.disqualified && score.score >= SCORE_GATE)
-    .sort((a, b) => b.score.score - a.score.score);
-
-  const out: RawJob[] = [];
-  for (const { card } of scored.slice(0, DETAIL_MAX)) {
-    const detail = await fetchDetail(card.refnr, fetchImpl);
-    out.push(cardToRawJob(card, detail));
-    await sleep(300);
-  }
-  return out;
+  // Every card this saw, not the best sixty of them.
+  //
+  // This used to score each card, drop everything under the gate, and fetch
+  // detail pages for the survivors — so a connector was deciding what the pool
+  // may contain, which is ingest's decision and the one thing store-all exists
+  // to take away from it (ADR-1: the first store-all sweep recovered 341k
+  // postings the old pipeline had been discarding in silence). A card dropped
+  // here can never be re-scored when the scorer improves.
+  //
+  // The bodies arrive later: desc:fill owns detail fetching for every platform
+  // that has a detail endpoint, ordered by the STORED score rather than a
+  // guess made from a title.
+  return [...cards.values()].map((card) => cardToRawJob(card));
 }
 
 export const arbeitsagentur: Source = {

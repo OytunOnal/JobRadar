@@ -1,26 +1,26 @@
 import { profileSearchGroups } from "../profile";
-import { scoreJob } from "../score";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Switzerland — SECO's Job-Room (job-room.ch), the official national job
 // platform. Keyless public JSON: POST search (title/company/preview per hit)
-// + GET detail (full description). Search previews are ~200 chars, so this is
-// two-stage like Arbeitsagentur: title score gates which ads get the detail
-// call. German AND French variants both run — Switzerland posts in both.
+// + GET detail (full description). Search previews are ~200 chars, so the
+// preview is stored as a stand-in and desc:fill fetches the real body.
+// German AND French variants both run — Switzerland posts in both.
 // externalUrl on an ad is the employer/board posting; the Job-Room page
 // otherwise.
 //
-// Config: CH_WINDOW_DAYS (7)  CH_MAX_PAGES (3, x50/page)  CH_DETAIL_MAX (40)
+// Config: CH_WINDOW_DAYS (7)  CH_MAX_PAGES (3, x50/page)
 
 const SEARCH_URL = "https://www.job-room.ch/jobadservice/api/jobAdvertisements/_search";
 const DETAIL_URL = "https://www.job-room.ch/jobadservice/api/jobAdvertisements";
 const UA = "JobRadar/0.1 (personal job search)";
 const WINDOW_DAYS = Number(process.env.CH_WINDOW_DAYS) || 7;
 const MAX_PAGES = Number(process.env.CH_MAX_PAGES) || 3;
-const DETAIL_MAX = Number(process.env.CH_DETAIL_MAX) || 40;
 const LIMIT = 50;
-// Mirrors ingest's STORE_THRESHOLD (importing it would be circular).
-const SCORE_GATE = 20;
+// The store gate used to live here too, as a fourth copy of `20` — one per
+// connector that fetched detail pages. It decided what the pool may contain,
+// which is ingest's decision; the number now exists once, in derive.ts, and
+// this connector no longer needs it.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -77,7 +77,8 @@ export function cardToRawJob(card: ChCard, description?: string): RawJob {
   };
 }
 
-async function fetchDetail(id: string, fetchImpl: typeof fetch): Promise<string | undefined> {
+// Exported for desc:fill, which owns detail fetching for every platform.
+export async function fetchDetail(id: string, fetchImpl: typeof fetch = fetch): Promise<string | undefined> {
   try {
     const res = await fetchImpl(`${DETAIL_URL}/${encodeURIComponent(id)}`, {
       headers: { "User-Agent": UA, Accept: "application/json" },
@@ -131,18 +132,11 @@ export async function fetchSwitzerland(fetchImpl: typeof fetch = fetch): Promise
     }
   }
 
-  // Detail budget goes to the best title scores first (two-stage cost model).
-  const scored = [...cards.values()]
-    .map((card) => ({ card, score: scoreJob(cardToRawJob(card)) }))
-    .filter(({ score }) => !score.disqualified && score.score >= SCORE_GATE)
-    .sort((a, b) => b.score.score - a.score.score);
-
-  const out: RawJob[] = [];
-  for (const { card } of scored.slice(0, DETAIL_MAX)) {
-    out.push(cardToRawJob(card, await fetchDetail(card.id, fetchImpl)));
-    await sleep(300);
-  }
-  return out;
+  // Every card, with its ~200-character preview as the body for now. The full
+  // description is a detail call, and detail calls belong to desc:fill — which
+  // orders them by the stored score rather than by a guess from a title, and
+  // has a budget and a circuit breaker this loop never had.
+  return [...cards.values()].map((card) => cardToRawJob(card));
 }
 
 export const switzerland: Source = {

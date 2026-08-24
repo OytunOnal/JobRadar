@@ -176,10 +176,17 @@ test("the adaptive batch sizer can finally be called at all", async () => {
   const lines: string[] = [];
   const log = (l: string) => lines.push(l);
   // A first window only establishes a baseline; it must not move the batch.
-  for (let i = 0; i < 6; i++) tuneAfterBatch(100, log);
+  for (let i = 0; i < 6; i++) tuneAfterBatch(1000, log);
   assert.deepEqual(lines, []);
-  // A second window with a very different rate does move it.
-  for (let i = 0; i < 6; i++) tuneAfterBatch(1, log);
+
+  // A second window whose measured rate is unmistakably lower. The sleep is
+  // load-bearing, not padding: the tuner divides work by elapsed time, and six
+  // calls inside one millisecond measure Infinity/Infinity — which compares
+  // equal to itself and retunes nothing. This test was flaky until it made the
+  // two windows take visibly different amounts of time.
+  for (let i = 0; i < 5; i++) tuneAfterBatch(1, log);
+  await new Promise((r) => setTimeout(r, 30));
+  tuneAfterBatch(1, log);
   assert.ok(lines.some((l: string) => l.includes("[tune]")), "a rate change retunes the batch");
 });
 

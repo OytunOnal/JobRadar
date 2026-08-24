@@ -1,6 +1,5 @@
 import { COUNTRY_LANGUAGE, resolveCountry } from "../geo";
 import { profileSearchGroups, type SearchGroup, type SearchLang } from "../profile";
-import { scoreJob } from "../score";
 import { apifyToken, runActor } from "./apify";
 import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
 
@@ -27,16 +26,17 @@ import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
 // Variants come from the generated profile's per-track searchVariants;
 // without them a track degrades to its lead titleKeyword, as before.
 //
-// Cost model is two-stage: search cards carry title/company/location/date —
-// enough for the free title-first keyword score. Full descriptions are fetched
-// only for cards that pass, within a per-run budget.
+// Search cards carry title/company/location/date and no body. The description
+// is a second guest request per posting, which desc:fill makes — ordered by
+// the stored score, with a budget and a circuit breaker. This connector
+// returns every card it sees.
 //
 // Config (interim until the planned `searches` config block):
 //   LINKEDIN_TITLES     comma-sep;  overrides ALL variants (EN-only escape hatch);
 //                       default: per-track searchVariants from the generated profile
 //   LINKEDIN_CITIES     ";"-sep     default: Berlin/Munich/Amsterdam/Istanbul
 //   LINKEDIN_COUNTRIES  ";"-sep     default: Germany;Netherlands;Turkey
-//   LINKEDIN_WINDOW_DAYS (7)  LINKEDIN_PAGES (2/search)  LINKEDIN_DETAIL_MAX (120)
+//   LINKEDIN_WINDOW_DAYS (7)  LINKEDIN_PAGES (2/search)
 //   LINKEDIN_VIA_APIFY=1 switches to the kaix Apify actor (paid fallback).
 
 const SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search";
@@ -45,9 +45,10 @@ const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
 
 const WINDOW_DAYS = Number(process.env.LINKEDIN_WINDOW_DAYS) || 7;
 const PAGES_PER_SEARCH = Number(process.env.LINKEDIN_PAGES) || 2;
-const DETAIL_MAX = Number(process.env.LINKEDIN_DETAIL_MAX) || 120;
-// Mirrors ingest's STORE_THRESHOLD (importing it would be circular).
-const SCORE_GATE = 20;
+// The store gate used to live here too, as a fourth copy of `20` — one per
+// connector that fetched detail pages. It decided what the pool may contain,
+// which is ingest's decision; the number now exists once, in derive.ts, and
+// this connector no longer needs it.
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -209,6 +210,17 @@ export function parseJobDetail(html: string): string {
 
 // ── Guest-API fetch (primary) ────────────────────────────────────────────────
 
+// Called by desc:fill, which owns detail fetching for every platform. The card
+// list carries no body; this is the second guest request per posting, and it
+// used to run inline behind a title-score gate.
+export async function fetchDetail(id: string): Promise<string> {
+  try {
+    return parseJobDetail(await guestFetch(`${DETAIL_URL}/${id}`));
+  } catch {
+    return ""; // card data alone is still a valid listing
+  }
+}
+
 async function fetchViaGuestApi(): Promise<RawJob[]> {
   const plan = searchPlan(
     searchGroups(),
@@ -232,38 +244,26 @@ async function fetchViaGuestApi(): Promise<RawJob[]> {
     }
   }
 
-  // Stage 2: full descriptions only for cards the free title score approves.
-  const out: RawJob[] = [];
-  let detailBudget = DETAIL_MAX;
-  for (const { card, remoteTier } of candidates) {
-    const base: RawJob = {
-      source: "linkedin",
-      externalId: card.id,
-      url: card.url,
-      title: card.title,
-      company: card.company,
-      location: card.location,
-      remote: remoteTier || /remote/i.test(card.location),
-      workMode: remoteTier ? ("remote" as WorkMode) : undefined,
-      description: "",
-      postedAt: card.postedAt,
-    };
-    const s = scoreJob(base);
-    if (s.disqualified || s.score < SCORE_GATE) continue;
-    if (detailBudget > 0) {
-      try {
-        const detailHtml = await guestFetch(`${DETAIL_URL}/${card.id}`);
-        base.description = parseJobDetail(detailHtml);
-        detailBudget--;
-        await sleep(700 + Math.random() * 500);
-      } catch {
-        /* card data alone is still a valid listing */
-      }
-    }
-    if (!base.description) base.description = base.title;
-    out.push(base);
-  }
-  return out;
+  // Every card, body-less. The description lives behind a second guest request
+  // per posting, and that is desc:fill's job now — it orders by the stored
+  // score instead of a title guess, and it has the budget and circuit breaker
+  // this loop never had.
+  //
+  // The gate that used to stand here decided what the pool may contain, which
+  // is ingest's decision. A card dropped in a connector can never be re-scored
+  // when the scorer improves; that is the lesson store-all was bought with.
+  return candidates.map(({ card, remoteTier }) => ({
+    source: "linkedin",
+    externalId: card.id,
+    url: card.url,
+    title: card.title,
+    company: card.company,
+    location: card.location,
+    remote: remoteTier || /remote/i.test(card.location),
+    workMode: remoteTier ? ("remote" as WorkMode) : undefined,
+    description: card.title,
+    postedAt: card.postedAt,
+  }));
 }
 
 // ── Apify fallback (kaix actor, paid) — kept behind LINKEDIN_VIA_APIFY ───────

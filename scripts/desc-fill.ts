@@ -20,6 +20,10 @@ import { labelledSections as labelled } from "../src/lib/sections";
 import { TEXT_VERSION } from "../src/lib/html-text";
 import { invalidateVector } from "../src/lib/embed";
 import { andWhere, openWhere } from "../src/lib/pool";
+import { fetchDetail as baDetail } from "../src/lib/sources/arbeitsagentur";
+import { fetchDetail as chDetail } from "../src/lib/sources/switzerland";
+import { fetchDetailSections as manfredSections } from "../src/lib/sources/manfred";
+import { fetchDetail as linkedinDetail } from "../src/lib/sources/linkedin";
 
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
 
@@ -172,11 +176,39 @@ export async function fetchDescription(source: string, externalId: string, url: 
       return jsonLdDescription(html) || ogDescription(html);
     }
     default:
-      return "";
+    // ── Sources that used to fetch their own detail pages ──────────────
+    //
+    // Four connectors ran this same two-stage shape themselves: score every
+    // card from its title, drop the ones under the gate, fetch detail pages
+    // for the best N. That put a store decision inside a connector and a
+    // detail budget in four places. They now return every card they see, and
+    // the second stage is here — where the ordering is the STORED score, and
+    // where a budget and a per-platform circuit breaker already exist.
+    case "arbeitsagentur":
+      return (await baDetail(externalId)).description ?? "";
+    case "ch-jobroom":
+      return (await chDetail(externalId)) ?? "";
+    case "manfred":
+      // Manfred names every block; assembled here, through the same helper
+      // every other named source in this switch goes through.
+      return labelled(await manfredSections(externalId));
+    case "linkedin":
+      return await linkedinDetail(externalId);
   }
 }
 
-const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:"];
+// Prefixes, because an ATS source is "<platform>:<token>". The last four are
+// whole source names: aggregators whose detail fetching moved here.
+const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin"];
+
+// A body short enough that the source is still holding the real one.
+//
+// The title-only test below does not catch these: Job-Room ships a ~200
+// character preview and BA ships nothing at all, so a preview reads as a real
+// body by length while being a tenth of one. Nor does the flat test, because
+// ingest stamps the current TEXT_VERSION on every write.
+const PREVIEW_SOURCES = new Set(["arbeitsagentur", "ch-jobroom", "manfred", "linkedin"]);
+const PREVIEW_MAX = 600;
 
 // The backfill runs only when this file is the entry point. Without the
 // guard, importing fetchDescription — to check one platform's shape, or from
@@ -214,6 +246,13 @@ const rows = await prisma.job.findMany({
 const queue = rows.filter((r) => {
   const d = r.content?.description ?? "";
   if (d.length < r.title.length + 60) return true;
+  //   3. PREVIEW — the four sources whose detail fetching moved here ship a
+  //      short teaser (or nothing) on the list endpoint. Long enough to pass
+  //      the title-only test, short enough that the real body is still at the
+  //      source. A successful fetch lifts it past this bar; a source whose
+  //      real body IS this short costs one retry per run, which the
+  //      per-platform circuit breaker bounds.
+  if (PREVIEW_SOURCES.has(r.source.split(":")[0]) && d.length < PREVIEW_MAX) return true;
   return !d.includes("\n") && r.content?.textVersion !== TEXT_VERSION;
 });
 const titleOnly = queue.filter((r) => (r.content?.description ?? "").length < r.title.length + 60).length;

@@ -133,8 +133,6 @@ header.top {
 .badge.t-risk { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
 .badge.t-good { color: var(--strong); border-color: currentColor; }
 .badge.t-note { color: var(--muted); }
-/* Roles gone from their source read as absent, not as a warning. */
-.badge.age-delisted { color: var(--faint); border-style: dashed; }
 .fitcomment { margin-top: 8px; font-size: 13px; color: var(--text); opacity: 0.92; }
 .reason {
   margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--faint);
@@ -173,7 +171,6 @@ header.top {
 }
 .pager a { border: 1px solid var(--line); border-radius: 8px; padding: 5px 14px; color: var(--text); }
 .pager a:hover { border-color: var(--accent); text-decoration: none; }
-.empty { color: var(--muted); text-align: center; padding: 56px 20px; }
 .empty .hint { color: var(--faint); font-size: 12.5px; margin-top: 6px; }
 
 @media (max-width: 720px) {
@@ -200,6 +197,8 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .trackrow .noteform { display: flex; gap: 6px; margin-top: 6px; }
 .trackrow .noteform input { flex: 1; min-width: 0; background: transparent; border: 1px solid var(--line, #333); border-radius: 6px; padding: 4px 8px; color: inherit; font: inherit; font-size: 12px; }
 .trackrow .noteform .btn { width: auto; padding: 4px 12px; font-size: 11.5px; }
+/* Declared twice, 27 lines apart, with different padding; this one silently
+   won on every page. Kept as-is so the sweep changes no pixels. */
 .empty { color: var(--muted, #888); padding: 30px 0; text-align: center; }
 .starred { border: 1px solid var(--line, #333); border-radius: 8px; padding: 6px 12px 10px; margin: 14px 0 6px; }
 .fitnum-inline { font-weight: 700; font-size: 12px; margin-right: 4px; }
@@ -222,9 +221,6 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .reasonpop .btn { text-align: left; }
-/* Pre-27B triage scores: visibly provisional, never as loud as a real verdict */
-.fitnum.prescore, .vlabel.prescore { color: var(--muted); }
-.gauge .prescore { background: var(--muted); opacity: 0.45; }
 
 /* ── Profile / control panel ─────────────────────────────────────────── */
 .panel { border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; margin: 16px 0; background: var(--surface); }

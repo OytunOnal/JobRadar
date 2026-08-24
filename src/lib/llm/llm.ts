@@ -9,6 +9,14 @@
 import { loadSettings } from "../user/settings";
 
 export class RateLimitError extends Error {}
+// Out of balance, as a TYPE. The walk used to recognize it by grepping the
+// error message for "HTTP 402" — a substring match over up to 200 chars of
+// echoed response body, so a gateway whose error text merely mentioned 402
+// could bench a healthy provider, and Anthropic's dialect (an empty credit
+// balance reports as HTTP 400) could never bench the real thing. The adapters
+// hold res.status and the body; meaning is translated there, not guessed
+// downstream from prose.
+export class OutOfBalanceError extends Error {}
 
 // "anthropic" uses the /v1/messages shape; "openai" uses /chat/completions.
 type ProviderKind = "openai" | "anthropic" | "ollama";
@@ -162,7 +170,11 @@ async function callOpenAI(p: Provider, messages: Msg[], model: string, opts: Cha
     }),
   });
   if (res.status === 429) throw new RateLimitError(`${p.name} rate limit`);
-  if (!res.ok) throw new Error(`${p.name} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    if (res.status === 402) throw new OutOfBalanceError(`${p.name} HTTP 402: ${body}`);
+    throw new Error(`${p.name} HTTP ${res.status}: ${body}`);
+  }
   const data = await res.json();
   const content: string = data.choices?.[0]?.message?.content ?? "";
   // Local reasoning models (Qwen3 via Ollama) inline their thinking; strip it
@@ -191,7 +203,17 @@ async function callAnthropic(p: Provider, messages: Msg[], model: string, opts: 
     }),
   });
   if (res.status === 429) throw new RateLimitError(`${p.name} rate limit`);
-  if (!res.ok) throw new Error(`${p.name} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    // Anthropic's out-of-balance dialect is HTTP 400 with a credit-balance
+    // message, not 402 — without this, the head-of-chain provider could never
+    // be benched when out of credits, and ate a failed round-trip on every
+    // call of a multi-hour backfill.
+    if (res.status === 402 || (res.status === 400 && /credit balance/i.test(body))) {
+      throw new OutOfBalanceError(`${p.name} HTTP ${res.status}: ${body}`);
+    }
+    throw new Error(`${p.name} HTTP ${res.status}: ${body}`);
+  }
   const data = await res.json();
   return (data.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("") ?? "";
 }
@@ -256,12 +278,16 @@ export const DEAD_TTL_MS = 60 * 60_000;
  *   DEAD_TTL_MS, because out-of-balance erroring at the head of every chain
  *   is pure waste for as long as the balance stays empty;
  * - RateLimitError is thrown only when every provider ASKED was rate-limited
- *   — one plain failure among the limits means something else is wrong, and
- *   backing off would hide it;
+ *   — benched providers and ones that revealed an empty balance mid-walk do
+ *   not count against it, because their silence says nothing about limits,
+ *   while one plain failure among the limits means something else is wrong
+ *   and backing off would hide it;
  * - when everything fails, the error carries every provider's reason, not
  *   just the tail's;
- * - null means "no LLM at the moment": nothing configured, or everything
- *   configured currently benched. Callers already skip gracefully on null.
+ * - null means "no LLM at the moment": nothing configured, everything
+ *   currently benched, or every provider revealing an empty balance on this
+ *   very walk. Callers must treat null as "skip, try later" — deepprobe once
+ *   treated it as a completed answer and burned its rescue lane on it.
  */
 export async function walkProviders<P extends { name: string }>(
   all: readonly P[],
@@ -272,7 +298,11 @@ export async function walkProviders<P extends { name: string }>(
   const provs = all.filter((p) => {
     const diedAt = dead.get(p.name);
     if (diedAt === undefined) return true;
-    if (now() - diedAt >= DEAD_TTL_MS) {
+    const age = now() - diedAt;
+    // A negative age means the clock stepped backwards (VM restore, RTC fix);
+    // holding the bench for the size of the step would recreate the very
+    // "topping up changed nothing" failure the TTL exists to end.
+    if (age < 0 || age >= DEAD_TTL_MS) {
       dead.delete(p.name); // revival: the bench is a timeout, not a verdict
       return true;
     }
@@ -281,6 +311,7 @@ export async function walkProviders<P extends { name: string }>(
   if (provs.length === 0) return null;
 
   let rateLimited = 0;
+  let broke = 0;
   const failures: string[] = [];
   for (const p of provs) {
     try {
@@ -288,11 +319,24 @@ export async function walkProviders<P extends { name: string }>(
     } catch (e: any) {
       failures.push(`${p.name}: ${String(e?.message ?? e).slice(0, 160)}`);
       if (e instanceof RateLimitError) rateLimited++;
-      else if (/HTTP 402/.test(e?.message ?? "")) dead.set(p.name, now());
+      else if (e instanceof OutOfBalanceError) {
+        broke++;
+        dead.set(p.name, now());
+      }
       // try the next provider
     }
   }
-  if (rateLimited === provs.length) throw new RateLimitError("all providers rate-limited");
+  // Everything that answered said "no balance": they are all benched now, so
+  // this walk's truth is the same as the next hour's — no LLM at the moment.
+  if (broke === provs.length) return null;
+  // An empty balance revealed mid-walk says nothing about rate limits; only
+  // the providers whose answer COULD have been a limit are in the denominator.
+  // Without this, an hourly revival of a still-broke provider injected one
+  // plain failure into an otherwise all-limited walk and downgraded the
+  // throw the ingest loops break on.
+  if (rateLimited > 0 && rateLimited === provs.length - broke) {
+    throw new RateLimitError("all providers rate-limited");
+  }
   // Every provider's reason, not just the last one — the chain hides bugs otherwise.
   throw new Error(`all providers failed — ${failures.join(" | ")}`);
 }

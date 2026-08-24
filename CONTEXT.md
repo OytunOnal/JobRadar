@@ -176,9 +176,9 @@ _Avoid_: LLM score, AI score, match score
 **Provider chain**:
 The ordered walk over configured LLM providers that every model call rides:
 the first success answers, a failure falls through to the next, a provider out
-of balance sits out an hour, and only a chain whose every member was
-rate-limited reports itself as rate-limited. Which provider leads is the
-user's choice.
+of balance sits out for a while, and the chain reports itself rate-limited
+only when every provider it asked was. Which provider leads is the user's
+choice.
 _Avoid_: fallback cascade, retry loop, LLM router
 
 **Judge**:

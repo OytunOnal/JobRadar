@@ -168,7 +168,12 @@ export async function runDeepProbes(
       [{ role: "user", content: websitePrompt(unknownIdx.map((i) => names[i])) }],
       { temperature: 0, maxTokens: 800, tier: "fast" },
     );
-    const resolved = answer ? parseWebsiteAnswers(answer, unknownIdx.length) : [];
+    // null is "no LLM at the moment", not an answer. Marking the batch
+    // deepChecked on it would burn the rescue lane permanently: these
+    // companies match the deepChecked:false query never again, with no error
+    // and no retry once the provider recovers. Leave them for a later pass.
+    if (answer === null) return report;
+    const resolved = parseWebsiteAnswers(answer, unknownIdx.length);
     unknownIdx.forEach((rowI, k) => {
       domains[rowI] = resolved[k] ?? null;
     });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { walkProviders, RateLimitError, DEAD_TTL_MS } from "../src/lib/llm/llm";
+import { walkProviders, RateLimitError, OutOfBalanceError, DEAD_TTL_MS } from "../src/lib/llm/llm";
 
 // The WALK over the provider chain, tested for the first time. The ORDER was
 // always testable without keys or a network (llmorder.test.ts); the walk — what
@@ -26,7 +26,12 @@ function chain(script: Record<string, "ok" | "fail" | "ratelimit" | "broke">) {
     switch (script[p.name]) {
       case "ok": return `${p.name} answered`;
       case "ratelimit": throw new RateLimitError(`${p.name} rate limit`);
-      case "broke": throw new Error(`${p.name} HTTP 402: no balance`);
+      // Typed, exactly as the adapters throw it. The first version of this
+      // fake hand-forged the adapter's message template and the walk grepped
+      // for "HTTP 402" — an undeclared string contract across the seam, where
+      // rewording one side silently unhooked the other while tests stayed
+      // green.
+      case "broke": throw new OutOfBalanceError(`${p.name} out of balance`);
       default: throw new Error(`${p.name} HTTP 500: boom`);
     }
   };
@@ -115,4 +120,37 @@ test("rate-limit accounting is over the providers actually tried", async () => {
   const dead = new Map([["groq", 500]]);
   const { provs, call } = chain({ groq: "ok", ollama: "ratelimit" });
   await assert.rejects(walkProviders(provs, call, dead, () => 501), RateLimitError);
+});
+
+test("a provider revealing an empty balance mid-walk does not spoil the rate-limit verdict", async () => {
+  // The hourly revival of a still-broke provider used to inject one plain
+  // failure into an otherwise all-limited walk, downgrading the throw the
+  // ingest loops break on — once per hour, a misleading report line and a
+  // wasted chain.
+  const dead = new Map<string, number>();
+  const { provs, call } = chain({ groq: "broke", anthropic: "ratelimit", gemini: "ratelimit" });
+  await assert.rejects(walkProviders(provs, call, dead), RateLimitError);
+  assert.equal(dead.has("groq"), true, "and the broke provider went back on the bench");
+});
+
+test("a walk in which everything reveals an empty balance answers null, not a throw", async () => {
+  // They are all benched now, so this walk's truth equals the next hour's:
+  // no LLM at the moment. A dashboard click with a single broke provider used
+  // to 500 once per hour at the revival boundary; now it no-ops like every
+  // other minute of that hour.
+  const dead = new Map<string, number>();
+  const { provs, call } = chain({ groq: "broke" });
+  assert.equal(await walkProviders(provs, call, dead), null);
+  assert.equal(dead.has("groq"), true);
+});
+
+test("a clock that steps backwards expires the bench rather than extending it", async () => {
+  // now() - diedAt goes negative after a VM restore or an RTC correction;
+  // waiting for it to climb past the TTL would hold the bench for the size of
+  // the step — recreating the "topping up changed nothing" failure the TTL
+  // exists to end.
+  const dead = new Map([["groq", 1_000_000]]);
+  const { provs, call, called } = chain({ groq: "ok" });
+  assert.equal(await walkProviders(provs, call, dead, () => 500_000), "groq answered");
+  assert.deepEqual(called, ["groq"]);
 });

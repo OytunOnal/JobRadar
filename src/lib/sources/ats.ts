@@ -668,7 +668,10 @@ export async function phenom(token: string, company: string): Promise<RawJob[]> 
         company,
         location: [...new Set(locs)].slice(0, 4).join("; "),
         remote: Boolean(j.remote) || /remote/i.test(String(j.type ?? "")),
-        description: String(j.descriptionTeaser ?? "") || String(j.title ?? ""),
+        // The teaser is cut from the same rich-text field the JD page
+        // renders, so it arrives with markup like every other body here.
+        // It was the one body field in this file assigned raw.
+        description: stripHtml(String(j.descriptionTeaser ?? "")) || String(j.title ?? ""),
         postedAt: j.postedDate ? new Date(j.postedDate) : undefined,
       });
     }

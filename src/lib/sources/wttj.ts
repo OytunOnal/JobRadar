@@ -1,5 +1,5 @@
 import { profileSearchGroups } from "../profile";
-import { type RawJob, type Source } from "./types";
+import { stripHtml, type RawJob, type Source } from "./types";
 
 // Welcome to the Jungle — France's biggest tech board (global reach), via its
 // public Algolia search index (the same one the site's jobs UI calls). The
@@ -58,7 +58,10 @@ export function mapHit(h: any): RawJob | null {
     remote: h.remote === "fulltime",
     workMode: h.remote === "fulltime" ? "remote" : h.remote === "partial" ? "hybrid" : undefined,
     salaryText: salary,
-    description: String(h.profile ?? ""), // teaser text when the index carries it
+    // `profile` is the posting's "profil recherché" — a named REQUIREMENTS
+    // section, stored in Algolia as authored, i.e. rich text. Calling it
+    // "teaser text" was an assumption; this file imported no converter.
+    description: stripHtml(String(h.profile ?? "")),
     postedAt: Number.isFinite(h.published_at_timestamp) && h.published_at_timestamp > 0
       ? new Date(h.published_at_timestamp * 1000)
       : undefined,

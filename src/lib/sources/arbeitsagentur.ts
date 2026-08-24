@@ -1,6 +1,6 @@
 import { profileSearchGroups } from "../profile";
 import { scoreJob } from "../score";
-import { type RawJob, type Source } from "./types";
+import { stripHtml, type RawJob, type Source } from "./types";
 
 // Bundesagentur für Arbeit (the German federal employment agency) Jobsuche
 // API — the national job board, keyless (the web client's static API key is
@@ -97,7 +97,11 @@ export function cardToRawJob(card: BaCard, detail?: { description?: string; exte
     location: card.location,
     remote: false, // BA listings are location-bound; deriveWorkMode reads the text
     salaryText: card.salaryText,
-    description: detail?.description ?? "",
+    // Converted HERE, in the pure mapper, rather than inside fetchDetail:
+    // this function is exported and tested, and a mapper that trusts its
+    // caller to have converted is a mapper that stores markup the day someone
+    // calls it from anywhere else.
+    description: stripHtml(detail?.description ?? ""),
     postedAt: card.postedAt,
   };
 }
@@ -114,6 +118,8 @@ export async function fetchDetail(
   // HOMEPAGE (live: "www.ihk.de") — as a job URL it would 404 the listing.
   const ext = d.externeUrl;
   return {
+    // Raw on purpose — cardToRawJob converts. One conversion, in the pure
+    // half, where a test can see it.
     description: d.stellenangebotsBeschreibung ? String(d.stellenangebotsBeschreibung) : undefined,
     externalUrl: ext ? String(ext).replace(/^(?!https?:\/\/)/, "https://") : undefined,
   };

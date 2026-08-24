@@ -1,4 +1,4 @@
-import { stripHtml, type RawJob, type Source } from "./types";
+import { type RawJob, type Source } from "./types";
 import { labelledSections } from "../sections";
 
 // Poland's two big tech boards, both with keyless JSON APIs (contracts

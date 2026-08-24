@@ -109,8 +109,11 @@ function pickLink(chunk: string): string {
   return raw.startsWith("http") ? raw : "";
 }
 
-const decode = (s: string) =>
-  s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;/g, "'");
+// Entity decoding happens INSIDE stripHtml, before tags are stripped, and
+// twice — see html-text.ts. Doing it again afterwards is the exact ordering
+// that rewrite was written to eliminate: a `&lt;p&gt;` surviving the two
+// internal passes gets manifested into a real `<p>` in the FINAL stored text,
+// with nothing downstream left to strip it. Across 66 feeds.
 
 export function splitCompany(rawTitle: string, def: FeedDef): { title: string; company: string } {
   const t = rawTitle.trim();
@@ -141,15 +144,18 @@ export function parseFeed(xml: string, def: FeedDef): RawJob[] {
   const out: RawJob[] = [];
   const seen = new Set<string>();
   for (const chunk of chunks) {
-    const rawTitle = decode(stripHtml(pickTag(chunk, ["title"])));
+    const rawTitle = stripHtml(pickTag(chunk, ["title"]));
     const link = pickLink(chunk);
     if (!rawTitle || !link) continue;
     const dateStr = pickTag(chunk, ["pubDate", "published", "updated", "dc:date"]);
-    const author = decode(stripHtml(pickTag(chunk, ["dc:creator", "author", "name"])));
+    const author = stripHtml(pickTag(chunk, ["dc:creator", "author", "name"]));
     let { title, company } = splitCompany(rawTitle, def);
     if (!company && def.company === "author" && author) company = author;
     if (!company) company = author || def.label;
-    const body = decode(stripHtml(pickTag(chunk, ["description", "summary", "content", "content:encoded"]))).slice(0, 4000);
+    // 4000, where every other connector and ingest itself use 8000 — a silent
+    // halving ingest cannot undo. Raised to match; safeSlice cuts it properly
+    // at the storage boundary.
+    const body = stripHtml(pickTag(chunk, ["description", "summary", "content", "content:encoded"])).slice(0, 8000);
     const id = link.replace(/^https?:\/\//, "").slice(0, 240);
     if (seen.has(id)) continue;
     seen.add(id);

@@ -69,7 +69,10 @@ export function cardToRawJob(card: ChCard, description?: string): RawJob {
     company: card.company,
     location: card.location,
     remote: false, // deriveWorkMode reads the text
-    description: description ?? card.preview,
+    // Converted here rather than trusting the caller. `preview` arrives
+    // already converted from parseAd, and htmlToText on clean text is a no-op;
+    // a detail body handed in raw is not, and this mapper is exported.
+    description: stripHtml(description ?? card.preview),
     postedAt: card.postedAt,
   };
 }
@@ -83,7 +86,8 @@ async function fetchDetail(id: string, fetchImpl: typeof fetch): Promise<string 
     if (!res.ok) return undefined;
     const d = await res.json();
     const jd = (d?.jobAdvertisement ?? d)?.jobContent?.jobDescriptions?.[0];
-    return jd?.description ? stripHtml(String(jd.description)) : undefined;
+    // Raw on purpose — cardToRawJob converts, so there is exactly one place.
+    return jd?.description ? String(jd.description) : undefined;
   } catch {
     return undefined;
   }

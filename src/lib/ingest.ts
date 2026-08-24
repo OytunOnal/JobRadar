@@ -46,8 +46,8 @@ import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
-import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
-import { TEXT_VERSION } from "./html-text";
+import { safeSlice, type RawJob, type Source } from "./sources/types";
+import { htmlToText, looksLikeHtml, TEXT_VERSION } from "./html-text";
 import { invalidateVector } from "./embed";
 import { andWhere, openWhere } from "./pool";
 import { derivedFields, statedFields, STORE_THRESHOLD } from "./derive";
@@ -281,6 +281,8 @@ export interface IngestReport {
   perSource: Record<string, number>;
   tooOld: number;
   junkDomain: number;
+  // Postings whose connector handed us markup. Non-zero is a connector bug.
+  unconverted: number;
   // Per-gate elimination counts (negative/roleNegative/noSignal/region/
   // noMatch/belowThreshold) — the false-negative audit surface.
   eliminated: Record<string, number>;
@@ -331,6 +333,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     fitAnalyzed: 0,
     perSource: {},
     tooOld: 0,
+    unconverted: 0,
     junkDomain: 0,
   eliminated: {},
     semanticDupes: 0,
@@ -557,6 +560,31 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   }
 
   for (const job of all) {
+    // A LAST LINE, NOT A CONVERSION STEP.
+    //
+    // Converting here unconditionally would be wrong: several connectors
+    // SYNTHESIZE a plain-text description (SwissDevJobs' "Technologies: ..."
+    // line, a16z's "title · function · seniority"), and htmlToText treats
+    // `<` followed by a letter as a tag — so a stack listing `<T>` or
+    // `<canvas>` would lose those tokens. (Measured while writing the test
+    // for this: the surrounding words survive, because the match stops at the
+    // first `>`. Prose like "latency < 100ms" is safe either way — the regex
+    // requires a letter after the bracket.)
+    //
+    // looksLikeHtml is narrow enough to tell the two apart: it fires only on
+    // real tag names and a handful of entities. So this converts what is
+    // genuinely markup, leaves synthesized prose alone, and COUNTS it —
+    // because a connector reaching here is a connector bug, and a silent
+    // repair would hide it. Measured when this landed: 1 posting in 3,577.
+    //
+    // It matters more than the count suggests. betterText judges quality by
+    // the presence of newlines, and raw markup has plenty, so unconverted
+    // markup can WIN against clean text on a re-sighting — and TEXT_VERSION
+    // is stamped either way, so the repair queue sees it as current.
+    if (looksLikeHtml(job.description)) {
+      report.unconverted++;
+      job.description = htmlToText(job.description);
+    }
     // SEO-farm copies: the original arrives via a better source.
     if (isJunkJobUrl(job.url)) {
       report.junkDomain++;

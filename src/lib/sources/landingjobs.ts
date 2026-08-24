@@ -1,4 +1,4 @@
-import { stripHtml, type RawJob, type Source } from "./types";
+import { type RawJob, type Source } from "./types";
 import { labelledSections } from "../sections";
 
 // Landing.Jobs — Portugal-centric European tech board with a relocation

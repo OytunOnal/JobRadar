@@ -1,6 +1,6 @@
 import { scoreJob } from "../score";
 import { labelledSections } from "../sections";
-import { stripHtml, type RawJob, type Source } from "./types";
+import { type RawJob, type Source } from "./types";
 
 // Manfred — Spanish tech job platform with a genuinely open public API:
 // every ACTIVE offer with salary range, remote percentage, and locations in

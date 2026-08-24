@@ -22,17 +22,34 @@ export const KEYWORD_WEIGHT = 0.4;
 // to record which one it was.
 export const EMBED_VIEW_VERSION = "s2500";
 
-// The provenance stamp stored on every vector: the text it read and the
-// projection that chose which of that text to read. Anything that does not
-// match the current stamp is stale work, which is what makes the queue a
-// query rather than a guess.
-// `rowTextVersion` is the description's OWN stamp, not the constant. Using the
-// constant claimed every vector was built from current text — including ones
-// embedded while the description was still the old flat markup. When that
-// description was later re-fetched, staleVectorWhere saw a matching stamp and
-// left the vector alone: exactly the blindness builtFrom exists to remove.
-export function embedStamp(rowTextVersion?: string | null): string {
-  return `${rowTextVersion ?? "t0"}/${EMBED_VIEW_VERSION}`;
+// The provenance stamp on every vector: WHICH PROJECTION produced it.
+//
+// It deliberately does not encode the text version. That was tried twice and
+// both shapes were wrong. Stamping the code's TEXT_VERSION lied — a vector
+// built from an old description claimed to be current. Stamping the row's own
+// version and then comparing it to the constant made the question
+// unanswerable: with TEXT_VERSION at t3 and no row yet carrying t3, 445,358
+// vectors that already existed were permanently "stale", re-embedded on every
+// pass and never cleared, and the worker's idle lane became a hot loop.
+//
+// The mistake in both was treating "is this vector current?" as arithmetic
+// over two rows' versions. It is not — it is cache invalidation, and the
+// writer does it: everything that rewrites a description clears the vector's
+// stamp (invalidateVector below). Staleness is then a plain single-row test.
+export function embedStamp(): string {
+  return EMBED_VIEW_VERSION;
+}
+
+// Called by every writer of JobContent.description. A description that changed
+// is a vector that no longer describes its job, and the write is the only
+// moment that fact is known cheaply.
+// updateMany, not update: a job may have no vector yet, and that is the
+// common case rather than an error.
+export async function invalidateVector(
+  db: { jobEmbedding: { updateMany: (args: { where: { jobId: string }; data: { builtFrom: null } }) => Promise<unknown> } },
+  jobId: string,
+): Promise<void> {
+  await db.jobEmbedding.updateMany({ where: { jobId }, data: { builtFrom: null } });
 }
 
 // "This job needs embedding." One definition, because there are three callers
@@ -47,12 +64,9 @@ export function staleVectorWhere() {
     OR: [
       { vector: { is: null } },
       { vector: { model: { not: EMBED_MODEL } } },
+      // Cleared by whoever last rewrote the description.
       { vector: { builtFrom: null } },
-      // A vector is current only when its stamp matches the description it
-      // was built from, so the comparison is row-to-row: JobContent's
-      // textVersion joined with the view version we embed at today.
-      { NOT: { content: { textVersion: TEXT_VERSION } } },
-      { vector: { builtFrom: { not: embedStamp(TEXT_VERSION) } } },
+      { vector: { builtFrom: { not: embedStamp() } } },
     ],
   };
 }

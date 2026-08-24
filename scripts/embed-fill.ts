@@ -100,11 +100,10 @@ async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
   const placeholders = rows.map(() => "(?, ?, ?, ?)").join(", ");
   const params: unknown[] = [];
   for (let i = 0; i < rows.length; i++) {
-    // Stamp the text version this row ACTUALLY had. A shared constant would
-    // claim every vector came from current text, and the next re-fetch of an
-    // old description would leave its vector silently stale.
-    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])),
-      embedStamp(rows[i].content?.textVersion));
+    // The stamp says which PROJECTION built this vector. Whether the text has
+    // since changed is answered by the writer clearing it, not by comparing
+    // version strings here.
+    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])), embedStamp());
   }
   await prisma.$executeRawUnsafe(
     `INSERT INTO JobEmbedding (jobId, model, vector, builtFrom) VALUES ${placeholders}

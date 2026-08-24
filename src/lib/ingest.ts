@@ -48,6 +48,7 @@ import { runLivenessSweep, type LivenessReport } from "./liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./sponsors";
 import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
 import { TEXT_VERSION } from "./html-text";
+import { invalidateVector } from "./embed";
 import { visaFields } from "./visa-write";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -586,7 +587,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           scoreReason: rescored.reason,
           scoredBy: "keyword",
           salaryText: data.salaryText,
-          workMode: data.workMode,
+          // From the text we KEEP, like every other derived field. deriveWorkMode
+          // reads the description for "hybrid", so a title-only re-sighting was
+          // resetting the work mode of a posting whose desc:fill-enriched body
+          // says hybrid — on every sweep, silently drifting the radar's facet.
+          workMode: deriveWorkMode({ ...job, description: kept }),
           country: data.country,
           ...visaFields(
             { visa: existing.visa, visaBy: existing.visaBy, sponsorReg: data.sponsorReg, source: existing.source, country: data.country },
@@ -626,6 +631,9 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
             : {}),
         },
       });
+      // A rewritten description invalidates the vector built from it — the
+      // same rule the score, langReq and seniority already follow.
+      if (keepIncoming) await invalidateVector(prisma, existing.id);
       report.updated++;
     } else {
       const created = await prisma.job.create({

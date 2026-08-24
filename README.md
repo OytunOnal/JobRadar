@@ -132,9 +132,19 @@ nothing will reproduce — plus your application history and dismissals. So
 schema changes ship as **migrations**, which are ordered, recorded, and
 applied without touching your rows.
 
-If you have used this project before migrations existed, run
-`npx prisma migrate resolve --applied 0_init` once to tell it your database
-already has the current shape. Everything after that is `npm run db:deploy`.
+If you used this project before migrations existed, run these two once:
+
+```bash
+npx prisma db push                            # bring your database to the current shape
+npx prisma migrate resolve --applied 0_init   # record that shape as the baseline
+```
+
+Both are needed, and in that order. `migrate resolve` only *records* a
+migration as applied — it does not run it — so on its own it would tell a
+database created by the old `db push` that it already has columns it has
+never had, and every query touching them would fail. The push adds them
+first; the resolve then makes every later change go through migrations.
+Everything after that is `npm run db:deploy`.
 
 ## Commands
 

@@ -35,14 +35,34 @@ const ENTITIES: Record<string, string> = {
   eacute: "é", uuml: "ü", ouml: "ö", auml: "ä", szlig: "ß", euro: "€", middot: "·",
 };
 
+// Anything unrecognised is left exactly as written. A job posting is hostile
+// input by default — some carry deliberate prompt injections — so this decodes
+// only what it knows and refuses to be creative about the rest.
 function decodeEntities(s: string): string {
   return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, name: string) => {
+    // hasOwn, not `!== undefined`: a plain object literal inherits from
+    // Object.prototype, so `ENTITIES["toString"]` is a FUNCTION. A posting
+    // writing "&toString;" had the source of Object.prototype.toString spliced
+    // into its description, and from there into the embedding and the prompt.
+    if (Object.hasOwn(ENTITIES, name)) return ENTITIES[name];
     const key = name.toLowerCase();
-    if (ENTITIES[name] !== undefined) return ENTITIES[name];
-    if (ENTITIES[key] !== undefined) return ENTITIES[key];
-    if (/^#x/i.test(name)) return String.fromCodePoint(parseInt(name.slice(2), 16));
-    if (/^#/.test(name)) return String.fromCodePoint(parseInt(name.slice(1), 10));
-    return m;
+    if (Object.hasOwn(ENTITIES, key)) return ENTITIES[key];
+
+    // Numeric references, bounds-checked. String.fromCodePoint THROWS on
+    // anything above U+10FFFF, and this runs inside every connector's map()
+    // inside the source fetch — so one posting with "&#1234567;" made that
+    // whole source contribute nothing for the run, reported as a generic
+    // fetch error.
+    const numeric = /^#x/i.test(name)
+      ? parseInt(name.slice(2), 16)
+      : /^#/.test(name)
+        ? parseInt(name.slice(1), 10)
+        : NaN;
+    if (!Number.isInteger(numeric) || numeric < 0 || numeric > 0x10ffff) return m;
+    // Lone surrogates are unpaired halves — unserializable, and they killed a
+    // desc-fill run once already through a different route.
+    if (numeric >= 0xd800 && numeric <= 0xdfff) return m;
+    return String.fromCodePoint(numeric);
   });
 }
 

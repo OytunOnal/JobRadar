@@ -49,7 +49,10 @@ const ONCE = args.includes("--once");
 // Nothing is lost by it, because fit-fill rebuilds its own queue every 100
 // analyses; what the worker adds on return is the lane decision, and a lane
 // currently lasts ~50 hours.
-const BATCH = Number(args[args.indexOf("--batch") + 1]) || 250;
+const batchIdx = args.indexOf("--batch");
+// indexOf returns -1 when the flag is absent, and -1 + 1 is 0 — so without
+// this guard a leading positional argument silently became the batch size.
+const BATCH = (batchIdx !== -1 ? Number(args[batchIdx + 1]) : NaN) || 250;
 const IDLE_MS = 60_000;
 // A child that cannot even start is not a transient hiccup to retry a minute
 // later — the machine is out of room, and hammering it every 60s neither
@@ -216,7 +219,13 @@ async function pass(): Promise<boolean> {
       // --archive, or embed-fill walks the live pool first and this message
       // describes work it is not doing.
       const code = await run("scripts/embed-fill.ts", ["--archive", "--budget", "2000"]);
-      if (code !== 0) log(`  embed:fill (arşiv) çıkış kodu ${code}`);
+      if (code !== 0) {
+        // Returning true here reset failStreak and skipped the whole backoff
+        // ladder, so a child that could not start was respawned immediately —
+        // exactly the tight loop the ladder exists to prevent.
+        log(`  embed:fill (arşiv) çıkış kodu ${code}`);
+        return false;
+      }
     } finally { releaseGpu(); }
     return true;
   }

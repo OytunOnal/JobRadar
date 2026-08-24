@@ -46,3 +46,35 @@ test("empty list items are dropped, a real dash line is kept", () => {
   // But a dash the POSTING wrote is not ours to delete.
   assert.match(htmlToText("<p>Salary band</p><p>-</p><p>Negotiable</p>"), /\n-\n/);
 });
+
+test("escaped comparison operators survive — they are text, not tags", () => {
+  // Entities are decoded BEFORE tags are stripped (that is what stops
+  // Greenhouse's escaped markup from reaching storage). The cost, until the
+  // tag pattern required a tag-like opening, was that a posting writing
+  // "&lt; 100ms" lost everything up to the next "&gt;".
+  assert.equal(
+    htmlToText("Latency must be &lt; 100ms and uptime &gt; 99%."),
+    "Latency must be < 100ms and uptime > 99%.",
+  );
+  assert.equal(htmlToText("<p>We need &lt;3 years exp &gt; junior level</p>"), "We need <3 years exp > junior level");
+  // Real markup must still go, escaped or not.
+  assert.equal(htmlToText("<p>Hi <strong>there</strong></p>"), "Hi there");
+  assert.equal(htmlToText("&lt;p&gt;Hi&lt;/p&gt;"), "Hi");
+  assert.equal(htmlToText("<!-- note -->Body"), "Body");
+});
+
+test("a hostile entity cannot crash the fetch or inject anything", () => {
+  // This runs inside every connector's map(), inside the source fetch: an
+  // uncaught throw here made one malformed posting cost a whole source's
+  // jobs for the run.
+  assert.equal(htmlToText("Ref &#1234567; here"), "Ref &#1234567; here");
+  assert.equal(htmlToText("Ref &#xFFFFFFF; here"), "Ref &#xFFFFFFF; here");
+  assert.equal(htmlToText("Half &#xD800; pair"), "Half &#xD800; pair");
+  // ENTITIES is a plain object, so it inherits Object.prototype — "&toString;"
+  // used to splice a function's source into the description, and from there
+  // into the embedding and the prompt.
+  assert.equal(htmlToText("Ref &toString; here"), "Ref &toString; here");
+  assert.equal(htmlToText("Ref &constructor; x"), "Ref &constructor; x");
+  // Real references still decode.
+  assert.equal(htmlToText("caf&#233; &amp; &#x2764;"), "café & ❤");
+});

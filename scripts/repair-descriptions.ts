@@ -60,6 +60,10 @@ async function main() {
         where: { jobId: r.jobId },
         data: { description: clean, textVersion: TEXT_VERSION },
       }));
+      // The vector was built from the markup we just removed.
+      writes.push(prisma.jobEmbedding.updateMany({
+        where: { jobId: r.jobId }, data: { builtFrom: null },
+      }));
       bytesSaved += r.description.length - clean.length;
       repaired++;
     }

@@ -19,6 +19,7 @@ import { detectVisa } from "../src/lib/visa";
 import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
 import { labelledSections as labelled } from "../src/lib/sections";
 import { TEXT_VERSION } from "../src/lib/html-text";
+import { invalidateVector } from "../src/lib/embed";
 
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
@@ -300,6 +301,8 @@ for (const r of queue) {
         },
       },
     });
+    // The vector described the text we just replaced.
+    await invalidateVector(prisma, r.id);
     filled++;
     if (newScore > 50) crossed++;
   }

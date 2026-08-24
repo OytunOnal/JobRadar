@@ -1,35 +1,38 @@
 import { prisma } from "@/lib/db";
 import { profile } from "@/lib/profile";
-import { FIT_PROMPT_VERSION } from "@/lib/fit";
-import { ageLabel, classifyFreshness, DELISTED_AFTER_DAYS } from "@/lib/freshness";
-import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
+import { ageLabel } from "@/lib/freshness";
+import { COUNTRY_NAMES, REGION_KEYS } from "@/lib/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
-import { detectLanguageRequirements, LANG_NAMES } from "@/lib/langreq";
-import { discoverableWhere, liveWhere, pursuedWhere } from "@/lib/pool";
+import { liveWhere, pursuedWhere, PURSUED_STATUSES } from "@/lib/pool";
+import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/labels";
+import {
+  allowedCountries, countryChips, radarFacetWhere, radarFilters, radarPaging,
+  radarWhere, PAGE_SIZE, RADAR_ORDER, VERDICTS, VISA_TIERS, VISA_TIER_LABELS, WORK_MODES,
+} from "@/lib/radar";
 
 export const dynamic = "force-dynamic";
 
 // Track chips come from the user's configured tracks (config/user.ts override,
 // generated profile, or the template defaults). Multi-select; "all" clears.
 const TRACK_KEYS = profile.tracks.map((t) => t.key);
-const VERDICTS = ["all", "strong", "possible", "weak"] as const;
-// Multi-select work-mode filter; "all" clears. Values match Job.workMode.
-const WORK_MODES = [
-  { value: "remote", label: "remote" },
-  { value: "hybrid", label: "hybrid" },
-  { value: "onsite", label: "on-site" },
-] as const;
-const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
-// The visa axis: a derived tier, not raw evidence (see lib/visa.ts). Hidden
-// entirely when the profile says no sponsorship is needed anywhere.
-const VISA_TIERS = ["yes", "maybe", "no", "unknown", "not-needed"] as const;
-const VISA_TIER_LABELS: Record<(typeof VISA_TIERS)[number], string> = {
-  yes: "visa: yes", maybe: "visa: maybe", no: "visa: no",
-  unknown: "visa: unknown", "not-needed": "no visa needed",
-};
-const PAGE_SIZE = 30;
+// The shortlist is a glance, not a list: bound it so it can never become one.
+const STARRED_MAX = 40;
 
+
+// Labels carry MEANING (`tone`), not placement. The page decides what a risk
+// looks like and where it goes; the rule module decides what is one.
+function Badges({ labels }: { labels: Label[] }) {
+  return (
+    <>
+      {labels.map((l) => (
+        <span key={l.kind + l.text} className={`badge t-${l.tone}`} title={l.title}>
+          {l.text}
+        </span>
+      ))}
+    </>
+  );
+}
 
 function RadarMark() {
   return (
@@ -45,133 +48,52 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; region?: string; country?: string; visa?: string }>;
+  searchParams: Promise<{ track?: string; verdict?: string; loc?: string; q?: string; page?: string; region?: string; country?: string; visa?: string }>;
 }) {
-  const sp = await searchParams;
-  // track is a comma list of track keys; empty = all.
-  const trackSet = new Set(
-    (sp.track ?? "").split(",").map((s) => s.trim()).filter((s) => TRACK_KEYS.includes(s)),
-  );
+  const f = radarFilters(await searchParams, TRACK_KEYS);
+  const trackSet = new Set(f.tracks);
+  const locSet = new Set(f.workModes);
+  const regionSet = new Set(f.regions);
+  const visaSet = new Set(f.visaTiers);
+  const { verdict, q, page } = f;
   const track = [...trackSet].sort().join(",");
-  const status = "active"; // Radar is discovery-only; /applied and /dismissed have their own pages
-  const verdict = sp.verdict ?? "all";
-  // loc is a comma list of work modes (e.g. "remote,hybrid"); empty = all.
-  const locSet = new Set(
-    (sp.loc ?? "").split(",").map((s) => s.trim()).filter((s) => WORK_MODES.some((m) => m.value === s)),
-  );
   const loc = [...locSet].sort().join(",");
-  // region: comma list of region keys; country: comma list of alpha-2 codes
-  // plus the special buckets "other" | "remote" | "unknown".
-  const regionSet = new Set(
-    (sp.region ?? "").split(",").map((s) => s.trim()).filter((s) => REGION_KEYS.includes(s)),
-  );
   const region = [...regionSet].sort().join(",");
-  const countryParam = new Set((sp.country ?? "").split(",").map((s) => s.trim()).filter(Boolean));
-  const visaSet = new Set(
-    (sp.visa ?? "").split(",").map((s) => s.trim()).filter((s) => VISA_TIERS.includes(s as never)),
-  );
   const visa = [...visaSet].sort().join(",");
-  const q = (sp.q ?? "").trim();
-  const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
-
-  // discoverableWhere: live, and not yet reacted to. Four columns that used to
-  // be spelled out here — and spelled out differently in ten other files.
-  // Interested postings render in their own strip above the list.
-  const where: any = { ...discoverableWhere() };
-  const and: any[] = [];
-  if (trackSet.size > 0) where.track = { in: [...trackSet] };
-  if (verdict !== "all") where.fitVerdict = verdict;
-  if (locSet.size > 0) where.workMode = { in: [...locSet] };
-  if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
-  if (visaSet.size > 0) where.visaTier = { in: [...visaSet] };
 
   // The pool's own clock: how far the newest observation has advanced. Guards
   // the delisted check against "we simply haven't ingested lately".
   const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
 
-  // A posting is hidden only when it is GONE, never when it is merely old.
-  //
-  // The age filter used to drop anything whose postedAt fell outside a 45-day
-  // window, and it was measured hiding 74 already-judged postings — 72 of
-  // which the model had read and called real openings, 16 of them strong.
-  // The reason is that postedAt does not mean what the filter assumed: Ashby
-  // reports Elicit's still-open ML Engineer role as published 2021-01-23 with
-  // isListed true, because the field records when the record was created, not
-  // when the opening appeared. Filtering on it discards live jobs and keeps
-  // dead ones whose dates happen to look recent.
-  //
-  // So age is now DISCLOSED rather than enforced: the card carries a "may not
-  // be fresh" badge, and ghost risk — the thing the age filter was really
-  // trying to catch — carries its own, judged by a model that read the
-  // posting instead of inferred from a date. Hiding decides for the user with
-  // worse information than they have.
-  if (poolNewest) {
-    const delistCutoff = new Date(poolNewest.getTime() - DELISTED_AFTER_DAYS * 86_400_000);
-    and.push({
-      NOT: { AND: [{ source: { contains: ":" } }, { lastSeenAt: { lt: delistCutoff } }] },
-    });
-  }
-  // There used to be an OR arm here re-admitting pursued postings, so a job you
-  // had applied to stayed visible after its source dropped it. It could never
-  // match: the population above pins status to "new", and the two met in the
-  // same AND. The comment described behaviour the query could not produce.
-  //
-  // Deleted rather than honoured, because the radar is for FINDING work and a
-  // posting you have applied to has been found — /applied tracks it, and shows
-  // the closure as a warning rather than dropping the row.
-  // ── Region / country facet ─────────────────────────────────────────────
-  // Country chips cascade from the region selection: top 10 by count within
-  // the allowed set + "other" (the long tail) + "remote" (no location) +
-  // "unknown" (location we couldn't place). Counts are computed with every
-  // filter EXCEPT the country selection, so chips don't jump while picking.
-  const allowedCountries = regionSet.size > 0
-    ? [...new Set([...regionSet].flatMap((r) => [...REGIONS[r]]))]
-    : Object.keys(COUNTRY_NAMES);
-
-  const facetWhere: any = { ...where, AND: [...and] };
-  if (regionSet.size > 0) facetWhere.AND.push({ country: { in: allowedCountries } });
+  // Country chips cascade from the region selection: top 10 by count within the
+  // allowed set + "other" (the long tail) + "remote" (no location) + "unknown"
+  // (a location we could not place). Counted against every filter EXCEPT the
+  // country selection, so the chips do not jump while you are picking one.
+  const allowed = allowedCountries(f);
+  const facetWhere = radarFacetWhere(f, poolNewest);
   const [countryCounts, remoteCount, unknownCount] = await Promise.all([
-    prisma.job.groupBy({ by: ["country"], _count: true, where: { ...facetWhere, country: { in: allowedCountries } } }),
-    prisma.job.count({ where: { ...where, AND: [...and, { country: null, workMode: "remote" }] } }),
-    prisma.job.count({ where: { ...where, AND: [...and, { country: null, workMode: { not: "remote" } }] } }),
+    prisma.job.groupBy({ by: ["country"], _count: true, where: { AND: [facetWhere, { country: { in: allowed } }] } }),
+    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: "remote" }] } }),
+    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: { not: "remote" } }] } }),
   ]);
   const counts = new Map(countryCounts.map((c) => [c.country as string, c._count]));
-  const topCountries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c]) => c);
-  const otherCountries = allowedCountries.filter((c) => !topCountries.includes(c));
-  const otherCount = otherCountries.reduce((sum, c) => sum + (counts.get(c) ?? 0), 0);
+  const { top: topCountries, other: otherCountries, otherCount } = countryChips(f, counts);
 
   const countrySet = new Set(
-    [...countryParam].filter((c) => topCountries.includes(c) || ["other", "remote", "unknown"].includes(c)),
+    f.countries.filter((c) => topCountries.includes(c) || ["other", "remote", "unknown"].includes(c)),
   );
   const country = [...countrySet].sort().join(",");
+  const where = radarWhere(f, { poolNewest, top: topCountries, other: otherCountries });
 
-  if (countrySet.size > 0) {
-    const or: any[] = [];
-    const codes = [...countrySet].filter((c) => !["other", "remote", "unknown"].includes(c));
-    if (codes.length) or.push({ country: { in: codes } });
-    if (countrySet.has("other")) or.push({ country: { in: otherCountries } });
-    if (countrySet.has("remote")) or.push({ country: null, workMode: "remote" });
-    if (countrySet.has("unknown")) or.push({ country: null, workMode: { not: "remote" } });
-    and.push({ OR: or });
-  } else if (regionSet.size > 0) {
-    and.push({ country: { in: allowedCountries } });
-  }
-
-  if (and.length) where.AND = and;
-
-  const [jobs, filteredCount, snapshot] = await Promise.all([
+  // One wave, not three. The starred strip and the applied-company set used to
+  // be awaited on their own after this block, so a page load waited on five
+  // round trips in sequence where three would do.
+  const [jobs, filteredCount, snapshot, starred, appliedRows] = await Promise.all([
     prisma.job.findMany({
       where,
-      // LLM-analyzed jobs (real fit) rank first; the rest fall back to keyword score.
-      orderBy: [
-        { fitScore: { sort: "desc", nulls: "last" } },
-        { sourceTrust: "desc" }, // equal fit: the direct-apply ATS listing outranks the aggregator copy
-        { score: "desc" },
-        { createdAt: "desc" },
-      ],
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      // Only the tiny coverLetter field crosses the content split — 20 rows,
+      orderBy: [...RADAR_ORDER],
+      ...radarPaging(f),
+      // Only the tiny coverLetter field crosses the content split — 30 rows,
       // usually null; descriptions stay out of the list path entirely.
       include: { content: { select: { coverLetter: true } } },
     }),
@@ -179,28 +101,27 @@ export default async function Page({
     // The stat strip reads the ingest-end snapshot — one row instead of
     // group-by'ing half a million (measured cause of slow filter clicks).
     prisma.dashboardStatsSnapshot.findFirst({ orderBy: { at: "desc" } }),
+    // Starred ("interested") postings — a compact always-visible shortlist
+    // above the discovery list, unaffected by the filters. Bounded: this had no
+    // `take`, so a user who starred liberally would have paid for an unbounded
+    // read on every page load.
+    prisma.job.findMany({
+      where: { ...liveWhere(), status: "interested" },
+      orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
+      take: STARRED_MAX,
+    }),
+    // Companies with an application in progress — their remaining postings get
+    // a badge and a one-click "hide the rest" (born from 14 manual dismissals).
+    prisma.job.findMany({ where: pursuedWhere(), select: { company: true }, distinct: ["company"] }),
   ]);
   const snap = snapshot
     ? (JSON.parse(snapshot.stats) as { total: number; byStatus: Record<string, number>; byVerdict: Record<string, number> })
     : { total: 0, byStatus: {}, byVerdict: {} };
-
-  // Starred ("interested") jobs — a compact always-visible shortlist above the
-  // discovery list, unaffected by the filters.
-  const starred = await prisma.job.findMany({
-    where: { ...liveWhere(), status: "interested" },
-    orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
-  });
-
-  // Companies with an application in progress — their remaining postings get
-  // a badge and a one-click "hide the rest" (born from 14 manual Mistral
-  // dismissals).
-  const appliedCompanies = new Set(
-    (await prisma.job.findMany({
-      where: pursuedWhere(),
-      select: { company: true },
-      distinct: ["company"],
-    })).map((r) => r.company),
-  );
+  const appliedCompanies = new Set(appliedRows.map((r) => r.company));
+  // One clock and one pool reading for every card on the page, so two postings
+  // rendered in the same response cannot be judged fresh against different
+  // instants.
+  const labelCtx = { now: new Date(), poolNewest: poolNewest ?? undefined, appliedCompanies };
 
   const sc = snap.byStatus;
   const vc = snap.byVerdict;
@@ -208,11 +129,10 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "region" | "country" | "visa", string>>) => {
+  const href = (over: Partial<Record<"track" | "verdict" | "loc" | "q" | "page" | "region" | "country" | "visa", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, loc, q, region, country, visa, page: "", ...over };
+    const merged = { track, verdict, loc, q, region, country, visa, page: "", ...over };
     if (merged.track) p.set("track", merged.track);
-    if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
     if (merged.loc) p.set("loc", merged.loc);
     if (merged.region) p.set("region", merged.region);
@@ -241,7 +161,6 @@ export default async function Page({
         </div>
         <form className="search" action="/" method="get">
           {track && <input type="hidden" name="track" value={track} />}
-          {status !== "active" && <input type="hidden" name="status" value={status} />}
           {verdict !== "all" && <input type="hidden" name="verdict" value={verdict} />}
           {loc && <input type="hidden" name="loc" value={loc} />}
           <input name="q" defaultValue={q} placeholder="Search title or company" aria-label="Search jobs" />
@@ -261,7 +180,7 @@ export default async function Page({
         <span><b>{total}</b> tracked</span>
         <span className="s-strong"><b>{vc["strong"] ?? 0}</b> strong</span>
         <span className="s-possible"><b>{vc["possible"] ?? 0}</b> possible</span>
-        <a href={`/applied${fromQS}`}><b>{(sc["applied"] ?? 0) + (sc["interview"] ?? 0) + (sc["offer"] ?? 0)}</b> in progress</a>
+        <a href={`/applied${fromQS}`}><b>{PURSUED_STATUSES.reduce((n, st) => n + (sc[st] ?? 0), 0)}</b> in progress</a>
       </div>
 
       <div className="filterbar">
@@ -352,17 +271,20 @@ export default async function Page({
                 <p className="title">
                   {j.fitScore != null && (
                     <span
-                      className={`fitnum-inline v-${j.fitVerdict}${j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " verdict-stale"}`}
-                      title={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "Judged by an older version — waiting to be re-judged."}
+                      className={`fitnum-inline v-${j.fitVerdict}${isVerdictStale(j) ? " verdict-stale" : ""}`}
+                      title={isVerdictStale(j) ? staleVerdictTitle(j) : undefined}
                     >{j.fitScore}</span>
                   )}{" "}
                   <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
                 </p>
                 <div className="meta">
                   {j.company}
-                  {j.location ? ` · ${j.location}` : ""}
-                  {j.sponsorReg && <span className="badge s-strong"> sponsor✓</span>}
-                  {j.visa === "yes" && <span className="badge s-strong"> visa</span>}
+                  {j.location ? ` · ${j.location}` : ""}{" "}
+                  {/* The same labels the main card uses. This strip used to
+                      render sponsorReg as "sponsor✓" while the card rendered
+                      the derived tier as "sponsor?" for the very same posting —
+                      1,920 of them. One vocabulary, one column. */}
+                  <Badges labels={postingLabels(j, labelCtx).filter((l) => l.kind === "visa")} />
                 </div>
               </div>
               <div className="actions">
@@ -389,43 +311,30 @@ export default async function Page({
         </div>
       ) : (
         jobs.map((j) => {
-          const freshness = classifyFreshness(j, new Date(), poolNewest ?? undefined);
-          const langBarriers = (j.langReq ?? "").split(",").filter(Boolean).filter((c) => !profile.languages.includes(c));
+          const labels = postingLabels(j, labelCtx);
           const appliedHere = appliedCompanies.has(j.company);
           return (
           <article className="job" key={j.id}>
             <div className="fitcell">
+              {/* One axis, not two. There used to be a `fitBy` branch above
+                  this one splitting scores by which MODEL judged them, and
+                  because it came first a pre-27B score could never also be
+                  marked stale — the two tests were mutually exclusive by
+                  construction while asking the same question. The question is
+                  "did the system we still trust produce this", and
+                  fitPromptVersion answers it; a model name is a weaker proxy
+                  that goes quietly wrong the day the model changes. */}
               {j.fitScore != null ? (
-                (j.fitBy ?? "").startsWith("qwen27b") ? (
-                  // A verdict is only "current" if THIS prompt produced it.
-                  // Every pre-v7 judgment was formed on markup-filled text
-                  // read through a blind head-slice, with no salary line and
-                  // visa wording reaching the model 24% of the time — a
-                  // different system wearing the same number. Faded until the
-                  // worker re-judges it, so a stale verdict never reads as a
-                  // fresh one.
                   <div
-                    className={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "verdict-stale"}
-                    title={j.fitPromptVersion === FIT_PROMPT_VERSION
-                      ? undefined
-                      : `Judged by an older version (${j.fitPromptVersion ?? "?"}) on text we have since repaired — waiting to be re-judged by ${FIT_PROMPT_VERSION}.`}
+                    className={isVerdictStale(j) ? "verdict-stale" : undefined}
+                    title={isVerdictStale(j) ? staleVerdictTitle(j) : undefined}
                   >
                     <div className={`fitnum v-${j.fitVerdict}`}>{j.fitScore}</div>
                     <div className="gauge"><span className={`v-${j.fitVerdict}`} style={{ width: `${j.fitScore}%` }} /></div>
                     <div className={`vlabel v-${j.fitVerdict}`}>
-                      {j.fitVerdict}{j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " · old"}
+                      {j.fitVerdict}{isVerdictStale(j) ? " · old" : ""}
                     </div>
                   </div>
-                ) : (
-                  // Pre-27B triage score (8B/free-cloud era, measured ~29%
-                  // optimistic): shown muted with a "pre" label until the
-                  // 27B pass upgrades it. Ordering is untouched by design.
-                  <div title="Pre-triage score (8B era, measured ~29% optimistic) — waiting for the 27B pass.">
-                    <div className="fitnum prescore">{j.fitScore}</div>
-                    <div className="gauge"><span className="prescore" style={{ width: `${j.fitScore}%` }} /></div>
-                    <div className="vlabel prescore">{j.fitVerdict} · pre</div>
-                  </div>
-                )
               ) : (
                 <>
                   <div className="fitnum unscored">{j.score}</div>
@@ -441,18 +350,11 @@ export default async function Page({
                   (Ashby reports Elicit's still-listed ML role as published in
                   2021) and a ghost flag is a judgement worth showing, not
                   acting on silently. */}
-              {(freshness === "aging" || freshness === "evergreen") && (
-                <div
-                  className="risk"
-                  title={`The source dates this posting ${ageLabel(j.postedAt ?? j.firstSeenAt)} old. That often means the record was created long ago rather than the opening being stale — it is still listed — but treat the date with suspicion.`}
-                >may not be fresh</div>
-              )}
-              {j.ghostRisk && (
-                <div
-                  className="risk warn"
-                  title="The model read this posting and thought it may not be one real, active opening — talent-pool wording, an unnamed client, or contradictory requirements."
-                >ghost risk</div>
-              )}
+              {labels.filter((l) => l.kind === "freshness" || l.kind === "ghost-risk").map((l) => (
+                <div key={l.kind} className={l.kind === "ghost-risk" ? "risk warn" : "risk"} title={l.title}>
+                  {l.text}
+                </div>
+              ))}
             </div>
 
             <div className="jobmain">
@@ -460,29 +362,7 @@ export default async function Page({
                 <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
               </p>
               <div className="meta">
-                {j.track && <span className="badge">{j.track}</span>}
-                {j.workMode !== "onsite" && <span className="badge">{j.workMode}</span>}
-                {freshness === "delisted" && <span className="badge age-delisted">delisted</span>}
-                {j.visa === "yes" && <span className="badge s-strong">visa</span>}
-                {j.visaTier === "yes" && (
-                  <span className="badge s-strong" title="The posting itself states it sponsors visas / offers relocation.">sponsor✓</span>
-                )}
-                {j.visaTier === "maybe" && (
-                  <span className="badge s-possible" title="The posting is silent, but the company is listed in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE) — it CAN sponsor.">sponsor?</span>
-                )}
-                {langBarriers.length > 0 && (
-                  <span className="badge age-evergreen" title="The description appears to require a language outside your profile — verify before applying.">
-                    requires {langBarriers.map((c) => LANG_NAMES[c] ?? c).join("/")}
-                  </span>
-                )}
-                {appliedHere && (
-                  <span className="badge s-strong" title="You have an application in progress at this company.">
-                    applied@co
-                  </span>
-                )}
-                {j.fitCategory && j.fitCategory !== "NONE" && j.fitCategory !== "OTHER" && (
-                  <span className="badge">{j.fitCategory.toLowerCase().replace("_", " ")}</span>
-                )}
+                <Badges labels={labels.filter((l) => l.kind !== "freshness" && l.kind !== "ghost-risk")} />
                 {j.company}
                 {j.location ? ` · ${j.location}` : ""}
                 {j.salaryText ? ` · ${j.salaryText}` : ""}

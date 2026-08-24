@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
-import { OPEN_STATUSES } from "@/lib/pool";
+import { isConcluded, OPEN_STATUSES } from "@/lib/pool";
 import { draftCoverLetter } from "@/lib/cover";
 import { analyzeFit, verdictFields } from "@/lib/fit";
 
@@ -20,8 +20,8 @@ export async function setStatus(formData: FormData) {
       extra.followUpAt = new Date(Date.now() + FOLLOW_UP_DAYS * 86_400_000);
     }
   }
-  // Terminal states don't need nudging.
-  if (status === "rejected" || status === "ghosted" || status === "offer") extra.followUpAt = null;
+  // A concluded pursuit does not need nudging.
+  if (isConcluded(status)) extra.followUpAt = null;
   // Dismissing records why (labeled feedback for scorer tuning); leaving the
   // dismissed state clears it.
   if (status === "ignored") {

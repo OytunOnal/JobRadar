@@ -42,7 +42,25 @@
 export const OPEN_STATUSES = ["new", "interested"] as const;
 export const DISCOVERABLE_STATUSES = ["new"] as const;
 export const PURSUED_STATUSES = ["applied", "interview", "offer"] as const;
+// Pursued, plus the two ways a pursuit ends. /applied groups by these, and it
+// used to keep its own hand-written copy of the list — twice in one file, once
+// for the query and once for the stage buttons.
+export const TRACKED_STATUSES = [...PURSUED_STATUSES, "rejected", "ghosted"] as const;
+// Pursued and still waiting on the other side. These are the ones a follow-up
+// nudge is FOR — /applied had this pair written out twice, once to pick the
+// "due today" list and once to decide which cards get the +3d/+7d buttons.
+export const AWAITING_STATUSES = ["applied", "interview"] as const;
+// The three ways a pursuit is over. Nothing needs nudging after one of these.
+export const CONCLUDED_STATUSES = ["offer", "rejected", "ghosted"] as const;
 export const DISMISSED_STATUS = "ignored" as const;
+
+export function isAwaitingReply(status: string): boolean {
+  return (AWAITING_STATUSES as readonly string[]).includes(status);
+}
+
+export function isConcluded(status: string): boolean {
+  return (CONCLUDED_STATUSES as readonly string[]).includes(status);
+}
 
 // Combine Prisma filters without one silently erasing another.
 //
@@ -102,6 +120,13 @@ export function discoverableWhere() {
 // rather than dropping the row.
 export function pursuedWhere() {
   return { status: { in: [...PURSUED_STATUSES] } };
+}
+
+// Everything the user has taken into their pipeline, including the ones that
+// ended. Like pursuedWhere, deliberately not anchored to liveWhere: an
+// application outlives its posting.
+export function trackedWhere() {
+  return { status: { in: [...TRACKED_STATUSES] } };
 }
 
 // Postings the user said no to. They stay in the pool as labelled feedback —

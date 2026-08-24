@@ -111,7 +111,13 @@ test("dismissed postings are outside every work queue", () => {
 // reach for.
 test("nothing outside pool.ts hand-assembles a population", () => {
   const offenders: string[] = [];
-  const STATUS_SETS = [/\["new",\s*"interested"\]/, /\["applied",\s*"interview",\s*"offer"\]/];
+  // Two status strings on one line is a set being spelled out, whatever shape
+  // it takes. The first version of this guard looked for specific array
+  // literals and therefore missed both real copies that existed at the time:
+  // /applied's five-element STAGES array, and a stat-strip line that summed
+  // three snapshot keys — `(sc["applied"] ?? 0) + (sc["interview"] ?? 0) + …`.
+  // Neither looked like the pattern; both were the rule, written again.
+  const STATUS = /"(new|interested|applied|interview|offer|rejected|ghosted|ignored)"/g;
 
   for (const dir of ["src", "scripts"]) {
     for (const rel of readdirSync(dir, { recursive: true }) as string[]) {
@@ -121,8 +127,9 @@ test("nothing outside pool.ts hand-assembles a population", () => {
       const lines = readFileSync(path, "utf8").split("\n");
 
       lines.forEach((line, i) => {
-        for (const re of STATUS_SETS) {
-          if (re.test(line)) offenders.push(`${path}:${i + 1} — status set spelled out`);
+        const distinct = new Set(line.match(STATUS) ?? []);
+        if (distinct.size >= 2) {
+          offenders.push(`${path}:${i + 1} — status set spelled out: ${[...distinct].join(" ")}`);
         }
       });
 

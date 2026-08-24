@@ -126,10 +126,15 @@ header.top {
   border: 1px solid var(--line-strong); color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.05em;
 }
-/* Freshness warnings: talent-pool postings and roles gone from their source */
-.badge.age-evergreen { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
+/* Badge tone. A label says what it MEANS — risk, note, or good news — and the
+   colour is decided here rather than in the rule that produced it. Before this
+   the same idea wore different classes on different surfaces, and one badge
+   (`.badge.ghost`) had no user at all. */
+.badge.t-risk { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
+.badge.t-good { color: var(--strong); border-color: currentColor; }
+.badge.t-note { color: var(--muted); }
+/* Roles gone from their source read as absent, not as a warning. */
 .badge.age-delisted { color: var(--faint); border-style: dashed; }
-.badge.ghost { color: var(--weak, #b58900); border-style: dotted; }
 .fitcomment { margin-top: 8px; font-size: 13px; color: var(--text); opacity: 0.92; }
 .reason {
   margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--faint);

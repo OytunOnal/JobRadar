@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
+import { postingLabels } from "@/lib/labels";
+import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/pool";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,6 @@ const GROUPS: Array<{ status: string; label: string }> = [
   { status: "rejected", label: "Rejected" },
   { status: "ghosted", label: "Ghosted" },
 ];
-const STAGES = ["applied", "interview", "offer", "rejected", "ghosted"];
 const GHOST_SUGGEST_DAYS = 14; // follow-up long overdue and still silent
 
 function fmt(d: Date | null): string {
@@ -32,13 +33,16 @@ export default async function AppliedPage({
   const from = (await searchParams).from ?? "";
   const radarHref = from ? `/?${from}` : "/";
   const fromQS = from ? `?from=${encodeURIComponent(from)}` : "";
-  const jobs = await prisma.job.findMany({
-    where: { status: { in: STAGES } },
-    orderBy: [{ appliedAt: "desc" }],
-  });
-  const now = Date.now();
+  const [jobs, poolNewest] = await Promise.all([
+    prisma.job.findMany({ where: trackedWhere(), orderBy: [{ appliedAt: "desc" }] }),
+    // The pool's own clock, so "gone from the source" is judged the same way
+    // here as on the radar rather than against wall-clock time.
+    prisma.job.aggregate({ _max: { lastSeenAt: true } }).then((a) => a._max.lastSeenAt),
+  ]);
+  const nowDate = new Date();
+  const now = nowDate.getTime();
   const dueToday = jobs.filter(
-    (j) => j.followUpAt && j.followUpAt.getTime() <= now && (j.status === "applied" || j.status === "interview"),
+    (j) => j.followUpAt && j.followUpAt.getTime() <= now && isAwaitingReply(j.status),
   );
 
   const card = (j: (typeof jobs)[number]) => {
@@ -54,14 +58,19 @@ export default async function AppliedPage({
           </p>
           <div className="meta">
             {j.company}
-            {j.location ? ` · ${j.location}` : ""}
-            {j.sponsorReg && <span className="badge s-strong"> sponsor✓</span>}
-            {j.visa === "yes" && <span className="badge s-strong"> visa</span>}
-            {j.delistedAt && (
-              <span className="badge age-delisted" title="The posting was taken down at the source — the role may be filled or closed.">
-                ⚠ posting closed
-              </span>
-            )}
+            {j.location ? ` · ${j.location}` : ""}{" "}
+            {/* The radar's vocabulary, not a second one. These three badges
+                used to be written here by hand: sponsor✓ from `sponsorReg`
+                (where the radar's card reads the derived tier and says
+                sponsor?), and "⚠ posting closed" from a bare `delistedAt`
+                where the radar uses the broader, tested classifier — so a
+                posting its source had stopped listing could show closed on one
+                page and nothing on the other. */}
+            {postingLabels(j, { now: nowDate, poolNewest: poolNewest ?? undefined })
+              .filter((l) => l.kind === "visa" || l.kind === "delisted")
+              .map((l) => (
+                <span key={l.kind} className={`badge t-${l.tone}`} title={l.title}>{l.text}</span>
+              ))}
             {" · applied "}{fmt(j.appliedAt)}
             {j.followUpAt && ` · follow-up ${fmt(j.followUpAt)}`}
             {" · "}
@@ -85,14 +94,14 @@ export default async function AppliedPage({
         </div>
         <div className="actions">
           <div className="status-pill">{j.status}</div>
-          {STAGES.filter((s) => s !== j.status).map((s) => (
+          {TRACKED_STATUSES.filter((s) => s !== j.status).map((s) => (
             <form action={setStatus} key={s}>
               <input type="hidden" name="id" value={j.id} />
               <input type="hidden" name="status" value={s} />
               <button className="btn" type="submit">{s}</button>
             </form>
           ))}
-          {(j.status === "applied" || j.status === "interview") && (
+          {isAwaitingReply(j.status) && (
             <>
               {["3", "7"].map((d) => (
                 <form action={setFollowUp} key={d}>

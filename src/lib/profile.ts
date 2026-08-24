@@ -199,6 +199,26 @@ export const profile = new Proxy({} as ReturnType<typeof buildProfile>, {
   }),
 });
 
+// Which of a posting's required languages are BARRIERS for this user.
+//
+// The module used to answer only "what did the user configure", so every caller
+// that needed this question took the raw field and answered it itself — three
+// byte-identical copies of `(c) => !profile.languages.includes(c)` in the
+// radar, the fit prompt and the judge queue, over an identically-parsed code
+// list. That is what a shallow, wide module does to its callers: it makes them
+// each carry the same reasoning.
+//
+// The question belongs here because the answer depends entirely on the user,
+// not on the posting: the same "de" is a wall for one profile and nothing for
+// another. Callers render the result differently — a badge joins names with
+// "/", the prompt with ", " — but they no longer decide WHAT a barrier is.
+export function languageBarriers(langReq: string | null | undefined): string[] {
+  return (langReq ?? "")
+    .split(",")
+    .filter(Boolean)
+    .filter((c) => !profile.languages.includes(c));
+}
+
 // Resolve the seniority appetite for a track: track override wins, global
 // lists fall back per-field (a track may override only `avoid`).
 export function seniorityFor(track: string | null | undefined): { boost: string[]; avoid: string[] } {

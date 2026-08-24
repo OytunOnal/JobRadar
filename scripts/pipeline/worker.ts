@@ -8,7 +8,7 @@ import { andWhere, archiveWhere } from "../../src/lib/queue/pool";
 import { clearRun, readRun, runNameFor, type RunResult } from "../../src/lib/queue/backfill";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../../src/lib/queue/chunks";
-import { acquireGpu, beatGpu, gpuBusyMessage, gpuToken, releaseGpu } from "../../src/lib/queue/gpu-lock";
+import { beatGpu, claimGpu, gpuBusyMessage, gpuToken, leaveGpu } from "../../src/lib/queue/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
 // which is right for a migration and wrong for a tool that lives on your
@@ -88,6 +88,37 @@ interface ChildOutcome {
   result: RunResult | null;
 }
 
+// Take the card, and treat the two ways of failing differently.
+//
+// Someone else holding it is ordinary: skip the pass and come back. A lock that
+// cannot be WRITTEN is not: nothing about the next pass will be different, and
+// unlogged it reads as an endless run of empty passes — which is exactly the
+// silence this worker has produced before. One transient failure is not a
+// fault, so it takes three in a row to stop; antivirus holding a file for a
+// moment must not halt the night's work.
+let unwritable = 0;
+const UNWRITABLE_LIMIT = 3;
+
+function takeGpu(holder: string): boolean {
+  const claim = claimGpu(holder);
+  if (claim === "acquired" || claim === "joined") {
+    unwritable = 0;
+    return true;
+  }
+  if (claim === "busy") {
+    unwritable = 0;
+    log(`  GPU alınamadı: ${gpuBusyMessage() ?? "başkasında"}`);
+    return false;
+  }
+  unwritable++;
+  log(`  GPU kilidi yazılamadı (${unwritable}/${UNWRITABLE_LIMIT}).`);
+  if (unwritable >= UNWRITABLE_LIMIT) {
+    log("=== kilit üst üste yazılamadı — worker duruyor, disk ya da izinler kontrol edilmeli ===");
+    process.exit(1);
+  }
+  return false;
+}
+
 function spawnChild(script: string, extra: string[] = []): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(
@@ -100,7 +131,7 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
         // our PID, not a bare flag, so it can check that the lock it attaches
         // to is the one we took — an orphan whose parent died must not latch
         // onto whatever lock a later worker has since acquired.
-        env: { ...process.env, JOBRADAR_GPU_DELEGATED: gpuToken() ?? "" },
+        env: { ...process.env, JOBRADAR_GPU_RUN: gpuToken() ?? "" },
       },
     );
     // We keep beating while the child boots. Once it is up it puts ITSELF on
@@ -259,13 +290,7 @@ async function pass(): Promise<boolean> {
     // ONE acquire for the whole lane. Releasing between embedding and judging
     // let a manual script slip into the gap and start swapping models against
     // us — the exact thrash the lock exists to prevent.
-    if (!acquireGpu("worker/lane")) {
-      // Two reasons, and the silent one is the dangerous one: either
-      // somebody else holds the card, or the lock could not be written at
-      // all. Unlogged, the second reads as an endless run of empty passes.
-      log(`  GPU alınamadı: ${gpuBusyMessage() ?? "kilit yazılamadı"}`);
-      return false;
-    }
+    if (!takeGpu("worker/lane")) return false;
     try {
       const stale = await prisma.job.count({
         where: andWhere(laneWhere(lane, now), staleVectorWhere()),
@@ -281,7 +306,7 @@ async function pass(): Promise<boolean> {
 
       log(`${label} — ${BATCH} ilan yargılanıyor`);
       judged = readOutcome(await runChild("scripts/backfill/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]), "fit:fill");
-    } finally { releaseGpu(); }
+    } finally { leaveGpu(); }
 
     // The receipt is the answer; this count is the CROSS-CHECK.
     //
@@ -305,13 +330,7 @@ async function pass(): Promise<boolean> {
     where: andWhere(archiveWhere(), staleVectorWhere()),
   });
   if (archive > 0) {
-    if (!acquireGpu("worker/archive")) {
-      // Two reasons, and the silent one is the dangerous one: either
-      // somebody else holds the card, or the lock could not be written at
-      // all. Unlogged, the second reads as an endless run of empty passes.
-      log(`  GPU alınamadı: ${gpuBusyMessage() ?? "kilit yazılamadı"}`);
-      return false;
-    }
+    if (!takeGpu("worker/archive")) return false;
     log(`boşta: arşivde ${archive.toLocaleString("tr")} vektör eksik — sırayı tıkamadan dolduruluyor`);
     try {
       // --archive, or embed-fill walks the live pool first and this message
@@ -321,7 +340,7 @@ async function pass(): Promise<boolean> {
       // skipped the whole backoff ladder, so a child that could not start was
       // respawned immediately — exactly the tight loop the ladder prevents.
       return out.progressed;
-    } finally { releaseGpu(); }
+    } finally { leaveGpu(); }
   }
 
   log(`kuyruk boş (prompt ${FIT_PROMPT_VERSION}) — ${IDLE_MS / 1000} sn bekleniyor`);
@@ -330,7 +349,7 @@ async function pass(): Promise<boolean> {
 
 async function main() {
   log(`=== worker başladı (pid ${process.pid}) ===`);
-  const stop = () => { releaseGpu(); log("=== worker durdu ==="); process.exit(0); };
+  const stop = () => { leaveGpu(); log("=== worker durdu ==="); process.exit(0); };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 
@@ -346,8 +365,8 @@ async function main() {
     if (failStreak > 1) log(`  ${Math.round(wait / 60000)} dk bekleniyor (${failStreak}. boş tur)`);
     await sleep(wait);
   }
-  releaseGpu();
+  leaveGpu();
   await prisma.$disconnect();
 }
 
-main().catch((e) => { releaseGpu(); console.error(e); process.exit(1); });
+main().catch((e) => { leaveGpu(); console.error(e); process.exit(1); });

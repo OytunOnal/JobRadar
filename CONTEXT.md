@@ -254,6 +254,25 @@ The process that keeps the pool embedded and judged between ingests, one phase
 at a time because one model fits in the GPU at a time.
 _Avoid_: daemon, background job, cron
 
+**Run**:
+One occupancy of the GPU: from the moment the card is taken to the moment the
+last process taking part in it has gone. It carries an identity generated when
+it begins, and that identity is never a process id.
+_Avoid_: lock, hold, session
+
+**Participant**:
+A process taking part in a run. The worker that began the run and the backfill
+it spawned are both participants, with no rank between them — either may leave
+without ending the run. A participant's process id answers one question only:
+whether it is still alive.
+_Avoid_: owner, holder, child
+
+**Takeover**:
+Beginning a new run on a card whose previous run has no participant left alive.
+Immediate, because a run with nobody in it is already over. A run whose
+participants are alive is never taken, however long it has been silent.
+_Avoid_: steal, break the lock, force, reclaim
+
 **Band**:
 A broad score region worked in order — the eighties before the seventies.
 Answers "which postings deserve attention next".

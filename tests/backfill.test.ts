@@ -240,6 +240,33 @@ test("the name the worker reads is the name the child writes", () => {
   }
 });
 
+// The worker and the lock have to agree on what travels between them, and the
+// two halves sit in different files with a process boundary in between — the
+// arrangement that has already broken this project twice, once when a rename
+// desynchronised the receipt name and once when a delegation flag said that
+// someone had delegated without saying which run. Neither is a type error:
+// both sides are strings.
+test("the worker hands down the run id the lock expects to receive", () => {
+  const worker = readFileSync(join("scripts", "pipeline", "worker.ts"), "utf8");
+  const lock = readFileSync(join("src", "lib", "queue", "gpu-lock.ts"), "utf8");
+
+  const expected = lock.match(/const TOKEN = "([A-Z_]+)"/)?.[1];
+  assert.ok(expected, "the lock module must name the variable it reads");
+  assert.match(
+    worker,
+    // String.raw, because `\s` and `\(` in an ordinary template literal are
+    // just `s` and `(` — the regex would quietly stop meaning what it says.
+    // Same trap the runNameFor case below documents.
+    new RegExp(String.raw`env:[^}]*${expected}:\s*gpuToken\(\)`),
+    `the worker must spawn children with ${expected} set from gpuToken()`,
+  );
+
+  // And nothing may still be speaking the retired dialect.
+  for (const [file, src] of [["worker.ts", worker], ["gpu-lock.ts", lock]] as const) {
+    assert.doesNotMatch(src, /JOBRADAR_GPU_DELEGATED/, `${file} still uses the delegation flag`);
+  }
+});
+
 test("runNameFor takes the bare script name, whatever the directory", () => {
   assert.equal(runNameFor("scripts/backfill/embed-fill.ts"), "embed-fill");
   assert.equal(runNameFor("scripts/embed-fill.ts"), "embed-fill");

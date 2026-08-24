@@ -226,6 +226,12 @@ a job, plus a delegation flag so a child process inherits its parent's hold
 instead of deadlocking against it. Any other process — a manual script, an
 ingest — reports who holds the GPU and waits.
 
+> **Superseded in part by ADR-11.** The phase-length hold and the file stand.
+> "One holder" and the delegation flag do not: identifying the holder by process
+> id, and delegating with a flag that named no particular hold, produced
+> twenty-eight defects across five review rounds. The queue shape below is
+> untouched.
+
 **Queue shape:** bands by score (≥80, then ≥70, …) worked in **chunks of
 ~1,000** rather than band-at-a-time, so the first hour produces the postings a
 user would actually read first instead of a complete pass over a band whose end
@@ -238,6 +244,65 @@ the vacancy.
 
 Everything is resumable from what the database already holds, because the
 alternative — a queue in memory — loses an hour of GPU to any interruption.
+
+### ADR-11 · The GPU is held by a run, not by a process
+
+ADR-10 framed the lock as a way to stop the runtime thrashing between models.
+Measured on the machine this runs on, it is more than that: 31.8 GB of RAM with
+roughly 4 GB free under a dev server and a browser, and llama-server holding
+most of the 17.7 GB judge resident. A second model does not slow the machine
+down, it **takes it down**. The lock is a crash guard.
+
+That reframing decides everything else, because it makes the errors asymmetric.
+Holding the card when you did not need it costs throughput. Believing you hold
+it when you do not costs the machine. So: **when the state of the card is
+uncertain, do not work.**
+
+**What went wrong under "one holder".** The holder was a process id, and every
+assumption built on that turned out to be false. The worker cannot see the pid
+that does the work — it spawns through a `tsx` wrapper which re-spawns, so the
+pid it records loads no model (measured: parent 31116, script 29748). Two
+processes wrote one field with two meanings, so one could erase the other's
+claim permanently. Nothing checked that a process attaching to the lock had any
+relationship to its holder, so an orphan could sign a lock a different worker
+had legitimately taken. And a pid is a number the OS hands back out, so a
+restarted worker drawing a recycled one was indistinguishable from the worker
+that died.
+
+Five rounds of review found twenty-eight defects here and the count did not
+fall — 5, 4, 6, 7, 6 — because each round's worst finding was a defect in the
+previous round's fix. They were one unanswered question surfacing in a new place
+each time.
+
+**Design:** a **run** holds the card. It is created when the card is taken,
+carries an identity generated at that moment, and ends when the last
+**participant** leaves. Processes take part in a run; they do not own it. A
+process id answers exactly one question — is this participant still alive — and
+never says which run this is or who may join it. The identity travels to a
+spawned process through the environment, so joining is a question with an
+answer: *is this the run I was handed?*
+
+**Two rules about time, and only one of them is a clock.** A run with no living
+participant is over at once, whatever its heartbeat says — that is what makes a
+restart instant, instead of waiting out a timer for a process that no longer
+exists. A run with a living participant is **never** taken, however long it has
+been silent, because that process may still have the model resident and taking
+the card from it is precisely the crash. The heartbeat survives only as an
+eight-hour backstop against a recycled pid making a dead run look alive forever;
+it is longer than any legitimate run and is not a limit on how long work may
+take.
+
+**Consequences.** A hung run holds the card until a human ends it, and the busy
+message names the process to end. Ollama used outside JobRadar is invisible to
+this and can still crash the machine — a real gap, deliberately out of scope,
+since the lock could only withdraw our own work rather than prevent another
+process's load.
+
+**Testing.** Two seams. The module's own interface covers the rules. A second,
+narrow seam spawns real processes through the same wrapper the worker uses,
+because four of the five review rounds found their worst defect in the gap
+*between* processes — a gap the in-process seam cannot see, and which fixtures
+inventing a pid actively hid.
 
 ## Evolution note
 

@@ -1,11 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Each case gets its own lock file; the module reads the path per call.
+// SEAM 1: the lock module's own interface, with the lock file redirected.
+//
+// The module reads its path per call, which is what makes it drivable from
+// outside without reaching into it. Everything here asserts what another
+// process would observe — the record on disk, and the module's answers — never
+// how an answer was reached.
+//
+// What this seam CANNOT see is the gap between processes, and that gap is where
+// the defects actually shipped. See gpulock.spawn.test.ts.
+
 function withLock<T>(fn: (path: string) => T): T {
   const dir = mkdtempSync(join(tmpdir(), "jr-gpu-"));
   const path = join(dir, "gpu.lock");
@@ -18,33 +27,19 @@ function withLock<T>(fn: (path: string) => T): T {
   }
 }
 
-// A pid that cannot exist anywhere, rather than one that happens not to.
-// Linux caps pid_max at 2^22 and Windows pids are multiples of four well below
-// this; picking a number in the plausible range would make the test a bet on
-// what else the machine is running.
+// A pid that cannot exist anywhere, rather than one that happens not to. Linux
+// caps pid_max at 2^22 and Windows pids sit well below this; a number in the
+// plausible range would make the case a bet on what else is running.
 const GONE = 0x7ffffff;
-// The token names the lock, not just its holder, so cases that play a
-// delegated child have to agree with the fixture on the lock's birth stamp.
-const SINCE = "2026-08-24T12:00:00.000Z";
 
-// A REAL other process, because since the liveness check landed a made-up pid
-// no longer means anything.
-//
-// These cases used to write `process.pid + 1` to mean "someone else". That was
-// never a live pid — it was an arbitrary number that happened to answer the way
-// the test wanted, and only on Windows, where OpenProcess ignores the low two
-// bits of a pid and so probes THIS process for +1, +2 and +3 alike. Measured
-// both ways: on Windows all three report alive; under Linux, which is what CI
-// runs, all three are ESRCH. So the fixture would have passed here and failed
-// there — the worst shape a test can have. Spawn something instead: an idle
-// node holding a timer is unambiguously alive and unambiguously not us.
+// A REAL other process. A made-up pid means nothing to a module that asks the
+// OS whether a participant is alive — fixtures inventing one gave false results
+// three times while this design was worked out: twice by naming a pid that was
+// not alive, once by collapsing a two-process chain into one.
 function withLiveProcess<T>(fn: (pid: number) => T): T {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-  // spawn reports failure asynchronously through an `error` event, and an
-  // `error` with no listener is rethrown — so under memory pressure, the very
-  // condition this project already documents (0xC0000142), a failed stand-in
-  // would take down the whole test process instead of failing one case. The
-  // assert below is what should report it.
+  // spawn reports failure asynchronously; an `error` with no listener is
+  // rethrown and takes down the whole test process rather than one case.
   child.on("error", () => {});
   try {
     assert.ok(child.pid, "could not spawn the stand-in process");
@@ -54,268 +49,224 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
   }
 }
 
-// Beating as the delegated process is how a child claims the lock, so a case
-// that plays the child has to say so the way the real one does — through the
-// environment the worker sets on the spawn.
-function asDelegated<T>(token: string, fn: () => T): T {
-  const prev = process.env.JOBRADAR_GPU_DELEGATED;
-  process.env.JOBRADAR_GPU_DELEGATED = token;
+// Play a process that was handed a run id, the way a spawned backfill is.
+function withToken<T>(id: string, fn: () => T): T {
+  const prev = process.env.JOBRADAR_GPU_RUN;
+  process.env.JOBRADAR_GPU_RUN = id;
   try { return fn(); } finally {
-    if (prev === undefined) delete process.env.JOBRADAR_GPU_DELEGATED;
-    else process.env.JOBRADAR_GPU_DELEGATED = prev;
+    if (prev === undefined) delete process.env.JOBRADAR_GPU_RUN;
+    else process.env.JOBRADAR_GPU_RUN = prev;
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, beatGpu, releaseGpuChild } = await import("../src/lib/queue/gpu-lock");
+const { acquireGpu, claimGpu, beatGpu, leaveGpu, gpuRun, gpuToken, gpuBusyMessage, BACKSTOP_MS } =
+  await import("../src/lib/queue/gpu-lock");
 
-test("acquire, then hold: the same process may re-acquire", () => {
-  withLock(() => {
-    assert.equal(acquireGpu("worker/embed"), true);
-    assert.equal(acquireGpu("worker/judge"), true); // same pid, phase change
-    assert.equal(gpuHolder()?.holder, "worker/judge");
-    releaseGpu();
-    assert.equal(gpuHolder(), null);
+const read = (path: string) => JSON.parse(readFileSync(path, "utf8"));
+
+test("taking a free card creates a run with the taker as its first participant", () => {
+  withLock((path) => {
+    assert.equal(claimGpu("worker/lane"), "acquired");
+    const run = gpuRun();
+    assert.equal(run?.holder, "worker/lane");
+    assert.deepEqual(run?.participants, [process.pid]);
+    assert.ok(run?.id, "a run carries an identity of its own");
+    assert.equal(gpuToken(), run?.id, "and that identity is what gets handed down");
+    leaveGpu();
+    assert.equal(existsSync(path), false, "the last participant out ends the run");
   });
 });
 
-test("another live process is refused, and told who holds it", () => {
+test("two runs never hold the card at once", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/judge", pid: other,
-      since: new Date().toISOString(), beat: Date.now(),
-    }));
-    assert.equal(acquireGpu("manual/embed"), false);
-    assert.match(gpuBusyMessage() ?? "", /GPU meşgul.*worker\/judge/);
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    assert.equal(claimGpu("manual/fit"), "busy");
+    assert.deepEqual(gpuRun()?.participants, [other], "and we did not add ourselves");
   }));
 });
 
-// The OTHER half of the pair: a holder that is still running but has stopped
-// beating. Deliberately a live pid, so this exercises the staleness rule and
-// not the liveness one — a hung holder is exactly the case the clock is for,
-// and it is the only case where taking the lock is a judgement call rather
-// than an observation.
-test("a holder that stopped beating loses the lock, alive or not", () => {
+test("a process handed the run id joins it", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/judge", pid: other,
-      since: new Date(Date.now() - 3600_000).toISOString(), beat: Date.now() - 3600_000,
-    }));
-    assert.equal(gpuHolder(), null, "stale lock must not count as held");
-    assert.equal(acquireGpu("worker/embed"), true);
-    releaseGpu();
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    withToken("run-a", () => {
+      assert.equal(claimGpu("manual/fit"), "joined");
+      assert.deepEqual(read(path).participants, [other, process.pid]);
+      assert.equal(read(path).holder, "worker/lane", "joining does not relabel the run");
+    });
   }));
 });
 
-test("a corrupt lock file blocks nothing", () => {
+// The orphan case, and the reason the token is the run's identity rather than a
+// flag or a pid: kill a worker while its script is still booting, let a second
+// worker legitimately take the freed card, and the orphan finishes booting to
+// find a run that was never its own.
+test("a process cannot join a run it was not handed", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-b", holder: "worker2/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    withToken("run-a", () => { // our parent's run, not this one
+      assert.equal(claimGpu("manual/fit"), "busy");
+      assert.deepEqual(read(path).participants, [other], "not ours to sign");
+      beatGpu();
+      assert.deepEqual(read(path).participants, [other], "nor ours to beat");
+    });
+  }));
+});
+
+test("any participant's beat keeps the run alive", () => {
+  withLock((path) => withLiveProcess((other) => {
+    const old = Date.now() - 60_000;
+    writeFileSync(path, JSON.stringify({
+      id: "run-a", holder: "worker/lane", since: new Date(old).toISOString(),
+      beat: old, participants: [other, process.pid],
+    }), "utf8");
+    beatGpu();
+    assert.ok(read(path).beat > old, "the beat came from a participant that did not create the run");
+  }));
+});
+
+// A claim written once can be lost once. It was: a single stale write from
+// another writer erased it permanently, after which that process's beats were
+// refused as a stranger's. Re-entry on every beat is what makes it survivable.
+test("a participant dropped from the record puts itself back on the next beat", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other, process.pid],
+    }), "utf8");
+    // Someone writes a record that has forgotten us. In life this is a spawned
+    // backfill, so it still holds the run id it was handed — which is the
+    // credential that lets it back in.
+    writeFileSync(path, JSON.stringify({
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    withToken("run-a", () => {
+      beatGpu();
+      assert.deepEqual(read(path).participants, [other, process.pid]);
+    });
+  }));
+});
+
+test("a run outlives the participant that created it", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [process.pid, other],
+    }), "utf8");
+    leaveGpu(); // the creator goes; the other participant is still judging
+    assert.equal(gpuRun()?.holder, "worker/lane");
+    assert.deepEqual(gpuRun()?.participants, [other]);
+    assert.equal(claimGpu("worker2/lane"), "busy", "so the card is not free");
+  }));
+});
+
+test("a run whose participants are all gone is taken at once, however fresh", () => {
   withLock((path) => {
-    writeFileSync(path, "{ not json");
-    assert.equal(gpuHolder(), null);
-    assert.equal(acquireGpu("worker/embed"), true);
-    releaseGpu();
-  });
-});
-
-test("releasing someone else's lock is a no-op", () => {
-  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "other", pid: other, since: new Date().toISOString(), beat: Date.now(),
-    }));
-    releaseGpu();
-    assert.equal(gpuHolder()?.holder, "other");
-  }));
-});
-
-// A dead holder is not a holder.
-//
-// The staleness rule alone is right for a process that HANGS and wrong for one
-// that is gone: restarting the worker kills the old process, leaving a lock a
-// few seconds old, and the replacement then refuses to start for five minutes.
-// Seen on a real restart — "GPU busy: worker/lane (pid 12940, 43 min)" while
-// pid 12940 no longer existed.
-test("a lock whose process is gone is takeable immediately, however fresh", () => {
-  withLock((path) => {
-    writeFileSync(path, JSON.stringify({
-      holder: "worker/lane",
-      pid: GONE,
-      since: new Date().toISOString(),
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), // beating as of this instant
+      participants: [GONE],
     }), "utf8");
-
-    assert.equal(gpuHolder(), null, "a fresh heartbeat from a dead pid holds nothing");
+    assert.equal(gpuRun(), null, "a fresh beat from a dead run holds nothing");
     assert.equal(gpuBusyMessage(), null);
-    assert.equal(acquireGpu("worker/lane"), true, "the replacement takes it at once");
+    assert.equal(claimGpu("worker/lane"), "acquired", "the replacement starts immediately");
   });
 });
 
-// The direction the liveness check could regress into, and the reason the two
-// tests above had to stop faking a pid: if `alive` ever answered too readily,
-// nothing here would notice a lock being handed away from a working process.
-test("a live holder still blocks, even when it is someone else", () => {
+// The rule the crash risk inverts. A process that is alive but silent may still
+// have 17.7 GB resident; taking the card from it is the crash the lock exists
+// to prevent. Waiting is correct, and ending it is the operator's call.
+test("a live run is never taken, however long it has been silent", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "manual/fit",
-      pid: other,
-      since: new Date().toISOString(),
-      beat: Date.now(),
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now() - BACKSTOP_MS + 60_000, // silent for hours, still short of the backstop
+      participants: [other],
     }), "utf8");
-    assert.notEqual(gpuHolder(), null, "a living holder is a holder");
-    assert.equal(acquireGpu("worker/lane"), false, "and it is not takeable");
+    assert.notEqual(gpuRun(), null);
+    assert.equal(claimGpu("worker2/lane"), "busy");
   }));
 });
 
-// A dead parent with a living child still holds the GPU.
-//
-// The worker takes the lock and then delegates: the model is loaded by the
-// child, and a kill aimed at the parent alone (taskkill, Task Manager) leaves
-// that child judging. Asking only about the parent's pid would hand a 6 GB
-// card to a second 27B load — the failure the lock exists to prevent, arrived
-// at through the fix for a different one.
-test("a delegated child keeps the lock alive after its parent is gone", () => {
-  withLock((path) => withLiveProcess((kid) => {
+// The one way a dead run could look alive forever: the OS reissuing a dead
+// participant's number to an unrelated process. The window is longer than any
+// legitimate run, because it is a backstop and not a schedule.
+test("the backstop frees a run whose participant number has been recycled", () => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/lane",
-      pid: GONE, // the parent is gone
-      child: kid, // but the work is not
-      since: new Date().toISOString(),
-      beat: Date.now(),
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now() - BACKSTOP_MS - 1000,
+      participants: [other],
     }), "utf8");
-    assert.equal(gpuHolder()?.holder, "worker/lane");
-    assert.equal(acquireGpu("worker/lane"), false, "no second judge on one card");
+    assert.equal(gpuRun(), null);
+    assert.equal(claimGpu("worker2/lane"), "acquired");
   }));
 });
 
-// The pid the parent can see is not the pid that does the work.
-//
-// The worker spawns `node tsx/cli <script>` and tsx re-spawns, so a pid
-// recorded from outside names a wrapper that loads no model. Measured through
-// the real spawn: the parent saw 31116 while the script ran as 29748, and a
-// beat from 29748 was rejected as a stranger's. Nobody can name the working
-// process but itself.
-test("the process doing the work claims the lock by beating, and is the only one who can", () => {
+// A write that fails must never read as one that worked. Wrapping the write in
+// a swallowing catch once turned a throw into a silent lie: taking the card
+// reported success while nothing was on disk and every other process was told
+// the card was free.
+test("a run that cannot be recorded does not start", () => {
   withLock((path) => {
-    const old = Date.now() - 6 * 60_000;
-    const write = () => writeFileSync(path, JSON.stringify({
-      holder: "worker/lane",
-      pid: GONE, // the worker was killed
-      since: SINCE,
-      beat: old,
-    }), "utf8");
-
-    write();
-    beatGpu(); // not delegated, not the holder: not ours to touch
-    assert.equal(gpuHolder(), null, "a beat from an unrelated process must not count");
-
-    write();
-    asDelegated(`${GONE}:${SINCE}`, () => {
-      beatGpu();
-      assert.equal(gpuHolder()?.child, process.pid, "the beat says who is working");
-      assert.equal(acquireGpu("worker/lane-2"), false, "so the card is protected");
-      // Self-healing: a stale write from the parent cannot end the claim,
-      // because the next beat asserts it again. A one-shot claim could be
-      // erased for good, and was — measured, by a single stale parent beat.
-      writeFileSync(path, JSON.stringify({
-        holder: "worker/lane", pid: GONE, since: SINCE, beat: Date.now(),
-      }), "utf8");
-      assert.equal(gpuHolder(), null, "claim gone");
-      beatGpu();
-      assert.equal(gpuHolder()?.child, process.pid, "and back, twenty seconds later");
-
-      releaseGpuChild();
-      assert.equal(gpuHolder(), null, "handing it back frees it, parent dead or not");
-    });
+    mkdirSync(path); // the lock path is a directory: the write cannot land
+    assert.equal(claimGpu("worker/lane"), "unwritable");
+    assert.equal(gpuRun(), null);
   });
 });
 
-// The check that came back.
-//
-// Removing setGpuChild removed the guard it carried — "never edit someone
-// else's claim" — and nothing replaced it, so a delegated process attached
-// itself to whatever lock was on disk. Measured: a process that had never been
-// spawned by the holder wrote its own pid onto a stranger's lock. And because
-// the claim is re-asserted every beat, forging it once meant forging it for
-// good: the holder cannot clear it, and cannot release its own lock past the
-// live "child" it never spawned.
-//
-// The real path there is not exotic. Kill a worker while tsx is still booting
-// and no exit handler runs; a second worker legitimately takes the freed card;
-// the first orphan then finishes booting and finds a lock that is not its own.
-test("a delegated process attaches only to the lock its own parent holds", () => {
-  withLock((path) => withLiveProcess((worker2) => {
+test("a lock from the previous build is read as a run with one participant", () => {
+  withLock((path) => withLiveProcess((other) => {
+    // Exactly the shape the old worker leaves behind: no id, no participants.
     writeFileSync(path, JSON.stringify({
-      holder: "worker2/lane", pid: worker2, // a different worker, still running
-      since: new Date().toISOString(), beat: Date.now(),
+      holder: "worker/lane", pid: other,
+      since: "2026-08-24T15:11:50.514Z", beat: Date.now(),
     }), "utf8");
-
-    asDelegated(`${GONE}:${SINCE}`, () => { // our parent was GONE, and it is not worker2
-      assert.notEqual(gpuBusyMessage(), null, "a stranger's lock is not ours to pass");
-      beatGpu();
-      assert.equal(gpuHolder()?.child, undefined, "and not ours to sign");
-    });
-
-    // AND NOT EVEN WHEN THE NUMBER MATCHES. The OS hands pids back out, and
-    // the scenario this guard exists for — worker killed, worker2 started — is
-    // exactly when one gets recycled. Naming the parent by pid alone let an
-    // orphan sign a lock it had never seen: measured, with a live holder and a
-    // different birth stamp, the check passed. The stamp is in the token now,
-    // so the same number is no longer the same lock.
-    writeFileSync(path, JSON.stringify({
-      holder: "worker2/lane", pid: worker2,
-      since: "2026-08-24T18:00:00.000Z", // worker2 took it, our parent did not
-      beat: Date.now(),
-    }), "utf8");
-    asDelegated(`${worker2}:${SINCE}`, () => {
-      assert.notEqual(gpuBusyMessage(), null, "same pid, different lock, still a stranger");
-      beatGpu();
-      assert.equal(gpuHolder()?.child, undefined);
-    });
+    assert.deepEqual(gpuRun()?.participants, [other], "its pid is its sole participant");
+    assert.equal(claimGpu("worker2/lane"), "busy", "and it still holds the card");
   }));
 });
 
-test("a graceful stop does not release the lock out from under a live child", () => {
-  withLock((path) => withLiveProcess((kid) => {
-    // Exactly what the worker's SIGINT/SIGTERM handler does.
+test("the busy message names a process the reader can actually stop", () => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/lane", pid: process.pid, child: kid,
-      since: new Date().toISOString(), beat: Date.now(),
-    }), "utf8");
-    releaseGpu();
-    assert.equal(gpuHolder()?.child, kid, "the child is still holding the model");
-  }));
-});
-
-test("the busy message names the process a reader can act on", () => {
-  withLock((path) => withLiveProcess((kid) => {
-    writeFileSync(path, JSON.stringify({
-      holder: "worker/lane", pid: GONE, child: kid,
-      since: new Date().toISOString(), beat: Date.now(),
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [GONE, other],
     }), "utf8");
     const msg = gpuBusyMessage() ?? "";
-    assert.match(msg, new RegExp(String(kid)), "the live child, not the dead parent");
-    assert.doesNotMatch(msg, new RegExp(String(GONE)));
+    assert.match(msg, new RegExp(String(other)), "the live participant");
+    assert.doesNotMatch(msg, new RegExp(String(GONE)), "not the one that is gone");
+    assert.match(msg, /worker\/lane/);
   }));
 });
 
-test("changing phase does not drop the child that is doing the work", () => {
-  withLock((path) => withLiveProcess((kid) => {
+test("a participant of the live run is not blocked by it", () => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/lane", pid: process.pid, child: kid,
-      since: new Date().toISOString(), beat: Date.now(),
+      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other, process.pid],
     }), "utf8");
-    acquireGpu("worker/archive"); // same process, new phase
-    assert.equal(gpuHolder()?.child, kid, "the orphan protection survives a re-acquire");
+    assert.equal(gpuBusyMessage(), null, "we are part of this run, not waiting on it");
   }));
 });
 
-// A write that fails must not read as one that worked.
-//
-// acquireGpu used to throw when it could not write; routing it through an
-// atomic replace that swallowed errors turned that into a silent lie — measured
-// with the rename failing, it returned true while gpuHolder() was null and
-// gpuBusyMessage() told everyone else the card was free.
-test("acquireGpu reports failure instead of claiming a lock it could not write", () => {
-  withLock((path) => {
-    mkdirSync(path); // the lock path is a directory: the rename cannot land
-    assert.equal(acquireGpu("worker/lane"), false, "no lock, no claim of one");
-    assert.equal(gpuHolder(), null);
-  });
+test("acquireGpu reports whether the card was taken", () => {
+  withLock((path) => withLiveProcess((other) => {
+    assert.equal(acquireGpu("worker/lane"), true);
+    leaveGpu();
+    writeFileSync(path, JSON.stringify({
+      id: "run-b", holder: "other", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    assert.equal(acquireGpu("worker/lane"), false);
+  }));
 });

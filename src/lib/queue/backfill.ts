@@ -36,7 +36,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../db";
-import { acquireGpu, beatGpu, delegatedUnder, gpuBusyMessage, gpuHolder, releaseGpu, releaseGpuChild } from "./gpu-lock";
+import { beatGpu, claimGpu, gpuBusyMessage, leaveGpu } from "./gpu-lock";
 
 export type StopReason = "drained" | "budget" | "stalled" | "failstreak" | "gpu-busy" | "error";
 
@@ -193,25 +193,18 @@ export async function backfill(
   // Refuse rather than compete: two processes alternating between the 27B and
   // the embedder spend their time reloading 17.7 GB of weights, not working.
   //
-  // THREE WAYS THIS RUN CAN RELATE TO THE GPU, and the run has to know which.
+  // The card is taken for the whole run, not per model load. Whether work goes
+  // to the local model or to the cloud is decided deep inside the LLM layer;
+  // holding the card unnecessarily costs throughput, releasing it early costs
+  // the machine. That is not a symmetric trade.
   //
-  // Under the worker, JOBRADAR_GPU_DELEGATED carries the parent's pid: the
-  // lock is already held on our behalf, so we neither acquire nor release it.
-  // We DO beat, and the beat is also how we say who we are — the parent cannot
-  // name us, because it spawns `node tsx/cli <script>` and tsx re-spawns, so
-  // the only pid it can see belongs to a wrapper that loads no model.
-  //
-  // But delegation is a claim to be checked, not taken. If the lock is gone or
-  // stale, or belongs to some other worker entirely, then we are not under it
-  // and must take our own — otherwise a four-hour judging pass runs with no
-  // protection while every comment here says otherwise.
-  //
-  // And if we cannot take one, we do not run. Believing you hold the card is
-  // worse than knowing you do not.
+  // Which of joining, taking and refusing applies is not decided here. It is
+  // one question with one answer, and it lives next to the rules — a caller
+  // re-deriving it is the shape of mistake this already cost five rounds of.
   let heartbeat: NodeJS.Timeout | undefined;
-  // A beat that stops landing means we are no longer covered — the write is
-  // failing, or the lock went stale and someone else took it. Either way this
-  // run is loading a model onto a card it no longer holds. Once per episode,
+  // A beat that stops landing means this run is no longer covered: the write is
+  // failing, or the card changed hands. Either way we would go on loading a
+  // model onto a card someone else believes is theirs. Once per episode,
   // re-armed on recovery, and through log() so it reaches <script>.log rather
   // than a terminal nobody is reading four hours later.
   let lostBeat = false;
@@ -222,40 +215,21 @@ export async function backfill(
     log("UYARI: GPU kilidi artık bu koşuya ait değil ya da yazılamıyor — kart devralınabilir.");
   };
   if (opts.gpu) {
-    const busy = gpuBusyMessage();
-    if (busy) {
-      log(busy);
-      stopped = "gpu-busy";
-      return finish();
-    }
-    const under = delegatedUnder(gpuHolder());
-    if (process.env.JOBRADAR_GPU_DELEGATED && !under) {
-      // Not "or belongs to someone else": gpuBusyMessage() above has already
-      // turned us away from any live stranger's lock, so reaching here means
-      // the parent's own lock is missing or stale. Saying both would misdirect
-      // the next person reading this log for exactly this bug.
-      log("Üst sürecin GPU kilidi yok ya da bayatlamış — kilidi bu koşu alıyor.");
-    }
-    if (under) {
-      // The beat is also the claim, so the first one says who we are.
-      beat();
-      process.on("exit", releaseGpuChild);
-    } else if (acquireGpu(opts.gpu)) {
-      process.on("exit", releaseGpu);
-    } else if (gpuHolder()) {
-      // Lost a race that gpuBusyMessage() won a moment ago. Ordinary
-      // contention, and it must not be filed as a crash: `error` is the
-      // receipt reason that means something is genuinely broken, and the
-      // worker's ladder reads the two differently.
+    const claim = claimGpu(opts.gpu);
+    if (claim === "busy") {
       log(gpuBusyMessage() ?? "GPU başkasında.");
       stopped = "gpu-busy";
       return finish();
-    } else {
+    }
+    if (claim === "unwritable") {
       log("GPU kilidi yazılamadı — koşulmuyor, çünkü tuttuğunu sanmak tutmamaktan kötü.");
       stopped = "error";
       error = "GPU kilidi yazılamadı";
       return finish();
     }
+    // Joined a run our parent holds, or took our own. Either way we leave it
+    // on the way out, and the last one out ends it.
+    process.on("exit", leaveGpu);
     heartbeat = setInterval(beat, 20_000);
     heartbeat.unref();
   }

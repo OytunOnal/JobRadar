@@ -11,7 +11,7 @@ process.env.LLM_DISABLE = "anthropic,cerebras,groq,gemini,deepseek";
 process.env.OLLAMA_MODEL = process.env.REVIEW_MODEL || "qwen3.8:27b";
 
 import { appendFileSync } from "node:fs";
-import { analyzeFit } from "../src/lib/fit";
+import { verdictFields, analyzeFit } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
 
 const LOCATION_TERMS = [
@@ -56,11 +56,7 @@ for (const t of targets) {
       const delta = fit.fitScore - (j.fitScore ?? 0);
       await prisma.job.update({
         where: { id: j.id },
-        data: {
-          fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
-          fitCategory: fit.category, ghostRisk: fit.ghostRisk, fitBy: "qwen27b-review2",
-          ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
-        },
+        data: verdictFields(fit, "qwen27b-review2", j),
       });
       done++;
       if (delta >= 15) raised++;

@@ -1,9 +1,7 @@
 import { prisma } from "../src/lib/db";
-import { scoreJob, SCORER_VERSION } from "../src/lib/score";
-import type { SeniorityLevel } from "../src/lib/seniority";
-import { deriveWorkMode } from "../src/lib/sources/types";
+import { SCORER_VERSION } from "../src/lib/score";
+import { derivedFields } from "../src/lib/derive";
 import { loadLocationCache, resolveWithCache } from "../src/lib/locresolve";
-import { detectVisa } from "../src/lib/visa";
 import { isRegisteredSponsor } from "../src/lib/sponsors";
 import { profile } from "../src/lib/profile";
 
@@ -32,7 +30,7 @@ while (true) {
     select: {
       id: true, title: true, company: true,
       location: true, remote: true, source: true, externalId: true, url: true,
-      seniorityBy: true, seniorityLevel: true,
+      seniorityBy: true, seniorityLevel: true, visa: true, visaBy: true,
       content: { select: { description: true } },
     },
     take: BATCH,
@@ -50,37 +48,25 @@ while (true) {
       remote: j.remote,
       description: desc,
     };
-    // The facts stage (or an earlier LLM fit) may already know this posting's
-    // level better than any regex can — judge the band against that.
-    const s = scoreJob(raw, {
-      knownLevel: j.seniorityBy === "llm" && j.seniorityLevel
-        ? (j.seniorityLevel as SeniorityLevel)
-        : undefined,
-    });
     // Rows that no longer pass are kept (the user may have acted on them) but
     // flagged: store-all semantics, never delete.
-    const track = s.disqualified ? "other" : s.track;
-    if (s.disqualified) disqualified++;
+    const country = resolveWithCache(j.location, locationCache);
+    const fields = derivedFields(raw, {
+      country,
+      sponsorReg: await isRegisteredSponsor(j.company, country),
+      // The facts stage (or an earlier LLM fit) may already know this posting's
+      // level and its visa answer better than any regex can. Passing the row in
+      // is what keeps a re-score from demoting either.
+      current: {
+        visa: j.visa, visaBy: j.visaBy,
+        seniorityLevel: j.seniorityLevel, seniorityBy: j.seniorityBy,
+        sponsorReg: await isRegisteredSponsor(j.company, country), source: j.source, country,
+      },
+    });
+    if (fields.disqualified) disqualified++;
     await prisma.job.update({
       where: { id: j.id },
-      data: {
-        score: s.disqualified ? 0 : s.score, track, scoreReason: s.reason, scoredBy: s.scoredBy,
-        disqualified: s.disqualified,
-        langReq: s.langReq || null,
-        ...(j.seniorityBy === "llm" ? {} : {
-          seniorityLevel: s.seniorityLevel === "unknown" ? null : s.seniorityLevel,
-          seniorityBy: s.seniorityLevel === "unknown" ? null : "detector",
-        }),
-        workMode: deriveWorkMode(raw), country: resolveWithCache(j.location, locationCache),
-        visa: detectVisa(desc, j.title),
-        sponsorReg: await isRegisteredSponsor(j.company, resolveWithCache(j.location, locationCache)),
-        scores: {
-          create: {
-            scorerVersion: SCORER_VERSION, score: s.disqualified ? 0 : s.score, track: s.track,
-            reason: s.reason, disqualified: s.disqualified, at: new Date(),
-          },
-        },
-      },
+      data: { ...fields, country },
     });
     processed++;
   }

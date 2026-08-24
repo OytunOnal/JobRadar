@@ -74,4 +74,42 @@ for (const src of aggregators) {
 }
 
 console.log(`\n${healthy} healthy, ${empty} suspicious-empty, ${broken} broken${failures.length ? ` (${failures.join(", ")})` : ""}`);
+
+// STORED-DERIVATION AUDIT: does visaTier still equal what the evidence derives?
+//
+// The schema has claimed for months that "every write goes through
+// applyVisaEvidence() and `npm run doctor` audits the invariant". Neither half
+// was true — there is no function by that name, and this file had never touched
+// the database. Meanwhile eight of eleven visa-touching writers bypassed the
+// single writer, and a sweep of the live pool found 88 rows whose stored tier
+// the current evidence does not produce: 30 of them wearing a sponsor badge on
+// the radar with nothing behind it.
+//
+// A stored derivation is only safe if its drift can be SEEN. This is the seeing.
+{
+  const { prisma } = await import("../src/lib/db");
+  const { deriveVisaTier } = await import("../src/lib/visa");
+  const { profile } = await import("../src/lib/profile");
+  const { liveWhere } = await import("../src/lib/pool");
+
+  const rows = await prisma.job.findMany({
+    where: liveWhere(),
+    select: { visa: true, sponsorReg: true, source: true, country: true, visaTier: true },
+  });
+  const drift = rows.filter(
+    (r) => deriveVisaTier(r, profile.workAuthorization) !== r.visaTier,
+  ).length;
+  await prisma.$disconnect();
+
+  if (drift === 0) {
+    console.log(`✓ visaTier: ${rows.length.toLocaleString("tr")} canlı ilanın tamamı kanıtıyla tutarlı`);
+  } else {
+    console.log(
+      `✗ visaTier: ${drift.toLocaleString("tr")}/${rows.length.toLocaleString("tr")} ilan sapmış — düzeltmek için: npm run visa:retier`,
+    );
+  }
+  // Drift is a data problem, not a broken source: report it, but let the exit
+  // code keep meaning "a connector is down".
+}
+
 process.exit(broken > 0 ? 1 : 0);

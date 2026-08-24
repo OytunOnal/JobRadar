@@ -1,6 +1,7 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { submitFitBatch, getBatch, fetchResults, type JobForBatch } from "../src/lib/batch";
+import { verdictFields } from "../src/lib/fit";
 
 // Usage:
 //   npm run fit:batch            → submit ALL jobs, poll, write results
@@ -23,10 +24,19 @@ async function collect(batchId: string) {
       let written = 0;
       for (const r of results) {
         if (!r.fit) continue;
+        // The row as it stands: verdictFields needs the register match and the
+        // country to recompute the visa tier, and a batch result carries
+        // neither. This write used to skip the tier, the version stamp and the
+        // history row entirely.
+        const current = await prisma.job.findUnique({
+          where: { id: r.jobId },
+          select: { visa: true, visaBy: true, sponsorReg: true, source: true, country: true, seniorityLevel: true },
+        });
+        if (!current) continue; // job may have been removed
         await prisma.job.update({
           where: { id: r.jobId },
-          data: { fitScore: r.fit.fitScore, fitVerdict: r.fit.verdict, fitComment: r.fit.comment, fitCategory: r.fit.category, ghostRisk: r.fit.ghostRisk, ...(r.fit.category === "NO_VISA" ? { visa: "no" } : {}) },
-        }).catch(() => {}); // job may have been removed
+          data: verdictFields(r.fit, "anthropic-batch", current),
+        }).catch(() => {});
         written++;
       }
       console.log(`\n✓ Wrote ${written} fit scores from ${results.length} results.`);

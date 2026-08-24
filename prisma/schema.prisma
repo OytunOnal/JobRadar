@@ -122,8 +122,10 @@ model Job {
   // DERIVED from visa + visaBy + sponsorReg + source + the profile's work
   // authorization: not-needed | yes | maybe | no | unknown. Stored (not
   // computed per query) because the radar filters and the fit queue sort on
-  // it over half a million rows. Every write goes through applyVisaEvidence()
-  // and `npm run doctor` audits the invariant.
+  // it over half a million rows. Every write goes through visaFields() — the
+  // single writer in visa-write.ts — and `npm run doctor` audits the invariant
+  // across the live pool, because a stored derivation is only safe if its
+  // drift can be seen.
   visaTier    String   @default("unknown")
   // Application tracking (the /applied page): when it was applied to, the
   // next follow-up nudge, and a free-form note.

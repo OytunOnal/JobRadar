@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
 import { OPEN_STATUSES } from "@/lib/pool";
 import { draftCoverLetter } from "@/lib/cover";
-import { analyzeFit, FIT_PROMPT_VERSION } from "@/lib/fit";
+import { analyzeFit, verdictFields } from "@/lib/fit";
 
 const FOLLOW_UP_DAYS = 10; // Europe answers slowly — first nudge after 10 days
 
@@ -114,17 +114,7 @@ export async function analyzeFitAction(formData: FormData) {
   if (!fit) return;
   await prisma.job.update({
     where: { id },
-    data: {
-      fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment, fitCategory: fit.category, ghostRisk: fit.ghostRisk,
-      ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
-      judgments: {
-        create: {
-          model: "on-demand-strong", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-          verdict: fit.verdict, category: fit.category, seniorityLevel: job.seniorityLevel,
-          ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
-        },
-      },
-    },
+    data: verdictFields(fit, "on-demand-strong", job),
   });
   revalidatePath("/");
 }

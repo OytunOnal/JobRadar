@@ -14,9 +14,8 @@
 
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
-import { scoreJob, SCORER_VERSION } from "../src/lib/score";
-import { detectVisa } from "../src/lib/visa";
-import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
+import { derivedFields } from "../src/lib/derive";
+import { stripHtml } from "../src/lib/sources/types";
 import { labelledSections as labelled } from "../src/lib/sections";
 import { TEXT_VERSION } from "../src/lib/html-text";
 import { invalidateVector } from "../src/lib/embed";
@@ -204,7 +203,7 @@ const rows = await prisma.job.findMany({
     { OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })) },
   ),
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
-  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, content: { select: { description: true, textVersion: true } } },
+  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, country: true, visa: true, visaBy: true, seniorityLevel: true, seniorityBy: true, sponsorReg: true, content: { select: { description: true, textVersion: true } } },
 });
 // Two reasons to fetch a posting's detail page.
 //
@@ -270,8 +269,19 @@ for (const r of queue) {
       company: r.company, location: r.location ?? undefined, remote: r.remote,
       description: desc,
     };
-    const s = scoreJob(raw);
-    const newScore = s.disqualified ? 0 : s.score;
+    // The body we just fetched IS the kept text — that is the whole point of
+    // this pass — so every derived field follows it. This block used to list
+    // those fields by hand and had drifted from the other three writers in
+    // three ways: no seniority guard (so it demoted LLM levels), only half the
+    // store gate, and a raw `visa` write that bypassed the single-writer rule.
+    const country = r.country ?? null;
+    const current = {
+      visa: r.visa, visaBy: r.visaBy,
+      seniorityLevel: r.seniorityLevel, seniorityBy: r.seniorityBy,
+      sponsorReg: r.sponsorReg, source: r.source, country,
+    };
+    const fields = derivedFields(raw, { country, sponsorReg: r.sponsorReg, current });
+    const newScore = fields.score;
     // slice(0, 8000) can cut a surrogate pair in half — the lone half is
     // unserializable and killed the run mid-queue. Drop a trailing orphan.
     let stored = desc.slice(0, 8000);
@@ -285,21 +295,7 @@ for (const r of queue) {
             update: { description: stored, textVersion: TEXT_VERSION },
           },
         },
-        score: newScore,
-        track: s.track,
-        scoreReason: s.reason,
-        disqualified: s.disqualified,
-        langReq: s.langReq || null,
-        seniorityLevel: s.seniorityLevel === "unknown" ? null : s.seniorityLevel,
-        seniorityBy: s.seniorityLevel === "unknown" ? null : "detector",
-        workMode: deriveWorkMode(raw),
-        visa: detectVisa(desc, r.title),
-        scores: {
-          create: {
-            scorerVersion: SCORER_VERSION, score: newScore, track: s.track,
-            reason: s.reason, disqualified: s.disqualified, at: new Date(),
-          },
-        },
+        ...fields,
       },
     });
     // The vector described the text we just replaced.

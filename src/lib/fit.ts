@@ -7,6 +7,7 @@ import { signalExcerpts, trimBoilerplate } from "./posting-text";
 import { postingView } from "./sections";
 import { andWhere, openWhere } from "./pool";
 import { VISA_MARKED } from "./visa";
+import { visaFields } from "./visa-write";
 
 export { trimBoilerplate };
 
@@ -103,6 +104,58 @@ export function judgeQueueWhere(wide: boolean, now: Date = new Date()) {
 // Bumped MANUALLY whenever the prompt text changes — LlmJudgmentHistory rows
 // carry it, so "did the seniority-rule change move scores" stays a query.
 export const FIT_PROMPT_VERSION = "v7-sectioned";
+
+// EVERYTHING A VERDICT MAKES TRUE, as one spreadable record.
+//
+// Six writers used to project a verdict onto a Job row by hand, and five of
+// them omitted `fitPromptVersion` — so their verdicts were invisible to a queue
+// whose whole design is "everything whose version is behind", and a re-judge
+// would never reach them. Three also skipped the LlmJudgmentHistory row, which
+// is the table that makes "did the prompt change move scores" answerable at
+// all; without it the measurement that retired the triage tier could not have
+// been made a second time.
+//
+// The visa half matters just as much: a model that reads an explicit refusal is
+// the STRONGEST evidence we can get, and writing `visa: "no"` without a
+// `visaBy` left that reading looking like a regex guess, while writing it
+// without recomputing the tier left the radar's badge describing the old
+// answer. It goes through the same single writer as every other visa write.
+//
+// `current` is the row as it stands: the tier derivation needs the register
+// match and the country, and neither can be guessed from the verdict.
+export function verdictFields(
+  fit: FitResult,
+  model: string,
+  current: { visa: string; visaBy: string | null; sponsorReg: boolean; source: string; country: string | null; seniorityLevel?: string | null },
+) {
+  return {
+    fitScore: fit.fitScore,
+    fitVerdict: fit.verdict,
+    fitComment: fit.comment,
+    fitCategory: fit.category,
+    ghostRisk: fit.ghostRisk,
+    fitBy: model,
+    // The stamp that makes the queue "everything whose version is behind"
+    // rather than "everything never touched".
+    fitPromptVersion: FIT_PROMPT_VERSION,
+    ...(fit.category === "NO_VISA"
+      ? visaFields(current, { visa: "no", by: "llm" })
+      : {}),
+    judgments: {
+      create: {
+        model,
+        promptVersion: FIT_PROMPT_VERSION,
+        fitScore: fit.fitScore,
+        verdict: fit.verdict,
+        category: fit.category,
+        seniorityLevel: current.seniorityLevel ?? null,
+        ghostRisk: fit.ghostRisk,
+        comment: fit.comment,
+        at: new Date(),
+      },
+    },
+  };
+}
 
 export interface FitResult {
   fitScore: number; // 0-100

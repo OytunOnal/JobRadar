@@ -1,4 +1,4 @@
-import { analyzeFit, judgeQueueWhere, unjudgedWhere, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { analyzeFit, judgeQueueWhere, unjudgedWhere, verdictFields, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { andWhere } from "../src/lib/pool";
 import { VISA_MARKED } from "../src/lib/visa";
 import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
@@ -206,24 +206,9 @@ while (done < LIMIT) {
         failStreak = 0;
         await prisma.job.update({
           where: { id: j.id },
-          data: {
-            fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
-            fitCategory: fit.category, ghostRisk: fit.ghostRisk,
-            // Single-tier regime (user decision 2026-08-21): the 27B judges
-            // directly — no 8B triage, no separate review pass to await.
-            fitBy: "qwen27b",
-            // The stamp that makes the queue "everything whose version is
-            // behind" rather than "everything never touched".
-            fitPromptVersion: FIT_PROMPT_VERSION,
-            ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
-            judgments: {
-              create: {
-                model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-                verdict: fit.verdict, category: fit.category, seniorityLevel: j.seniorityLevel,
-                ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
-              },
-            },
-          },
+          // Single-tier regime (user decision 2026-08-21): the 27B judges
+          // directly — no 8B triage, no separate review pass to await.
+          data: verdictFields(fit, "qwen27b", j),
         });
         done++;
         sinceSnapshot++;

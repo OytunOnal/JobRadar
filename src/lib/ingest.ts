@@ -35,7 +35,7 @@ import { agenticjobs, a16zspeedrun } from "./sources/nichejobs";
 import { workingnomads } from "./sources/workingnomads";
 import { jobindexdk } from "./sources/jobindexdk";
 import { companySources } from "./sources/companies";
-import { analyzeFit } from "./fit";
+import { analyzeFit, verdictFields } from "./fit";
 import { llmEnabled, RateLimitError } from "./llm";
 import { harvest, type HarvestReport } from "./discovery/harvest";
 import { boardSources, parseBoardSourceName, recordBoardOutcome } from "./discovery/boardSources";
@@ -50,6 +50,7 @@ import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/t
 import { TEXT_VERSION } from "./html-text";
 import { invalidateVector } from "./embed";
 import { andWhere, openWhere } from "./pool";
+import { derivedFields, statedFields, STORE_THRESHOLD } from "./derive";
 import { visaFields } from "./visa-write";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -128,9 +129,6 @@ export const aggregators: Source[] = [
 ];
 
 
-// Minimum keyword score to bother storing. Junk (score 0, disqualified) is dropped.
-const STORE_THRESHOLD = 20;
-
 function dedupeKey(job: RawJob): string {
   return createHash("sha1")
     .update(`${job.source}:${job.externalId}`)
@@ -160,6 +158,104 @@ function norm(s: string): string {
 // So take the incoming text only when it is better, and treat STRUCTURE as
 // quality — a version with headings and bullets beats a longer flat one,
 // because the section parser can only read what has line breaks.
+// STORE ONE SIGHTING: create the posting, or fold this sighting into the row
+// that already represents it.
+//
+// Extracted from the ingest loop so it can be CALLED — by the loop, and by a
+// test. Everything this decides used to live inside a 612-line function with a
+// database singleton and ~140 network sources between a test and the decision,
+// which is why the only test that touches this area re-implements the `kept`
+// rule in the test file rather than exercising it: delete the real line and the
+// test still passes.
+//
+// `identity` is the create-path row: the caller assembles it because it holds
+// the run-scoped caches (location, sponsor register) and the dedupe keys.
+export async function storeSighting(
+  job: RawJob,
+  ctx: {
+    key: string;
+    ck: string;
+    country: string | null;
+    sponsorReg: boolean;
+    identity: Record<string, unknown>;
+  },
+): Promise<{ kind: "created"; id: string } | { kind: "updated"; id: string }> {
+  const { key, ck, country, sponsorReg } = ctx;
+
+  // Exact same-source match, or the same role stored under a different source.
+  const withText = { include: { content: { select: { description: true } } } } as const;
+  const existing =
+    (await prisma.job.findUnique({ where: { dedupeKey: key }, ...withText })) ??
+    (await prisma.job.findFirst({ where: { contentKey: ck }, ...withText }));
+
+  if (!existing) {
+    const created = await prisma.job.create({
+      data: {
+        ...ctx.identity,
+        content: { create: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION } },
+        listings: { create: { event: "listed", source: job.source, at: new Date() } },
+      } as never,
+    });
+    return { kind: "created", id: created.id };
+  }
+
+  // Derive from the text we are going to KEEP, not the text that just arrived.
+  //
+  // These are not always the same, and the difference was undoing desc:fill's
+  // work on every sweep. Several platforms' list payloads carry only the title,
+  // so desc:fill fetches the real body from the detail endpoint; betterText then
+  // correctly refuses to overwrite that body with the next sweep's title-only
+  // payload — but the score was recomputed from the payload regardless,
+  // collapsing to a title-only score and often crossing back below the gate. The
+  // posting kept its good text and lost the score that text had earned.
+  const keepIncoming = betterText(job.description, existing.content?.description);
+  const kept = keepIncoming ? job.description : existing.content?.description ?? job.description;
+
+  // Refresh what the source states and what its text makes true, but never
+  // clobber the user's pipeline status/notes.
+  await prisma.job.update({
+    where: { id: existing.id },
+    data: {
+      ...statedFields(job),
+      ...derivedFields({ ...job, description: kept }, {
+        country,
+        sponsorReg,
+        current: {
+          visa: existing.visa, visaBy: existing.visaBy,
+          seniorityLevel: existing.seniorityLevel, seniorityBy: existing.seniorityBy,
+          sponsorReg, source: existing.source, country,
+        },
+      }),
+      country,
+      contentKey: ck,
+      // Refresh the stored text when the board now offers a better one. This is
+      // how structure comes back to postings ingested before htmlToText: the old
+      // stripHtml collapsed every newline, so ~half the pool is flat prose that
+      // only a re-sighting can repair.
+      ...(keepIncoming
+        ? {
+            content: {
+              upsert: {
+                create: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
+                update: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
+              },
+            },
+          }
+        : {}),
+      // Pool-diff freshness: the job is still listed at its source.
+      lastSeenAt: new Date(),
+      delistedAt: null, // it's back (or never left)
+      ...(existing.delistedAt
+        ? { listings: { create: { event: "relisted", source: job.source, at: new Date() } } }
+        : {}),
+    },
+  });
+  // A rewritten description invalidates the vector built from it — the same
+  // rule the score, langReq and seniority already follow.
+  if (keepIncoming) await invalidateVector(prisma, existing.id);
+  return { kind: "updated", id: existing.id };
+}
+
 export function betterText(incoming: string, current: string | null | undefined): boolean {
   if (!current?.trim()) return true;
   const inStruct = incoming.includes("\n");
@@ -501,46 +597,27 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     }
     seenContent.add(ck);
 
+    const country = resolveWithCache(job.location, locationCache);
+    // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
+    const sponsorReg = await isRegisteredSponsor(job.company, country);
+
     const data = {
+      // Identity, and our own observation of it. Everything else on the row is
+      // either what the source states (statedFields) or what its text makes
+      // true (derivedFields), and neither of those belongs in a literal here.
       dedupeKey: key,
       contentKey: ck,
       source: job.source,
       externalId: job.externalId,
-      url: canonicalJobUrl(job.url), // tracking params stripped, stable form
-      title: job.title,
-      company: job.company,
-      location: job.location ?? null,
-      remote: job.remote,
-      country: resolveWithCache(job.location, locationCache),
-      workMode: deriveWorkMode(job),
-      ...visaFields(
-        {
-          visa: job.visa ?? detectVisa(job.description, job.title),
-          // A source's own structured flag is stronger evidence than our regex.
-          visaBy: job.visa ? "source" : "regex",
-          sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
-          source: job.source,
-          country: resolveWithCache(job.location, locationCache),
-        },
-      ),
-      // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
-      sponsorReg: await isRegisteredSponsor(job.company, resolveWithCache(job.location, locationCache)),
-      salaryText: job.salaryText ?? null,
-      sourceTrust: sourceTrust(job.source),
-      score: rejected ? 0 : s.score,
-      track: s.track,
-      scoreReason: s.reason,
-      scoredBy: s.scoredBy,
-      disqualified: rejected,
-      seniorityLevel: s.seniorityLevel === "unknown" ? null : s.seniorityLevel,
-      seniorityBy: s.seniorityLevel === "unknown" ? null : "detector",
-      langReq: s.langReq || null,
+      country,
+      ...statedFields(job),
+      ...derivedFields(job, { country, sponsorReg }),
       // Sources parse dates from wild formats; one NaN Date must degrade to
       // "date unknown", never kill the whole run (it took down a sweep slice).
       postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
     };
 
-    if (job.location && data.country === null && resolveCountry(job.location) === null) {
+    if (job.location && country === null && resolveCountry(job.location) === null) {
       const key = normalizeLocation(job.location);
       if (!locationCache.has(key)) {
         if (!unknownLocations.has(key)) unknownLocations.set(key, new Set());
@@ -553,99 +630,12 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     // this is the third crash class caught here, so guard the class.
     try {
 
-    // Exact same-source match, or the same role stored under a different source.
-    const withText = { include: { content: { select: { description: true } } } } as const;
-    const existing =
-      (await prisma.job.findUnique({ where: { dedupeKey: key }, ...withText })) ??
-      (await prisma.job.findFirst({ where: { contentKey: ck }, ...withText }));
-
-    if (existing) {
-      // Score the text we are going to KEEP, not the text that just arrived.
-      //
-      // These are not always the same, and the difference was undoing
-      // desc:fill's work on every sweep. Several platforms' list payloads
-      // carry only the title, so desc:fill fetches the real body from the
-      // detail endpoint; betterText then correctly refuses to overwrite that
-      // body with the next sweep's title-only payload — but the score was
-      // recomputed from the payload regardless, collapsing to a title-only
-      // score and often crossing back below the gate. The posting kept its
-      // good text and lost the score that text had earned.
-      const keepIncoming = betterText(job.description, existing.content?.description);
-      const kept = keepIncoming ? job.description : existing.content?.description ?? job.description;
-      const rescored = keepIncoming ? s : scoreJob({ ...job, description: kept });
-      const rescoreRejected = rescored.disqualified || rescored.score < STORE_THRESHOLD;
-
-      // Refresh score/text but never clobber the user's pipeline status/notes.
-      await prisma.job.update({
-        where: { id: existing.id },
-        data: {
-          // The SAME gate creation uses: `rejected = disqualified || score <
-          // STORE_THRESHOLD`. Writing only `rescored.disqualified` dropped the
-          // threshold half, so a re-sighting that scored 12 came back as a
-          // live candidate while an identical NEW posting was gated out.
-          score: rescoreRejected ? 0 : rescored.score,
-          track: rescored.track,
-          scoreReason: rescored.reason,
-          scoredBy: "keyword",
-          salaryText: data.salaryText,
-          // From the text we KEEP, like every other derived field. deriveWorkMode
-          // reads the description for "hybrid", so a title-only re-sighting was
-          // resetting the work mode of a posting whose desc:fill-enriched body
-          // says hybrid — on every sweep, silently drifting the radar's facet.
-          workMode: deriveWorkMode({ ...job, description: kept }),
-          country: data.country,
-          ...visaFields(
-            { visa: existing.visa, visaBy: existing.visaBy, sponsorReg: data.sponsorReg, source: existing.source, country: data.country },
-            { visa: data.visa as any, by: data.visaBy === "source" ? "source" : "regex" },
-          ),
-          contentKey: ck,
-          // Same rule: every derived field follows the text we keep.
-          langReq: rescored.langReq || null,
-          // Refresh the stored text when the board now offers a better one.
-          // This is how structure comes back to postings ingested before
-          // htmlToText: the old stripHtml collapsed every newline, so ~half
-          // the pool is flat prose that only a re-sighting can repair.
-          ...(betterText(job.description, existing.content?.description)
-            ? {
-                content: {
-                  upsert: {
-                    create: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
-                    update: { description: safeSlice(kept, 8000), textVersion: TEXT_VERSION },
-                  },
-                },
-              }
-            : {}),
-          // The LLM's level verdict outranks the detector — don't overwrite it.
-          ...(existing.seniorityBy === "llm"
-            ? {}
-            : {
-                seniorityLevel: rescored.seniorityLevel === "unknown" ? null : rescored.seniorityLevel,
-                seniorityBy: rescored.seniorityLevel === "unknown" ? null : "detector",
-              }),
-          // A re-score can flip the gate verdict in either direction.
-          disqualified: rescoreRejected,
-          // Pool-diff freshness: the job is still listed at its source.
-          lastSeenAt: new Date(),
-          delistedAt: null, // it's back (or never left)
-          ...(existing.delistedAt
-            ? { listings: { create: { event: "relisted", source: job.source, at: new Date() } } }
-            : {}),
-        },
-      });
-      // A rewritten description invalidates the vector built from it — the
-      // same rule the score, langReq and seniority already follow.
-      if (keepIncoming) await invalidateVector(prisma, existing.id);
+    const outcome = await storeSighting(job, { key, ck, country, sponsorReg, identity: data });
+    if (outcome.kind === "updated") {
       report.updated++;
     } else {
-      const created = await prisma.job.create({
-        data: {
-          ...data,
-          content: { create: { description: safeSlice(job.description, 8000), textVersion: TEXT_VERSION } },
-          listings: { create: { event: "listed", source: job.source, at: new Date() } },
-        },
-      });
       report.stored++;
-      newlyCreated.push({ id: created.id, title: created.title, company: created.company, description: job.description, source: created.source });
+      newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
       if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
     }
 
@@ -794,12 +784,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         if (!fit) continue;
         await prisma.job.update({
           where: { id: j.id },
-          data: {
-            fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
-            fitCategory: fit.category, ghostRisk: fit.ghostRisk,
-            // The model read the posting: an explicit refusal beats "unknown".
-            ...(fit.category === "NO_VISA" ? { visa: "no" } : {}),
-          },
+          // The model read the posting: an explicit refusal beats "unknown",
+          // and verdictFields is what makes that a proper llm-strength write
+          // with the tier recomputed and the history row appended.
+          data: verdictFields(fit, "auto-fit", j),
         });
         report.fitAnalyzed++;
         // Throttle to stay under the provider's per-minute token limit.

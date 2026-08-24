@@ -19,7 +19,7 @@ import { andWhere, openWhere } from "../src/lib/pool";
 process.env.OLLAMA_MODEL = process.env.REVIEW_MODEL || "qwen3.8:27b";
 
 import { appendFileSync } from "node:fs";
-import { analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { verdictFields, analyzeFit, FIT_PROMPT_VERSION } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
 
 const MARK = "qwen27b-review";
@@ -71,18 +71,7 @@ while (true) {
         const delta = fit.fitScore - (j.fitScore ?? 0);
         await prisma.job.update({
           where: { id: j.id },
-          data: {
-            fitScore: fit.fitScore, fitVerdict: fit.verdict, fitComment: fit.comment,
-            fitCategory: fit.category, ghostRisk: fit.ghostRisk, fitBy: MARK,
-            ...(fit.category === "NO_VISA" ? { visa: "no", visaBy: "llm" } : {}),
-            judgments: {
-              create: {
-                model: "qwen27b", promptVersion: FIT_PROMPT_VERSION, fitScore: fit.fitScore,
-                verdict: fit.verdict, category: fit.category, seniorityLevel: j.seniorityLevel,
-                ghostRisk: fit.ghostRisk, comment: fit.comment, at: new Date(),
-              },
-            },
-          },
+          data: verdictFields(fit, MARK, j),
         });
         done++;
         const line = `${j.company.slice(0, 26)} | ${j.title.slice(0, 34)} | ${j.fitScore} → ${fit.fitScore} (${fit.verdict})`;

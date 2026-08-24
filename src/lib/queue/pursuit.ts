@@ -1,4 +1,4 @@
-import { AWAITING_STATUSES, DISMISSED_STATUS, PURSUED_STATUSES, isAwaitingReply } from "./pool";
+import { DISMISSED_STATUS, TRACKED_STATUSES, isAwaitingReply, isConcluded } from "./pool";
 
 // THE WRITE SIDE OF THE PURSUIT LIFECYCLE. pool.ts answers what a status
 // means; this module answers what changing one does. Until it existed, that
@@ -60,12 +60,17 @@ export interface TransitionOptions {
  * says "what happened, happened".
  *
  * The rules are TOTAL over every jump:
- * - entering any pursued status stamps `appliedAt` if it was never set — a
- *   pursuit tracked late still gets its stamp;
- * - entering an awaiting status ensures a follow-up date, so the nudge and the
- *   ghost suggestion work for late-tracked pursuits too;
- * - entering anything else clears it — concluded, dismissed and open postings
- *   are alike in not awaiting a reply;
+ * - entering any tracked status stamps `appliedAt` if it was never set — a
+ *   pursuit tracked late still gets its stamp, and so does one recorded only
+ *   at its rejection;
+ * - THE NUDGE RIDES THE STAMP: a follow-up date is born when the pursuit is
+ *   first stamped into an awaiting status, dies at definitive ends (concluded,
+ *   dismissed), and is otherwise the user's to keep — including deliberately
+ *   empty. The first version of this rule filled every null on entering an
+ *   awaiting status, and null carries two meanings here: "never scheduled"
+ *   and "the user pressed no-nudge". Filling both re-armed an explicit
+ *   opt-out and let an applied→new→applied undo silently defer the date —
+ *   one field, two meanings, the same disease the GPU lock's child field had;
  * - dismissing records the reason; every other entry clears it.
  */
 export function transitionFields(
@@ -79,18 +84,19 @@ export function transitionFields(
   dismissReason: string | null;
 }; event: PursuitEvent } {
   const at = opts.at ?? new Date();
-  const pursued = (PURSUED_STATUSES as readonly string[]).includes(to);
-  const awaiting = (AWAITING_STATUSES as readonly string[]).includes(to);
+  const stamping = (TRACKED_STATUSES as readonly string[]).includes(to) && !current.appliedAt;
   const dismissed = to === DISMISSED_STATUS;
   const reason = dismissed ? (opts.reason || null) : null;
 
   return {
     fields: {
       status: to,
-      ...(pursued && !current.appliedAt ? { appliedAt: at } : {}),
-      followUpAt: awaiting
-        ? current.followUpAt ?? new Date(at.getTime() + FOLLOW_UP_DAYS * DAY)
-        : null,
+      ...(stamping ? { appliedAt: at } : {}),
+      followUpAt: isConcluded(to) || dismissed
+        ? null
+        : stamping && isAwaitingReply(to)
+          ? new Date(at.getTime() + FOLLOW_UP_DAYS * DAY)
+          : current.followUpAt,
       dismissReason: reason,
     },
     event: pursuitEvent(
@@ -101,9 +107,12 @@ export function transitionFields(
   };
 }
 
-/** The manual follow-up form's choices: a number of days, or "clear". */
+/** The manual follow-up form's choices: a number of days, or "clear". What
+ * cannot be parsed honestly means "no date" — NaN would travel to Prisma as an
+ * Invalid Date and come back as an unhandled 500. */
 export function followUpDate(days: string, at: Date = new Date()): Date | null {
-  return days === "clear" ? null : new Date(at.getTime() + Number(days) * DAY);
+  const n = Number(days);
+  return days === "clear" || !Number.isFinite(n) ? null : new Date(at.getTime() + n * DAY);
 }
 
 /** Nudge long overdue and still no answer — probably ghosted. Applied only:

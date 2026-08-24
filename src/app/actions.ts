@@ -14,17 +14,23 @@ import { analyzeFit, verdictFields } from "@/lib/llm/fit";
 export async function setStatus(formData: FormData) {
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
-  const current = await prisma.job.findUnique({
-    where: { id },
-    select: { status: true, appliedAt: true, followUpAt: true },
-  });
-  if (!current) return;
-  const { fields, event } = transitionFields(current, status, {
-    reason: String(formData.get("reason") ?? "") || null,
-  });
-  await prisma.job.update({
-    where: { id },
-    data: { ...fields, actions: { create: event } },
+  // One transaction around read-then-write. A double-click sends two of these
+  // concurrently; computed from the same snapshot, the second would re-stamp
+  // what the first just stamped. Serialized, it computes from the first's
+  // result and correctly changes nothing.
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.job.findUnique({
+      where: { id },
+      select: { status: true, appliedAt: true, followUpAt: true },
+    });
+    if (!current) return;
+    const { fields, event } = transitionFields(current, status, {
+      reason: String(formData.get("reason") ?? "") || null,
+    });
+    await tx.job.update({
+      where: { id },
+      data: { ...fields, actions: { create: event } },
+    });
   });
   revalidatePath("/");
   revalidatePath("/applied");
@@ -39,11 +45,15 @@ export async function dismissCompanyRest(formData: FormData) {
   if (!company) return;
   const affected = await prisma.job.findMany({
     where: { company, status: { in: [...OPEN_STATUSES] } },
-    select: { id: true, status: true, appliedAt: true, followUpAt: true },
+    select: { id: true },
   });
   if (affected.length === 0) return;
-  // Open postings share one lifecycle answer, so ask once and apply to all —
-  // the same definition the single-row path uses, not a second spelling of it.
+  // One lifecycle answer for the whole sweep — the same definition the
+  // single-row path uses, not a second spelling of it. The synthetic state is
+  // honest: every affected row is OPEN (the where says so), and dismissal's
+  // effects do not depend on the rest of the row. If they ever do, this must
+  // start feeding real rows — which is why only `id` is selected: selecting
+  // state and then not using it would read as though it were.
   const { fields, event } = transitionFields(
     { status: "new", appliedAt: null, followUpAt: null },
     "ignored",

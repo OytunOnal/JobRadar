@@ -72,20 +72,50 @@ test("leaving dismissal clears the reason", () => {
   assert.equal(fields.dismissReason, null);
 });
 
-test("undoing back to open keeps the history but stops the nudging", () => {
+// null CARRIES TWO MEANINGS in followUpAt — "never scheduled" and "the user
+// pressed no-nudge" — and the first version of this module conflated them: any
+// entry into an awaiting status re-armed the nudge, overriding an explicit
+// opt-out, and an applied→new→applied undo silently deferred the date. Same
+// disease the GPU lock's child field had: one field, two writers of meaning.
+// The rule that untangles it: the nudge rides the STAMP. It is born when the
+// pursuit is first stamped, dies at definitive ends, and is otherwise the
+// user's to keep — including deliberately empty.
+
+test("a cleared nudge survives a stage move — no-nudge means no nudge", () => {
   const { fields } = transitionFields(
-    { status: "applied", appliedAt: NOW, followUpAt: new Date(NOW.getTime() + DAY) },
-    "interested", { at: NOW });
-  assert.equal(fields.appliedAt, undefined, "what happened, happened");
-  assert.equal(fields.followUpAt, null, "but an open posting is not awaiting a reply");
+    { status: "applied", appliedAt: NOW, followUpAt: null }, // user pressed "no nudge"
+    "interview", { at: NOW });
+  assert.equal(fields.followUpAt, null, "an opt-out is not a gap to fill");
 });
 
-test("reopening a concluded pursuit re-arms the nudge", () => {
+test("an undo round-trip keeps the original nudge date", () => {
+  const day10 = new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY);
+  const toOpen = transitionFields(
+    { status: "applied", appliedAt: NOW, followUpAt: day10 }, "interested", { at: NOW });
+  assert.deepEqual(toOpen.fields.followUpAt, day10,
+    "the fat-finger to open does not erase the schedule");
+  const back = transitionFields(
+    { status: "interested", appliedAt: NOW, followUpAt: day10 }, "applied",
+    { at: new Date(NOW.getTime() + 2 * DAY) });
+  assert.deepEqual(back.fields.followUpAt, day10, "and coming back does not defer it");
+});
+
+test("reopening a concluded pursuit does not invent a nudge", () => {
   const { fields } = transitionFields(
     { status: "rejected", appliedAt: new Date(NOW.getTime() - 30 * DAY), followUpAt: null },
     "applied", { at: NOW });
   assert.equal(fields.appliedAt, undefined);
-  assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY));
+  assert.equal(fields.followUpAt, null,
+    "the follow-up buttons exist for exactly this decision");
+});
+
+test("recording an outside rejection still stamps the pursuit", () => {
+  // Unreachable from today's buttons, constructible tomorrow: the user applied
+  // outside the tool and only records the rejection. rejected is tracked, and
+  // /applied sorts it by appliedAt — a null there renders as "applied —".
+  const { fields } = transitionFields(open, "rejected", { at: NOW });
+  assert.deepEqual(fields.appliedAt, NOW);
+  assert.equal(fields.followUpAt, null);
 });
 
 test("one event shape for single and bulk, and bulk says so", () => {
@@ -102,9 +132,12 @@ test("pursuitEvent is the one way an action-log row is shaped", () => {
   assert.deepEqual(e, { type: "note", payload: null, at: NOW });
 });
 
-test("followUpDate turns the form's choices into dates", () => {
+test("followUpDate turns the form's choices into dates, and garbage into none", () => {
   assert.deepEqual(followUpDate("3", NOW), new Date(NOW.getTime() + 3 * DAY));
   assert.equal(followUpDate("clear", NOW), null);
+  // A hand-crafted POST is not the UI. NaN would reach Prisma as Invalid Date
+  // and come back as an unhandled 500; "could not parse" honestly means "no date".
+  assert.equal(followUpDate("abc", NOW), null);
 });
 
 test("the ghost suggestion fires at fourteen days of silence, not thirteen", () => {

@@ -39,7 +39,6 @@ export default async function AppliedPage({
     prisma.job.aggregate({ _max: { lastSeenAt: true } }).then((a) => a._max.lastSeenAt),
   ]);
   const nowDate = new Date();
-  const now = nowDate.getTime();
   // Lifecycle rules come from queue/pursuit.ts — a render function is where
   // one of them used to live, which meant it could only be tested by
   // rendering. The page asks; it does not decide.

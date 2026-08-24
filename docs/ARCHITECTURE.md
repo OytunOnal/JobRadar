@@ -349,9 +349,18 @@ ever exists, legality belongs at that boundary, not in the domain effects.
 something, including the ones a single-user tool never sees: a pursuit tracked
 late enters at interview or offer with no applied stamp, and under the old
 partial rules the follow-up machinery simply never engaged for it. So:
-entering any pursued status stamps `appliedAt` if unset; entering an awaiting
-status ensures a follow-up date; entering anything else clears it; dismissing
-records the reason (ADR-5's data), leaving dismissal clears it.
+entering any tracked status stamps `appliedAt` if unset — including a pursuit
+recorded only at its rejection; the follow-up date is born with that stamp,
+dies at definitive ends (concluded, dismissed), and is otherwise the user's to
+keep, a deliberate clear included; dismissing records the reason (ADR-5's
+data), leaving dismissal clears it.
+
+The nudge rule was amended the same day it shipped, by review: the first
+version filled every missing follow-up date on entering an awaiting status,
+and `null` carries two meanings there — "never scheduled" and "the user
+pressed no-nudge". Filling both re-armed an explicit opt-out and let an
+undo round-trip silently defer the date. One field, two meanings: the same
+disease ADR-11 treated in the GPU lock's `child` field.
 
 ## Evolution note
 

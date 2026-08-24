@@ -173,6 +173,14 @@ and its reasoning. Always qualified — an unqualified "score" means the keyword
 score.
 _Avoid_: LLM score, AI score, match score
 
+**Provider chain**:
+The ordered walk over configured LLM providers that every model call rides:
+the first success answers, a failure falls through to the next, a provider out
+of balance sits out an hour, and only a chain whose every member was
+rate-limited reports itself as rate-limited. Which provider leads is the
+user's choice.
+_Avoid_: fallback cascade, retry loop, LLM router
+
 **Judge**:
 The model that produces a fit. One strong local model rather than a cheap
 triage tier, because a triage tier measured 29% optimistic.

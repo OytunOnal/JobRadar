@@ -234,30 +234,71 @@ async function callProvider(p: Provider, messages: Msg[], opts: ChatOpts): Promi
     : callOpenAI(p, messages, model, opts);
 }
 
-// Try providers in order; fall through on rate-limit/error. Returns null only if
-// no provider is configured. Throws RateLimitError only if ALL are exhausted.
-// Providers that answered with a permanent failure (402 no balance) sit out
-// the rest of the process instead of erroring at the end of every chain.
-const deadProviders = new Set<string>();
+// A provider that answered 402 sits out this long before being asked again.
+// It used to sit out the rest of the process, which was fine for a four-hour
+// backfill child and wrong for the dev server: topping up the balance changed
+// nothing until the server was restarted. An hour matches the human act it is
+// waiting for.
+export const DEAD_TTL_MS = 60 * 60_000;
 
-export async function chat(messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
-  const provs = providers().filter((p) => !deadProviders.has(p.name));
+/**
+ * THE WALK over the provider chain, separated from the calling so it can be
+ * tested — every LLM call in the system rides this loop, and until the seam
+ * existed its behaviour was reachable only through real fetch calls. The
+ * decision lives here; the effect (`call`) and the memory (`dead`) come in as
+ * parameters. Production hands in the real callProvider and a module-owned
+ * map; a test hands in a script and a fresh map, so no state leaks between
+ * cases.
+ *
+ * The contract, pinned by tests/llmwalk.test.ts:
+ * - providers are tried in order and the first success answers;
+ * - a failure falls through; a 402 additionally benches the provider for
+ *   DEAD_TTL_MS, because out-of-balance erroring at the head of every chain
+ *   is pure waste for as long as the balance stays empty;
+ * - RateLimitError is thrown only when every provider ASKED was rate-limited
+ *   — one plain failure among the limits means something else is wrong, and
+ *   backing off would hide it;
+ * - when everything fails, the error carries every provider's reason, not
+ *   just the tail's;
+ * - null means "no LLM at the moment": nothing configured, or everything
+ *   configured currently benched. Callers already skip gracefully on null.
+ */
+export async function walkProviders<P extends { name: string }>(
+  all: readonly P[],
+  call: (p: P) => Promise<string>,
+  dead: Map<string, number>,
+  now: () => number = Date.now,
+): Promise<string | null> {
+  const provs = all.filter((p) => {
+    const diedAt = dead.get(p.name);
+    if (diedAt === undefined) return true;
+    if (now() - diedAt >= DEAD_TTL_MS) {
+      dead.delete(p.name); // revival: the bench is a timeout, not a verdict
+      return true;
+    }
+    return false;
+  });
   if (provs.length === 0) return null;
 
   let rateLimited = 0;
   const failures: string[] = [];
   for (const p of provs) {
     try {
-      return await callProvider(p, messages, opts);
+      return await call(p);
     } catch (e: any) {
       failures.push(`${p.name}: ${String(e?.message ?? e).slice(0, 160)}`);
       if (e instanceof RateLimitError) rateLimited++;
-      // Out of balance is permanent for this process — stop asking.
-      else if (/HTTP 402/.test(e?.message ?? "")) deadProviders.add(p.name);
+      else if (/HTTP 402/.test(e?.message ?? "")) dead.set(p.name, now());
       // try the next provider
     }
   }
   if (rateLimited === provs.length) throw new RateLimitError("all providers rate-limited");
   // Every provider's reason, not just the last one — the chain hides bugs otherwise.
   throw new Error(`all providers failed — ${failures.join(" | ")}`);
+}
+
+const deadProviders = new Map<string, number>();
+
+export async function chat(messages: Msg[], opts: ChatOpts = {}): Promise<string | null> {
+  return walkProviders(providers(), (p) => callProvider(p, messages, opts), deadProviders);
 }

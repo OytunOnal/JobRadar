@@ -8,7 +8,7 @@ import { andWhere, archiveWhere } from "../../src/lib/queue/pool";
 import { clearRun, readRun, runNameFor, type RunResult } from "../../src/lib/queue/backfill";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../../src/lib/queue/chunks";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../../src/lib/queue/gpu-lock";
+import { acquireGpu, beatGpu, gpuBusyMessage, gpuToken, releaseGpu } from "../../src/lib/queue/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
 // which is right for a migration and wrong for a tool that lives on your
@@ -100,14 +100,25 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
         // our PID, not a bare flag, so it can check that the lock it attaches
         // to is the one we took — an orphan whose parent died must not latch
         // onto whatever lock a later worker has since acquired.
-        env: { ...process.env, JOBRADAR_GPU_DELEGATED: String(process.pid) },
+        env: { ...process.env, JOBRADAR_GPU_DELEGATED: gpuToken() ?? "" },
       },
     );
     // We keep beating while the child boots. Once it is up it puts ITSELF on
     // the lock and beats for both of us — we cannot name it from here, because
     // between us and the script sits a tsx wrapper whose pid is the only one
     // we get to see.
-    const beat = setInterval(beatGpu, 20_000);
+    // A beat that stops landing is the quiet disaster: either the lock cannot
+    // be written, or it went stale and another process legitimately took it —
+    // and we would go on judging on a card someone else now believes is theirs.
+    // Said once per episode, and re-armed on recovery, because every 20 seconds
+    // for four hours is not a log.
+    let lost = false;
+    const beat = setInterval(() => {
+      if (beatGpu()) { lost = false; return; }
+      if (lost) return;
+      lost = true;
+      log("  UYARI: GPU kilidi artık bizim değil ya da yazılamıyor — kart devralınabilir.");
+    }, 20_000);
     const stop = (): void => { clearInterval(beat); };
     child.on("exit", (code) => { stop(); resolve(code ?? 1); });
     // Without this the emitted error is unhandled and takes down the one

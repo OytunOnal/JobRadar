@@ -23,6 +23,9 @@ function withLock<T>(fn: (path: string) => T): T {
 // this; picking a number in the plausible range would make the test a bet on
 // what else the machine is running.
 const GONE = 0x7ffffff;
+// The token names the lock, not just its holder, so cases that play a
+// delegated child have to agree with the fixture on the lock's birth stamp.
+const SINCE = "2026-08-24T12:00:00.000Z";
 
 // A REAL other process, because since the liveness check landed a made-up pid
 // no longer means anything.
@@ -54,9 +57,9 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
 // Beating as the delegated process is how a child claims the lock, so a case
 // that plays the child has to say so the way the real one does — through the
 // environment the worker sets on the spawn.
-function asDelegated<T>(parent: number, fn: () => T): T {
+function asDelegated<T>(token: string, fn: () => T): T {
   const prev = process.env.JOBRADAR_GPU_DELEGATED;
-  process.env.JOBRADAR_GPU_DELEGATED = String(parent);
+  process.env.JOBRADAR_GPU_DELEGATED = token;
   try { return fn(); } finally {
     if (prev === undefined) delete process.env.JOBRADAR_GPU_DELEGATED;
     else process.env.JOBRADAR_GPU_DELEGATED = prev;
@@ -194,7 +197,7 @@ test("the process doing the work claims the lock by beating, and is the only one
     const write = () => writeFileSync(path, JSON.stringify({
       holder: "worker/lane",
       pid: GONE, // the worker was killed
-      since: new Date(old).toISOString(),
+      since: SINCE,
       beat: old,
     }), "utf8");
 
@@ -203,7 +206,7 @@ test("the process doing the work claims the lock by beating, and is the only one
     assert.equal(gpuHolder(), null, "a beat from an unrelated process must not count");
 
     write();
-    asDelegated(GONE, () => {
+    asDelegated(`${GONE}:${SINCE}`, () => {
       beatGpu();
       assert.equal(gpuHolder()?.child, process.pid, "the beat says who is working");
       assert.equal(acquireGpu("worker/lane-2"), false, "so the card is protected");
@@ -211,8 +214,7 @@ test("the process doing the work claims the lock by beating, and is the only one
       // because the next beat asserts it again. A one-shot claim could be
       // erased for good, and was — measured, by a single stale parent beat.
       writeFileSync(path, JSON.stringify({
-        holder: "worker/lane", pid: GONE,
-        since: new Date().toISOString(), beat: Date.now(),
+        holder: "worker/lane", pid: GONE, since: SINCE, beat: Date.now(),
       }), "utf8");
       assert.equal(gpuHolder(), null, "claim gone");
       beatGpu();
@@ -244,10 +246,27 @@ test("a delegated process attaches only to the lock its own parent holds", () =>
       since: new Date().toISOString(), beat: Date.now(),
     }), "utf8");
 
-    asDelegated(GONE, () => { // our parent was GONE, and it is not worker2
+    asDelegated(`${GONE}:${SINCE}`, () => { // our parent was GONE, and it is not worker2
       assert.notEqual(gpuBusyMessage(), null, "a stranger's lock is not ours to pass");
       beatGpu();
       assert.equal(gpuHolder()?.child, undefined, "and not ours to sign");
+    });
+
+    // AND NOT EVEN WHEN THE NUMBER MATCHES. The OS hands pids back out, and
+    // the scenario this guard exists for — worker killed, worker2 started — is
+    // exactly when one gets recycled. Naming the parent by pid alone let an
+    // orphan sign a lock it had never seen: measured, with a live holder and a
+    // different birth stamp, the check passed. The stamp is in the token now,
+    // so the same number is no longer the same lock.
+    writeFileSync(path, JSON.stringify({
+      holder: "worker2/lane", pid: worker2,
+      since: "2026-08-24T18:00:00.000Z", // worker2 took it, our parent did not
+      beat: Date.now(),
+    }), "utf8");
+    asDelegated(`${worker2}:${SINCE}`, () => {
+      assert.notEqual(gpuBusyMessage(), null, "same pid, different lock, still a stranger");
+      beatGpu();
+      assert.equal(gpuHolder()?.child, undefined);
     });
   }));
 });

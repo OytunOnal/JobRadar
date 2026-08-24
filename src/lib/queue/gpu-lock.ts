@@ -86,29 +86,43 @@ function writeLock(info: LockInfo): boolean {
   }
 }
 
-// WHO delegated, not merely that someone did.
+// WHO delegated, and WHICH lock.
 //
 // The worker sets this on the environment of the script it spawns, and every
-// descendant inherits it. It used to say "1", which is an assertion without a
-// subject: any delegated process would attach itself to whatever lock happened
-// to be on disk. Measured — a process that had never been spawned by the
-// holder wrote its own pid onto a stranger's lock, and since the claim is
-// re-asserted on every beat, the rightful holder could not clear it and could
-// not release its own lock while it stood.
+// descendant inherits it. It used to say "1", which is an assertion with no
+// subject: any delegated process attached itself to whatever lock happened to
+// be on disk. Measured — a process the holder had never spawned wrote its own
+// pid onto a stranger's lock, and since the claim is re-asserted on every
+// beat, forging it once was forging it for good.
 //
-// Naming the parent turns the claim into something checkable: I may attach to
-// THIS lock, because the process that spawned me is the one holding it. A
-// stale "1" from an older build parses to a pid that matches no holder, so it
-// fails the check and the run takes its own lock — the safe direction.
-function delegatedTo(): number | null {
-  const n = Number(process.env.JOBRADAR_GPU_DELEGATED);
-  return Number.isInteger(n) && n > 1 ? n : null;
+// Naming the parent fixed that but left the identity resting on a number the
+// OS hands back out. Worker1 is killed while tsx boots, worker2 starts, and if
+// it is given the same pid then the orphan's token matches a lock it has never
+// seen. Measured with a live holder and a different `since`: the check passed.
+// (Not a frequent event — sixty sequential spawns here reused nothing — but
+// the check should not depend on how the OS feels about recycling numbers.)
+//
+// So the token carries the lock's own birth stamp as well. `since` is written
+// once when the lock is first taken and carried across every phase change, so
+// it identifies THE LOCK rather than the moment; two different workers cannot
+// produce the same pair. A legacy "1" matches no token at all, fails the
+// check, and the run takes its own lock — the safe direction. This also stops
+// the identity being a number that has to be reserved: a real pid 1, which any
+// container entrypoint gets, used to be rejected as if it were the old flag.
+function tokenFor(info: LockInfo): string {
+  return `${info.pid}:${info.since}`;
+}
+
+// The token to hand to a child, or null when we hold nothing to delegate.
+export function gpuToken(): string | null {
+  const info = gpuHolder();
+  return info ? tokenFor(info) : null;
 }
 
 // Is this lock the one my parent took on my behalf?
 export function delegatedUnder(info: LockInfo | null): boolean {
-  const parent = delegatedTo();
-  return parent !== null && info !== null && info.pid === parent;
+  const token = process.env.JOBRADAR_GPU_DELEGATED;
+  return !!token && info !== null && token === tokenFor(info);
 }
 
 // Is the process that wrote this lock still running?
@@ -212,24 +226,20 @@ export function acquireGpu(holder: string): boolean {
 // the field was gone. Re-asserting it here makes it self-healing — whoever is
 // doing the work says so twenty seconds later, and the twenty seconds after
 // that.
-export function beatGpu(): void {
+// Returns whether the beat landed. False means we are no longer covered —
+// either the write failed, or the lock is not ours any more because it went
+// stale and somebody else legitimately took it. Both are silent disasters if
+// nobody says them: we go on holding 17.7 GB on a card another process now
+// believes it owns. The module has no logger of its own, so it reports and
+// lets the caller — which has one, and a log file — decide how loudly.
+export function beatGpu(): boolean {
   const info = read();
-  if (!info) return;
-  // A delegated process is the work — but only on the lock its own parent
-  // holds. Anything else is someone else's claim to forge.
+  if (!info) return false;
   if (delegatedUnder(info)) info.child = process.pid;
-  else if (info.pid !== process.pid) return;
+  else if (info.pid !== process.pid) return false;
   info.beat = Date.now();
-  if (!writeLock(info) && !warnedBeat) {
-    warnedBeat = true;
-    // A beat that cannot write is the failure this file is least able to
-    // survive quietly: the lock goes stale on schedule and another process
-    // takes a card with 17.7 GB resident on it. Say it once — repeating every
-    // 20 seconds for four hours would bury the run's real output.
-    console.error("GPU kilidi yazılamıyor — kilit bayatlayacak ve kart devralınabilir.");
-  }
+  return writeLock(info);
 }
-let warnedBeat = false;
 
 export function releaseGpu(): void {
   const info = read();

@@ -209,6 +209,18 @@ export async function backfill(
   // And if we cannot take one, we do not run. Believing you hold the card is
   // worse than knowing you do not.
   let heartbeat: NodeJS.Timeout | undefined;
+  // A beat that stops landing means we are no longer covered — the write is
+  // failing, or the lock went stale and someone else took it. Either way this
+  // run is loading a model onto a card it no longer holds. Once per episode,
+  // re-armed on recovery, and through log() so it reaches <script>.log rather
+  // than a terminal nobody is reading four hours later.
+  let lostBeat = false;
+  const beat = (): void => {
+    if (beatGpu()) { lostBeat = false; return; }
+    if (lostBeat) return;
+    lostBeat = true;
+    log("UYARI: GPU kilidi artık bu koşuya ait değil ya da yazılamıyor — kart devralınabilir.");
+  };
   if (opts.gpu) {
     const busy = gpuBusyMessage();
     if (busy) {
@@ -218,11 +230,15 @@ export async function backfill(
     }
     const under = delegatedUnder(gpuHolder());
     if (process.env.JOBRADAR_GPU_DELEGATED && !under) {
-      log("Üst sürecin GPU kilidi yok ya da başkasına ait — kilidi bu koşu alıyor.");
+      // Not "or belongs to someone else": gpuBusyMessage() above has already
+      // turned us away from any live stranger's lock, so reaching here means
+      // the parent's own lock is missing or stale. Saying both would misdirect
+      // the next person reading this log for exactly this bug.
+      log("Üst sürecin GPU kilidi yok ya da bayatlamış — kilidi bu koşu alıyor.");
     }
     if (under) {
       // The beat is also the claim, so the first one says who we are.
-      beatGpu();
+      beat();
       process.on("exit", releaseGpuChild);
     } else if (acquireGpu(opts.gpu)) {
       process.on("exit", releaseGpu);
@@ -240,7 +256,7 @@ export async function backfill(
       error = "GPU kilidi yazılamadı";
       return finish();
     }
-    heartbeat = setInterval(beatGpu, 20_000);
+    heartbeat = setInterval(beat, 20_000);
     heartbeat.unref();
   }
 

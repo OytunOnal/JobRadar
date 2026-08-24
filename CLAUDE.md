@@ -13,6 +13,6 @@ See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` at the root when it exists, with architectural
-decisions currently collected in `docs/ARCHITECTURE.md`.
+Single-context: the glossary is `CONTEXT.md` at the root, with architectural
+decisions collected in `docs/ARCHITECTURE.md`.
 See `docs/agents/domain.md`.

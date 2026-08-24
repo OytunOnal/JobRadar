@@ -71,3 +71,40 @@ test("releasing someone else's lock is a no-op", () => {
     assert.equal(gpuHolder()?.holder, "other");
   });
 });
+
+// A dead holder is not a holder.
+//
+// The staleness rule alone is right for a process that HANGS and wrong for one
+// that is gone: restarting the worker kills the old process, leaving a lock a
+// few seconds old, and the replacement then refuses to start for five minutes.
+// Seen on a real restart — "GPU busy: worker/lane (pid 12940, 43 min)" while
+// pid 12940 no longer existed.
+test("a lock whose process is gone is takeable immediately, however fresh", () => {
+  withLock((path) => {
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane",
+      pid: 0x7ffffff, // no such process
+      since: new Date().toISOString(),
+      beat: Date.now(), // beating as of this instant
+    }), "utf8");
+
+    assert.equal(gpuHolder(), null, "a fresh heartbeat from a dead pid holds nothing");
+    assert.equal(gpuBusyMessage(), null);
+    assert.equal(acquireGpu("worker/lane"), true, "the replacement takes it at once");
+  });
+});
+
+test("a live holder still blocks, even when it is someone else", () => {
+  withLock((path) => {
+    // This process is alive by construction, and it is not us only because we
+    // claim a different pid — the point is that liveness alone must not hand
+    // the lock over.
+    writeFileSync(path, JSON.stringify({
+      holder: "manual/fit",
+      pid: process.pid,
+      since: new Date().toISOString(),
+      beat: Date.now(),
+    }), "utf8");
+    assert.notEqual(gpuHolder(), null, "a living holder is a holder");
+  });
+});

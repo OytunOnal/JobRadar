@@ -37,9 +37,38 @@ function read(): LockInfo | null {
   }
 }
 
+// Is the process that wrote this lock still running?
+//
+// Signal 0 sends nothing; it only asks whether the pid can be signalled.
+// ESRCH means no such process. EPERM means it exists but belongs to someone
+// else — alive, and not ours to take. Any other answer is treated as alive,
+// because refusing to work is a smaller failure than two processes swapping
+// 17.7 GB of weights against each other.
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
 export function gpuHolder(): LockInfo | null {
   const info = read();
   if (!info) return null;
+  // A dead holder is not a holder, whatever its heartbeat says.
+  //
+  // The time rule alone is right for a process that HANGS — it stops beating
+  // but might still be mid-judgment — and wrong for one that is simply gone.
+  // Restarting the worker hits the second case every time: the old process is
+  // killed, its lock is seconds old, and the replacement refuses to start for
+  // the next five minutes. Measured on a real restart: "GPU busy: worker/lane
+  // (pid 12940, 43 min)" while pid 12940 no longer existed.
+  //
+  // Pid reuse could in principle make this wrong in the other direction, but
+  // only in the window where the OS has recycled the number AND the lock has
+  // not gone stale — and the consequence is one taken lock, not corruption.
+  if (!alive(info.pid)) return null;
   return Date.now() - info.beat > STALE_MS ? null : info;
 }
 

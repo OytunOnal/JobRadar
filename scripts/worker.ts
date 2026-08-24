@@ -5,6 +5,7 @@ import { prisma } from "../src/lib/db";
 import { staleVectorWhere } from "../src/lib/embed";
 import { FIT_PROMPT_VERSION, judgeQueueWhere } from "../src/lib/fit";
 import { andWhere, archiveWhere } from "../src/lib/pool";
+import { clearRun, readRun, type RunResult } from "../src/lib/backfill";
 import { VISA_MARKED } from "../src/lib/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../src/lib/chunks";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
@@ -79,7 +80,15 @@ const TSX = fileURLToPath(import.meta.resolve("tsx/cli"));
 // Run one of the existing scripts as a child. They stay independently
 // runnable — the worker composes the tools rather than reimplementing them,
 // so there is one embed-fill, not two that can drift apart.
-function run(script: string, extra: string[] = []): Promise<number> {
+// What a child reports about itself. The exit code alone could not tell
+// "finished the work" from "gave up immediately" — both were 0 — which is why
+// this file used to re-query the database to guess.
+interface ChildOutcome {
+  code: number;
+  result: RunResult | null;
+}
+
+function spawnChild(script: string, extra: string[] = []): Promise<number> {
   return new Promise((resolve) => {
     const child = spawn(
       process.execPath,
@@ -101,6 +110,58 @@ function run(script: string, extra: string[] = []): Promise<number> {
       resolve(1);
     });
   });
+}
+
+// Spawn a backfill and come back with what it says it did.
+//
+// The receipt is cleared FIRST, so what we read afterwards can only be this
+// run's. A child that never started — 0xC0000142, the memory-pressure case —
+// would otherwise leave the previous run's receipt in place and have it read
+// as today's answer.
+async function runChild(script: string, extra: string[] = []): Promise<ChildOutcome> {
+  const name = script.replace(/^scripts\//, "").replace(/\.ts$/, "");
+  clearRun(name);
+  const code = await spawnChild(script, extra);
+  return { code, result: readRun(name) };
+}
+
+// Turn a child's ending into the worker's next move.
+//
+// Six endings, not one integer. `drained` and `failstreak` used to be the same
+// exit code, and that is precisely what produced a 33-hour stall: the worker
+// read "there is nothing to do" as "I could not do it" and climbed the backoff
+// ladder over a lane that was simply finished.
+function readOutcome(out: ChildOutcome, label: string): { progressed: boolean; retryLater: boolean } {
+  if (!out.result) {
+    log(`  ${label}: makbuz yok, çıkış kodu ${out.code}${out.code === 3221225794 ? " (0xC0000142 — süreç başlayamadı, bellek dar)" : ""}`);
+    return { progressed: false, retryLater: true };
+  }
+  const r = out.result;
+  const tally = `${r.done} işlendi${r.failed ? `, ${r.failed} hata` : ""}`;
+  switch (r.stopped) {
+    case "drained":
+      log(`  ${label}: kuyruk boşaldı (${tally})`);
+      // Not a failure. There was nothing left to do, and the ladder must not
+      // treat that as an inability to work.
+      return { progressed: r.done > 0, retryLater: false };
+    case "budget":
+      log(`  ${label}: bütçe doldu (${tally})`);
+      return { progressed: r.done > 0, retryLater: false };
+    case "gpu-busy":
+      log(`  ${label}: GPU başkasında — bu turu atlıyorum`);
+      return { progressed: false, retryLater: true };
+    case "stalled":
+      // The runner only writes this when a queue could not consume itself.
+      // Never pass over it quietly: it means a predicate and a write disagree.
+      log(`  ${label}: KUYRUK İLERLEMEDİ (${tally}) — bir yüklem ile yazım ayrışmış olabilir`);
+      return { progressed: false, retryLater: true };
+    case "failstreak":
+      log(`  ${label}: üst üste hata (${tally}) — model cevap vermiyor olabilir`);
+      return { progressed: false, retryLater: true };
+    case "error":
+      log(`  ${label}: çöktü — ${r.error ?? "?"}`);
+      return { progressed: false, retryLater: true };
+  }
 }
 
 // The same rows the child will work on — used for the before/after progress
@@ -174,6 +235,7 @@ async function pass(): Promise<boolean> {
       : `${chunkLabel(lane.chunk)} (${lane.chunk.n.toLocaleString("tr")})`;
 
     const before = await prisma.job.count({ where: laneWhere(lane, now) });
+    let judged: { progressed: boolean; retryLater: boolean } | null = null;
 
     // ONE acquire for the whole lane. Releasing between embedding and judging
     // let a manual script slip into the gap and start swapping models against
@@ -185,31 +247,30 @@ async function pass(): Promise<boolean> {
       });
       if (stale > 0) {
         log(`${label} — ${stale.toLocaleString("tr")} vektör eksik/bayat, önce onlar`);
-        const code = await run("scripts/embed-fill.ts", ["--open", "--judge-target", ...childArgs]);
-        // A crashed embed pass must not be followed by judging on the stale
-        // vectors it failed to replace: that is a whole batch ordered by a
-        // queue we know is wrong, and nothing would say so.
-        if (code !== 0) {
-          log(`  embed:fill çıkış kodu ${code} — bu turda yargılamayı atlıyorum`);
-          return false;
-        }
+        const embed = readOutcome(await runChild("scripts/embed-fill.ts", ["--open", "--judge-target", ...childArgs]), "embed:fill");
+        // A failed embed pass must not be followed by judging on the stale
+        // vectors it did not replace: that is a whole batch ordered by a queue
+        // we know is wrong, and nothing would say so.
+        if (embed.retryLater) return false;
       }
 
       log(`${label} — ${BATCH} ilan yargılanıyor`);
-      const code = await run("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]);
-      if (code !== 0) log(`  fit:fill çıkış kodu ${code}${code === 3221225794 ? " (0xC0000142 — süreç başlayamadı, bellek dar)" : ""}`);
+      judged = readOutcome(await runChild("scripts/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]), "fit:fill");
     } finally { releaseGpu(); }
 
-    // Did anything actually happen? A child that exits without judging —
-    // because every row was skipped, or a predicate drifted apart from this
-    // count — would otherwise be respawned forever. Belt and braces on top of
-    // sharing judgeQueueWhere: this catches the NEXT such mismatch too.
+    // The receipt is the answer; this count is the CROSS-CHECK.
+    //
+    // They should agree, and when they do not it means the population the
+    // parent counted and the one the child walked have drifted apart — the
+    // exact fault that cost 33 hours before embed-fill could express a lane at
+    // all. Losing the check would leave that class of drift with no detector,
+    // so it stays; it just no longer has to carry the whole decision.
     const after = await prisma.job.count({ where: laneWhere(lane, now) });
-    if (after >= before) {
-      log(`  ilerleme yok (${after} hâlâ sırada) — bekleniyor`);
-      return false;
+    const drop = before - after;
+    if (judged && judged.progressed && drop <= 0) {
+      log(`  UYUŞMAZLIK: çocuk iş yaptığını bildirdi ama şeritte ${after} hâlâ duruyor (önce ${before}) — ebeveyn ile çocuğun popülasyonu ayrışmış olabilir`);
     }
-    return true;
+    return Boolean(judged?.progressed);
   }
 
   // Nothing live to do: spend the idle GPU on the archive's vectors. A
@@ -224,16 +285,12 @@ async function pass(): Promise<boolean> {
     try {
       // --archive, or embed-fill walks the live pool first and this message
       // describes work it is not doing.
-      const code = await run("scripts/embed-fill.ts", ["--archive", "--budget", "2000"]);
-      if (code !== 0) {
-        // Returning true here reset failStreak and skipped the whole backoff
-        // ladder, so a child that could not start was respawned immediately —
-        // exactly the tight loop the ladder exists to prevent.
-        log(`  embed:fill (arşiv) çıkış kodu ${code}`);
-        return false;
-      }
+      const out = readOutcome(await runChild("scripts/embed-fill.ts", ["--archive", "--budget", "2000"]), "embed:fill (arşiv)");
+      // Reporting progress here when the child failed reset failStreak and
+      // skipped the whole backoff ladder, so a child that could not start was
+      // respawned immediately — exactly the tight loop the ladder prevents.
+      return out.progressed;
     } finally { releaseGpu(); }
-    return true;
   }
 
   log(`kuyruk boş (prompt ${FIT_PROMPT_VERSION}) — ${IDLE_MS / 1000} sn bekleniyor`);

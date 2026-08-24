@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { backfill } from "../src/lib/backfill";
+import { backfill, clearRun, readRun } from "../src/lib/backfill";
 import { tuneAfterBatch } from "../scripts/embed-fill";
 
 // Ten scripts carried a byte-identical log(). Three carried a byte-identical
@@ -183,6 +183,29 @@ test("the adaptive batch sizer can finally be called at all", async () => {
   assert.ok(lines.some((l: string) => l.includes("[tune]")), "a rate change retunes the batch");
 });
 
+// The channel candidate 5 rests on: clear, run, read.
+test("a receipt cleared before a run cannot be mistaken for that run's answer", async () => {
+  await backfill("t-chan", quiet, async (run) => { run.did(4); run.drained(); });
+  assert.equal(readRun("t-chan")?.done, 4);
+
+  // The 0xC0000142 case: the child never starts, so it never writes. Without
+  // clearing first, the parent would read the PREVIOUS run as today's answer.
+  clearRun("t-chan");
+  assert.equal(readRun("t-chan"), null, "no receipt means the child never reached finish()");
+});
+
+test("the endings a single exit code could not tell apart", async () => {
+  // Both of these used to be exit code 0, and reading "nothing to do" as
+  // "could not work" is what climbed the backoff ladder over a finished lane
+  // for 33 hours.
+  await backfill("t-end-a", quiet, async (run) => { run.drained(); });
+  await backfill("t-end-b", quiet, async (run) => {
+    while (run.round()) { run.failed(); run.failed(); run.failed(); }
+  });
+  assert.equal(readRun("t-end-a")?.stopped, "drained");
+  assert.equal(readRun("t-end-b")?.stopped, "failstreak");
+});
+
 test("nothing outside backfill.ts hand-writes the run scaffolding", async () => {
   const offenders: string[] = [];
   // board-sweep manages its own state file and network waits, migrate-layered
@@ -226,7 +249,7 @@ test("importing a backfill script does not start a backfill", () => {
 
 test.after(() => {
   rmSync(".run", { recursive: true, force: true });
-  for (const n of ["t-drained", "t-budget", "t-stall", "t-slow", "t-fail", "t-crash", "t-receipt", "t-flag", "t-positional", "t-perrow", "t-skips"]) {
+  for (const n of ["t-drained", "t-budget", "t-stall", "t-slow", "t-fail", "t-crash", "t-receipt", "t-flag", "t-positional", "t-perrow", "t-skips", "t-chan", "t-end-a", "t-end-b"]) {
     rmSync(`${n}.log`, { force: true });
   }
 });

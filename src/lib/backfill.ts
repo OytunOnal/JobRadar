@@ -33,7 +33,7 @@
 // why `round()` exists — it is the worker's before/after progress check,
 // brought inside the process.
 
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "./db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "./gpu-lock";
@@ -87,6 +87,28 @@ export interface Run {
   readonly done: number;
 }
 
+function receiptPath(script: string): string {
+  return join(".run", `${script}.json`);
+}
+
+// Clear a script's receipt before spawning it, so what is read afterwards can
+// only be THIS run's. Without it, a child that never reached its finish — the
+// 0xC0000142 case, where the process could not start at all — leaves the
+// previous run's receipt in place and the parent reads it as today's answer.
+export function clearRun(script: string): void {
+  try { rmSync(receiptPath(script)); } catch { /* nothing to clear */ }
+}
+
+// What a child actually did. `null` means it never got to finish(), which is
+// itself the answer: the run died somewhere the runner could not report from.
+export function readRun(script: string): RunResult | null {
+  try {
+    return JSON.parse(readFileSync(receiptPath(script), "utf8")) as RunResult;
+  } catch {
+    return null;
+  }
+}
+
 function parseBound(argv: readonly string[], fallback: number): number {
   for (const flag of ["--budget", "--limit"]) {
     const i = argv.indexOf(flag);
@@ -137,7 +159,7 @@ export async function backfill(
     // composer resorts to tailing the log file for a Turkish word.
     try {
       mkdirSync(".run", { recursive: true });
-      writeFileSync(join(".run", `${script}.json`), JSON.stringify(result, null, 2));
+      writeFileSync(receiptPath(script), JSON.stringify(result, null, 2));
     } catch {
       // A run that cannot write its receipt still did the work. Never let the
       // bookkeeping fail the job.

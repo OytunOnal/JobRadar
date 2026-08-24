@@ -1,18 +1,31 @@
-# Waits for the embed backfill to COMPLETE (a fresh "Bitti" line stamped after
-# this script started), then restores a default Ollama and launches the 27B
-# fit worker. ASCII-only on purpose: this file travels through shells.
+# Waits for the embed backfill to finish, then restores a default Ollama and
+# launches the 27B fit worker. ASCII-only on purpose: this file travels
+# through shells.
+#
+# It reads .run/embed-fill.json, the receipt every backfill writes on its way
+# out. It used to tail embed-fill.log for the word "Bitti" and compare an ISO
+# timestamp as a STRING, which bound this file to two undeclared contracts:
+# the exact fixed-width stamp format, and one Turkish word in a log line.
+# Translate that footer or add milliseconds to the stamp and this script waits
+# forever. The receipt has neither problem, and it also distinguishes the two
+# endings a log line could not: "drained" is finished, "failstreak" is not.
 Set-Location "C:\Users\hoyti\OneDrive\Desktop\Projects\JobRadar"
-$startStamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss")
-Write-Output "chain armed at $startStamp (UTC)"
+$receipt = ".run\embed-fill.json"
+Remove-Item $receipt -ErrorAction SilentlyContinue
+Write-Output "chain armed - waiting for a fresh $receipt"
+
 while ($true) {
-  Start-Sleep -Seconds 300
-  $line = Get-Content "embed-fill.log" -Tail 1 -ErrorAction SilentlyContinue
-  if ($null -ne $line -and $line -match "Bitti") {
-    $m = [regex]::Match($line, "^\[([0-9T:\-]+)\]")
-    if ($m.Success -and $m.Groups[1].Value -gt $startStamp) { break }
+  Start-Sleep -Seconds 60
+  if (-not (Test-Path $receipt)) { continue }
+  $run = Get-Content $receipt -Raw | ConvertFrom-Json
+  if ($run.stopped -eq "drained" -or $run.stopped -eq "budget") {
+    Write-Output "embed complete: $($run.done) embedded, stopped=$($run.stopped)"
+    break
   }
+  Write-Output "embed stopped early (stopped=$($run.stopped), done=$($run.done)) - not chaining"
+  exit 1
 }
-Write-Output "embed complete: $line"
+
 Write-Output "restarting ollama with default env, then launching 27B fit worker"
 Stop-Process -Name "ollama" -Force -Confirm:$false -ErrorAction SilentlyContinue
 Stop-Process -Name "llama-server" -Force -Confirm:$false -ErrorAction SilentlyContinue

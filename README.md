@@ -3,11 +3,11 @@
 [![CI](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml)
 
 A local-first job-discovery engine and application tracker. JobRadar discovers
-**~50,000 companies' official ATS boards**, pulls their listings first-hand
-(**500k+ postings** in the current pool), scores each one against **your** CV
-with a locally-run LLM, and ranks the fresh, real matches on a dashboard — so
-you stop tab-hopping across job boards and stop wading through SEO reposts,
-ghost postings, and years-old evergreen ads.
+**~53,000 live company ATS boards**, pulls their listings first-hand
+(**526k postings** in the current pool), scores each one against **your** CV
+with a locally-run LLM, and ranks the real matches on a dashboard — so you
+stop tab-hopping across job boards, and so an SEO repost, a ghost posting or a
+years-old evergreen ad arrives labelled as one instead of wasting an evening.
 
 It runs on your machine, uses your own API keys where keys are needed at all
 (most sources are keyless), and keeps your CV and personal data local — never
@@ -22,28 +22,29 @@ committed, never uploaded.
 ## What it does
 
 - **Discovers companies at scale.** A platform-agnostic discovery layer speaks
-  **27 ATS platforms** — from startup staples (Greenhouse, Lever US+EU, Ashby,
+  **28 ATS platforms** — from startup staples (Greenhouse, Lever US+EU, Ashby,
   Workable, Recruitee, Personio) through enterprise systems (Workday,
   SuccessFactors, Oracle Cloud Recruiting, Eightfold, Cornerstone, Phenom,
-  Radancy, Avature, BeeSite, Jibe/iCIMS…). Boards are found four ways —
+  Radancy, Avature, BeeSite, Jibe/iCIMS…), 22 of them in the discovery registry
+  that finds and probe-validates boards at scale. Boards are found four ways —
   harvesting ATS identities out of aggregator job URLs, bulk Common
   Crawl/Wayback CDX sweeps, public company datasets, and name-guess probing —
   then **probe-validated live** against each platform's API. Every platform
   entry documents its live-verified quirks (case-sensitive APIs, regional
   namespaces, POST-only probes, redirect traps, locale-gated results).
-- **Aggregates ~70 additional sources**: national employment agencies
+- **Aggregates 103 non-ATS sources**: national employment agencies
   (Germany, Sweden, Denmark, Switzerland, Flanders, EURES), tech boards with
   structured visa flags (GermanTechJobs, SwissDevJobs), visa-focused feeds
   (Hunt UK Visa Sponsors), country boards (Poland, Finland, Malta, Ireland,
   Portugal, Spain, France), remote boards, HN who-is-hiring, and a
-  65-feed curated RSS layer driven by one generic parser.
+  66-feed curated RSS layer driven by one generic parser.
 - **Stores everything, hides judgment.** Gate-rejected postings aren't dropped
   — they're stored with a `disqualified` flag. A scorer fix is a local
   re-score, never a re-crawl; "what did the filter wrongly kill" is a SQL
   query, not archaeology. Score and LLM-verdict history are **append-only and
   version-stamped**, so every ranking change is measurable after the fact.
 - **Knows who sponsors visas.** The complete public sponsor registers of
-  NL (IND), UK (Home Office), DK (SIRI) and IE (DETE) — ~146k companies — are
+  NL (IND), UK (Home Office), DK (SIRI) and IE (DETE) — 146,746 companies — are
   loaded and name-matched, so sponsor-registered employers rank first and wear
   a badge backed by government data, not vibes.
 - **Scores in layers, each measured:**
@@ -59,6 +60,11 @@ committed, never uploaded.
   ranking (own ATS > curated board > mass aggregator), dual-signal freshness
   (claimed date × "do we still see it listed"), closure-banner liveness probes
   in 10+ languages, semantic dedup of reposts, and LLM ghost-risk flagging.
+  What it does **not** do is hide the result: a posting whose date is old or
+  whose text reads like a ghost listing carries a *may not be fresh* or *ghost
+  risk* badge under its score and stays in the list. A hidden posting teaches
+  you nothing and a filter that is wrong is invisible; a labelled one lets you
+  decide in a second and shows you when the label is wrong.
 - **Tracks your pipeline** on separate pages: a discovery-only radar with
   one-click dismiss-with-reason (the reasons feed back into scorer tuning), an
   applications page with follow-up nudges and ghosted detection, and a
@@ -79,11 +85,15 @@ company-name guesses ───▶ probe ──┘                    ~70 aggrega
                                                                                 ▼
                                                      27B LLM fit judge (local Ollama)
                                                                                 ▼
-                                                        dashboard (fresh, ranked view)
+                                                dashboard (ranked, risks labelled)
 ```
 
-Job descriptions are treated as untrusted input (prompt-injection guarded) and
-trailing EEO/benefits boilerplate is trimmed before the model sees them. A
+Job descriptions are treated as untrusted input (prompt-injection guarded, and
+verified against a live injection found in the pool). They are also **parsed
+into sections** — requirements, responsibilities, benefits, EEO boilerplate —
+so each consumer gets the parts it needs within its own budget: the fit judge
+sees requirements whole, the embedding sees what the job *is* rather than the
+company's history. A
 cloud multi-provider chain (Anthropic → Groq → Gemini …) exists behind the
 same interface and can replace the local model with one env var.
 
@@ -116,7 +126,30 @@ npm run discovery:validate -- 5000
 # 6. Run
 npm run ingest    # fetch + score into the DB (also discovers new boards)
 npm run dev       # dashboard at http://localhost:3000
+
+# 7. (optional) Keep the pool judged in the background:
+npm run worker    # embeds and judges continuously; Ctrl-C whenever
 ```
+
+### The worker
+
+`npm run ingest` fills the pool in minutes; judging it takes far longer, because
+a 27B model reads about one posting a minute. So the worker runs between
+ingests and works the queue down.
+
+It processes the pool in **bands** (score ≥ 80 first, then ≥ 70, …) and inside
+a band in **chunks of ~1,000**: embed a chunk, judge it, embed the next. A band
+is not finished before the next one starts on its best postings, so the first
+hour produces the postings you would actually have read first rather than a
+complete pass over a band you may never reach the end of. Visa-marked postings
+form a priority lane above all of it.
+
+One model fits in a consumer GPU at a time — the judge is 17.7 GB, the embedder
+0.6 GB — so a **file lock with a heartbeat** hands the GPU to one phase at a
+time instead of letting the two swap models every few seconds. If you start an
+ingest or a manual script while the worker holds the GPU, it will say so and
+wait rather than thrash. The worker is safe to kill at any point: every lane
+resumes from what the database already has.
 
 ### Upgrading
 
@@ -160,7 +193,8 @@ Everything after that is `npm run db:deploy`.
 | `npm run desc:fill` | Description backfill for platforms whose list APIs carry no posting body. |
 | `npm run sponsors` | Refresh the public visa-sponsor registers (NL/UK/DK/IE). |
 | `npm run doctor` | Health-check every source connector. |
-| `npm test` | ~235 unit tests grounded in real corpus data. |
+| `npm run worker` | The continuous background worker: holds the GPU, runs the embed → judge lanes in chunks, visa-marked postings first. |
+| `npm test` | 300 unit tests grounded in real corpus data. |
 
 ## Configuring for your search
 
@@ -182,7 +216,7 @@ profiles. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#persona-independence).
 Next.js (App Router) · Prisma + SQLite (layered schema: thin hot rows +
 append-only history tables — main list query measured at 4 ms over 525k rows) ·
 TypeScript · local LLM via Ollama (27B judge, 0.6B embeddings) with a
-multi-provider cloud fallback · Common Crawl / Wayback CDX · ~235 unit tests.
+multi-provider cloud fallback · Common Crawl / Wayback CDX · 300 unit tests.
 
 ## Roadmap
 

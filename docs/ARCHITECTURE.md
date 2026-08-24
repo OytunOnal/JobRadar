@@ -135,6 +135,110 @@ user-specific role negatives ride the profile and still respect the
 specific-track override (a "Unity iOS Developer" survives an "ios developer"
 exclusion).
 
+### ADR-7 · A posting is sections, not a prefix
+
+**Before:** every consumer took the first N characters of the description.
+That is a bet that postings put the important part first, and they do not: a
+posting that opens with the company's founding story produced an embedding
+describing the *company*, so it sat near every other posting that did the same
+regardless of the role. The LLM's window was spent the same way.
+
+**Two measurements forced the change.** First, the stored text was not text:
+the old converter stripped tags *before* decoding entities, and Greenhouse —
+our largest source — returns its content HTML-encoded, so the tag regex matched
+nothing and the decode step then *manifested* markup into the stored text.
+**47–58% of a stored Greenhouse description was `<span style=…>`.** Repairing
+the pool removed **218.6 MB** of markup. Second, once the text was readable it
+could be parsed: headings split a posting into requirements / responsibilities
+/ benefits / EEO boilerplate, and **98.3% of postings expose enough structure
+to split** (the rest fall back to a body classifier).
+
+**After:** `postingView(text, consumer)` gives each consumer its own view under
+its own budget, with per-kind quotas and a second top-up pass. The fit judge
+gets requirements — **99.6% of requirement sections arrive whole** — and the
+embedding gets what the job *is*. Nothing is deleted from storage; a view is a
+projection, and a new consumer is a new quota rather than a new truncation.
+
+**A caveat this bought the hard way:** each converter change ships a
+`TEXT_VERSION` bump, and rows written by a broken converter cannot always be
+repaired offline. The `t2` converter deleted everything between a decoded
+`&lt;` and the next `&gt;` — "must be &lt; 100ms and uptime &gt; 99%" became
+"must be 99%" — so those rows are stale *by version* and must be re-fetched.
+The words are gone; only the source still has them.
+
+### ADR-8 · Staleness is cache invalidation, not version arithmetic
+
+**The bug:** "is this vector current?" was answered by comparing the vector's
+stamp against the code's current `TEXT_VERSION`. With `TEXT_VERSION` at `t3`
+and no row yet *carrying* `t3`, the predicate was unsatisfiable: **445,358
+vectors that already existed were permanently stale**, re-embedding wrote a
+stamp that still did not match, and the worker's idle lane — which continues
+without sleeping when it finds work — re-embedded the same first 2,000 rows
+forever. The GPU ran all night and the queue did not move.
+
+Two stamp designs were tried and **both were wrong in the same way**. Stamping
+the code's version lied (a vector built from an old description claimed to be
+current); stamping the row's own version and comparing it to the constant made
+the question unanswerable. The error was treating currency as *arithmetic over
+two rows' version strings*.
+
+**After:** it is cache invalidation, and the writer performs it. Everything
+that rewrites a description — ingest, `desc:fill`, `repair-descriptions` —
+clears the vector's stamp in the same transaction. Staleness became a
+single-row test, and the stamp records only *which projection* built the
+vector, which is the one thing no other row can know.
+
+The generalisation: **a version comparison is only meaningful when both sides
+are guaranteed to exist.** Cross-row version arithmetic quietly assumes a
+backfill has already run. Write-time invalidation assumes nothing.
+
+### ADR-9 · Disclose the risk; do not hide the posting
+
+The radar had an age filter — *fresh / recent / all* — defaulting to fresh.
+It was hiding **a third of the pool**: 53,905 postings visible, 78,715 in
+reality. Worse, the postings it hid were the ones the system knew the most
+about, since ghost-risk and staleness are *derived* signals with real error
+bars, and a filter converts an uncertain signal into a certain absence.
+
+**After:** the filter is gone. A posting whose claimed date is old carries a
+*may not be fresh* badge under its score; one the judge flagged carries *ghost
+risk*. Both stay in the ranking. This costs a little screen space and buys two
+things: the user decides in a second with the evidence in front of them, and a
+wrong signal becomes *visible* — a mislabelled posting can be seen and fixed,
+where a wrongly hidden one is invisible by construction. The same reasoning
+already governed store-all (ADR-1); this applies it to the view layer.
+
+The version-stamp view got the same treatment rather than a re-judge: a score
+from an older prompt renders **faded** instead of being hidden or silently
+presented as current.
+
+### ADR-10 · One GPU, one holder, chunked bands
+
+Judging is the bottleneck — a 27B model reads ~1 posting/minute — and the
+constraint that shapes everything is that **the judge (17.7 GB) and the
+embedder (0.6 GB) do not fit in a 6 GB card together.** Alternating them per
+job meant the runtime spent most of its wall clock swapping weights, and the
+memory pressure produced outright spawn failures (`0xC0000142`) once the judge
+spilled into system RAM.
+
+**Design:** a file lock with a heartbeat, held for a whole *phase* rather than
+a job, plus a delegation flag so a child process inherits its parent's hold
+instead of deadlocking against it. Any other process — a manual script, an
+ingest — reports who holds the GPU and waits.
+
+**Queue shape:** bands by score (≥80, then ≥70, …) worked in **chunks of
+~1,000** rather than band-at-a-time, so the first hour produces the postings a
+user would actually read first instead of a complete pass over a band whose end
+they may never reach. A chunk boundary never splits a score value — otherwise
+which side of the boundary a posting lands on depends on row order, which is
+not a property of the posting. Visa-marked postings form a strict lane above
+all of it, and they bypass the freshness filter: a sponsor-registered employer
+is worth judging even on an older posting, because the *company* fact outlives
+the vacancy.
+
+Everything is resumable from what the database already holds, because the
+alternative — a queue in memory — loses an hour of GPU to any interruption.
+
 ## Evolution note
 
 The system did not start with this architecture, deliberately: a single fat

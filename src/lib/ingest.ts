@@ -117,7 +117,7 @@ export const aggregators: Source[] = [
   warpjobs,       // LLM inference / ML-systems niche, visa flag
   aidevjobs,      // aidevboard.com AI jobs API
   wejob,          // francophone Switzerland JSON API
-  ...rssSources,  // 65 curated RSS/Atom job feeds (see rssfeeds.ts)
+  ...rssSources,  // 66 curated RSS/Atom job feeds (see rssfeeds.ts)
   adzuna,   // needs ADZUNA_APP_ID + ADZUNA_APP_KEY; skips itself otherwise
   jsearch,  // needs RAPIDAPI_KEY; skips itself otherwise
   // linkedin removed from the automatic set (user decision 2026-08-21): it

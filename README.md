@@ -107,7 +107,7 @@ npm run cv:import -- "path/to/Resume.pdf"   # .pdf, .txt, or .md
 npm run profile:generate   # CV -> tracks, seniority bands, languages, search queries
 
 # 4. Database (local SQLite)
-npx prisma db push
+npm run db:deploy          # and again after every `git pull` — see below
 
 # 5. (recommended) Fill the company pool from the web archives (~15 min):
 npm run discovery:crawl
@@ -117,6 +117,24 @@ npm run discovery:validate -- 5000
 npm run ingest    # fetch + score into the DB (also discovers new boards)
 npm run dev       # dashboard at http://localhost:3000
 ```
+
+### Upgrading
+
+```bash
+git pull
+npm install
+npm run db:deploy   # apply any schema changes to your existing database
+```
+
+Your database is the part of this you cannot get back. It holds every
+judgment the model has made — each one a minute of GPU that re-running
+nothing will reproduce — plus your application history and dismissals. So
+schema changes ship as **migrations**, which are ordered, recorded, and
+applied without touching your rows.
+
+If you have used this project before migrations existed, run
+`npx prisma migrate resolve --applied 0_init` once to tell it your database
+already has the current shape. Everything after that is `npm run db:deploy`.
 
 ## Commands
 

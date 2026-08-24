@@ -4,7 +4,6 @@ import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-
 import { extractFacts, EXTRACTOR_VERSION } from "../src/lib/facts";
 import { applyFactsToJob } from "../src/lib/visa-write";
 import { andWhere, openWhere } from "../src/lib/pool";
-import { judgeTargetWhere } from "../src/lib/fit";
 
 // Refuse rather than compete: two processes alternating between the 27B and
 // the embedder spend their time reloading 17.7 GB of weights, not working.
@@ -41,14 +40,23 @@ function log(line: string): void {
   appendFileSync("facts-fill.log", stamped + "\n");
 }
 
-// Same population and the same policy as the judging queue — facts exist to
-// feed it — but a different work axis: facts, not verdicts. Written out by hand
-// here until pool.ts existed, which is how it came to carry its own copy of the
-// score gate and of the four eligibility columns.
-const NOW = new Date();
+// The open pool above the score gate. Written out by hand here until pool.ts
+// existed, which is how it came to carry its own copy of the four eligibility
+// columns.
+//
+// NOT judgeTargetWhere, though facts exist mainly to feed the judging queue:
+// applyFactsToJob also writes visa evidence, and the visa tier is a badge the
+// radar shows on postings the judge will never reach. Narrowing this to judge
+// targets measured 71,724 -> 26,134, and the 45,590 difference is postings that
+// would silently stop getting their sponsorship evidence.
+//
+// The 40 is therefore still written twice, here and in judgeTargetWhere. That
+// is deliberate: they are two different questions that happen to share a
+// number, and merging them is what would couple this queue to the judge's
+// policy.
 const where = andWhere(
   openWhere(),
-  judgeTargetWhere(true, NOW),
+  { score: { gte: 40 } },
   // Queue = "no facts yet, or facts from an older extractor". Version-aware
   // like the keyword rescore: improving the extractor re-runs only what it
   // must, and the improvement reaches existing rows without a manual sweep.

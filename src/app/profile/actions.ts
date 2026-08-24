@@ -7,7 +7,7 @@ import { patchSettings, loadSettings } from "@/lib/settings";
 import { profile } from "@/lib/profile";
 import { SCORER_VERSION } from "@/lib/score";
 import { EXTRACTOR_VERSION } from "@/lib/facts";
-import { FIT_PROMPT_VERSION, judgeQueueWhere, judgeTargetWhere } from "@/lib/fit";
+import { FIT_PROMPT_VERSION, judgeQueueWhere } from "@/lib/fit";
 import { staleVectorWhere } from "@/lib/embed";
 import { deriveVisaTier } from "@/lib/visa";
 import { andWhere, liveWhere, openWhere } from "@/lib/pool";
@@ -192,9 +192,7 @@ export async function impactCounts(): Promise<ImpactCounts> {
   // other row with its own hand-written filter. Each count below is now the
   // queue it reports on, composed from the same functions that queue feeds on.
   //
-  // Two of them changed answer as a result. staleFacts was missing the
-  // freshness and target-country policy that facts:fill applies, so it reported
-  // work that queue would never do. staleJudgments asked a different COLUMN
+  // One of them changed answer as a result: staleJudgments asked a different COLUMN
   // than the pipeline — a join against the judgment history rather than the
   // posting's own stamp — which is a third opinion on "judged by an old
   // prompt", where two were already one too many.
@@ -205,7 +203,7 @@ export async function impactCounts(): Promise<ImpactCounts> {
       prisma.job.count({ where: openWhere() }),
       prisma.job.count({ where: { scores: { none: { scorerVersion: SCORER_VERSION } } } }),
       prisma.job.count({
-        where: andWhere(openWhere(), judgeTargetWhere(true, NOW), {
+        where: andWhere(openWhere(), { score: { gte: 40 } }, {
           OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }],
         }),
       }),

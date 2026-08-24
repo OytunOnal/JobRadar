@@ -30,7 +30,7 @@ execSync("npx prisma db push --skip-generate --accept-data-loss", {
 // Dynamic, so the env above is set before db.ts constructs its client.
 const { prisma } = await import("../src/lib/db");
 const { storeSighting } = await import("../src/lib/ingest");
-const { statedFields, derivedFields } = await import("../src/lib/derive");
+const { statedFields, derivedFields } = await import("../src/lib/scoring/derive");
 
 const ENRICHED = [
   "About the role",

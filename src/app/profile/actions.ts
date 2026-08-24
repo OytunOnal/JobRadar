@@ -3,15 +3,15 @@
 import { spawn } from "node:child_process";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { patchSettings, loadSettings } from "@/lib/settings";
-import { profile } from "@/lib/profile";
-import { SCORER_VERSION } from "@/lib/score";
-import { EXTRACTOR_VERSION } from "@/lib/facts";
-import { FIT_PROMPT_VERSION, judgeQueueWhere } from "@/lib/fit";
-import { staleVectorWhere } from "@/lib/embed";
-import { deriveVisaTier } from "@/lib/visa";
-import { andWhere, liveWhere, openWhere } from "@/lib/pool";
-import type { TrackDef } from "@/lib/profile";
+import { patchSettings, loadSettings } from "@/lib/user/settings";
+import { profile } from "@/lib/user/profile";
+import { SCORER_VERSION } from "@/lib/scoring/score";
+import { EXTRACTOR_VERSION } from "@/lib/llm/facts";
+import { FIT_PROMPT_VERSION, judgeQueueWhere } from "@/lib/llm/fit";
+import { staleVectorWhere } from "@/lib/llm/embed";
+import { deriveVisaTier } from "@/lib/visa/visa";
+import { andWhere, liveWhere, openWhere } from "@/lib/queue/pool";
+import type { TrackDef } from "@/lib/user/profile";
 
 // Editing the profile is never just a save: it invalidates work the pipeline
 // already did. Every action here reports what it touched, and the page offers

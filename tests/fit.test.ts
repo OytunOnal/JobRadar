@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fitSystemPrompt, fitUserPrompt, parseFit, trimBoilerplate } from "../src/lib/fit";
+import { fitSystemPrompt, fitUserPrompt, parseFit, trimBoilerplate } from "../src/lib/llm/fit";
 
 test("parses a clean fit JSON", () => {
   const r = parseFit('{"fitScore": 85, "verdict": "strong", "comment": "Great match."}');

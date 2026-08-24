@@ -1,15 +1,15 @@
 import { prisma } from "@/lib/db";
-import { profile } from "@/lib/profile";
-import { ageLabel } from "@/lib/freshness";
-import { COUNTRY_NAMES, REGION_KEYS } from "@/lib/geo";
+import { profile } from "@/lib/user/profile";
+import { ageLabel } from "@/lib/scoring/freshness";
+import { COUNTRY_NAMES, REGION_KEYS } from "@/lib/location/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
-import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
-import { liveWhere, pursuedWhere, PURSUED_STATUSES } from "@/lib/pool";
-import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/labels";
+import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
+import { liveWhere, pursuedWhere, PURSUED_STATUSES } from "@/lib/queue/pool";
+import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/view/labels";
 import {
   allowedCountries, countryChips, radarFacetWhere, radarFilters, radarPaging,
   radarWhere, PAGE_SIZE, RADAR_ORDER, VERDICTS, VISA_TIERS, VISA_TIER_LABELS, WORK_MODES,
-} from "@/lib/radar";
+} from "@/lib/view/radar";
 
 export const dynamic = "force-dynamic";
 

@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Welcome to the Jungle — France's biggest tech board (global reach), via its

@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Jobindex — Denmark's biggest PRIVATE job board (complements the public

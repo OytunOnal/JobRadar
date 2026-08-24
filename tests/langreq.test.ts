@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detectLanguageRequirements } from "../src/lib/langreq";
+import { detectLanguageRequirements } from "../src/lib/scoring/langreq";
 
 test("langreq: hard requirements detected across languages", () => {
   assert.deepEqual(detectLanguageRequirements("Sehr gute Deutschkenntnisse erforderlich"), ["de"]);

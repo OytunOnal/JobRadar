@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Denmark — Jobnet (the national job board) via its web client's BFF API.

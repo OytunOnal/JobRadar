@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ageLabel, classifyFreshness, tooOldToStore } from "../src/lib/freshness";
+import { ageLabel, classifyFreshness, tooOldToStore } from "../src/lib/scoring/freshness";
 
 const NOW = new Date("2026-08-19T12:00:00Z");
 const days = (n: number) => new Date(NOW.getTime() - n * 86_400_000);

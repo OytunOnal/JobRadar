@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSections, postingView, viewBudget } from "../src/lib/sections";
+import { parseSections, postingView, viewBudget } from "../src/lib/text/sections";
 
 const POSTING = `About us
 Acme GmbH was founded in 2011 and we love ping pong.

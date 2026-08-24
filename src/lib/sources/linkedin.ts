@@ -1,5 +1,5 @@
-import { COUNTRY_LANGUAGE, resolveCountry } from "../geo";
-import { profileSearchGroups, type SearchGroup, type SearchLang } from "../profile";
+import { COUNTRY_LANGUAGE, resolveCountry } from "../location/geo";
+import { profileSearchGroups, type SearchGroup, type SearchLang } from "../user/profile";
 import { apifyToken, runActor } from "./apify";
 import { stripHtml, type RawJob, type Source, type WorkMode } from "./types";
 

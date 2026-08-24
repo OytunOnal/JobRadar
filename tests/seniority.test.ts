@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { detectSeniority, levelBlocked } from "../src/lib/seniority";
+import { detectSeniority, levelBlocked } from "../src/lib/scoring/seniority";
 
 test("detectSeniority: explicit title levels win", () => {
   assert.equal(detectSeniority("Staff Software Engineer", "").level, "staff");

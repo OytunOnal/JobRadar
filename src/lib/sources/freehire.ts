@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // freehire.me — open-source job aggregator with a keyless public JSON API that

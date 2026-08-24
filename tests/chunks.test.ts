@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chunkFromHistogram, chunkLabel, chunkWhere, chunkFromArgs, CHUNK_TARGET } from "../src/lib/chunks";
+import { chunkFromHistogram, chunkLabel, chunkWhere, chunkFromArgs, CHUNK_TARGET } from "../src/lib/queue/chunks";
 
 test("takes from the top until the target is reached", () => {
   const c = chunkFromHistogram([

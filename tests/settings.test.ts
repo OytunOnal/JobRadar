@@ -18,7 +18,7 @@ const dir = mkdtempSync(join(tmpdir(), "jr-settings-"));
 const PATH = join(dir, "settings.json");
 process.env.JOBRADAR_SETTINGS_PATH = PATH;
 
-const settingsModule = await import("../src/lib/settings");
+const settingsModule = await import("../src/lib/user/settings");
 const { loadSettings, patchSettings } = settingsModule;
 
 test.after(() => {

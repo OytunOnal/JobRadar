@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { detectVisa } from "../src/lib/visa";
+import { detectVisa } from "../src/lib/visa/visa";
 
 test("explicit sponsorship offers → yes", () => {
   assert.equal(detectVisa("We offer visa sponsorship and a relocation package."), "yes");

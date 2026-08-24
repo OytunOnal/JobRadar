@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { scoreJob, seniorityAdjust } from "../src/lib/score";
-import { seniorityFor } from "../src/lib/profile";
+import { scoreJob, seniorityAdjust } from "../src/lib/scoring/score";
+import { seniorityFor } from "../src/lib/user/profile";
 import type { RawJob } from "../src/lib/sources/types";
 
 function mkJob(over: Partial<RawJob>): RawJob {

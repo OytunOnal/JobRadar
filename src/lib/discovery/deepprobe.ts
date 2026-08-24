@@ -1,5 +1,5 @@
 import { prisma } from "../db";
-import { chat } from "../llm";
+import { chat } from "../llm/llm";
 import { scanTextForSlugs } from "./harvest";
 import { namesMatch } from "./nameprobe";
 import { probeBoard } from "./validate";

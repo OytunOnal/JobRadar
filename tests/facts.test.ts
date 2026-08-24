@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseFacts } from "../src/lib/facts";
-import { signalExcerpts, trimBoilerplate } from "../src/lib/posting-text";
+import { parseFacts } from "../src/lib/llm/facts";
+import { signalExcerpts, trimBoilerplate } from "../src/lib/text/posting-text";
 
 test("parseFacts: reads the model's structured answer", () => {
   const f = parseFacts('{"visaOffered":"yes","seniorityLevel":"senior","languages":["de"],"ghostRisk":false}', "AI Engineer", "");

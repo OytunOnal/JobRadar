@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Switzerland — SECO's Job-Room (job-room.ch), the official national job

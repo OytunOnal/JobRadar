@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { looksLikeHtml, htmlToText } from "../src/lib/html-text";
+import { looksLikeHtml, htmlToText } from "../src/lib/text/html-text";
 import { mapHit } from "../src/lib/sources/wttj";
 import { cardToRawJob } from "../src/lib/sources/arbeitsagentur";
 import { parseFeed } from "../src/lib/sources/rssfeeds";
@@ -103,7 +103,7 @@ test("a connector that produces descriptions can convert them", () => {
 
 test("a source's named blocks travel as parts, and ingest assembles them", async () => {
   const { leverSections } = await import("../src/lib/sources/ats");
-  const { labelledSections } = await import("../src/lib/sections");
+  const { labelledSections } = await import("../src/lib/text/sections");
 
   const parts = leverSections({
     description: "<p>We build tools.</p>",
@@ -121,7 +121,7 @@ test("a source's named blocks travel as parts, and ingest assembles them", async
 
 test("an adapter's own description survives as the fallback", async () => {
   const { leverSections } = await import("../src/lib/sources/ats");
-  const { labelledSections } = await import("../src/lib/sections");
+  const { labelledSections } = await import("../src/lib/text/sections");
   // Every named block empty: the assembly is empty, so ingest keeps whatever
   // the adapter put in `description` — Lever's structure-destroyed plain text,
   // Personio's unpaired <value> blocks, or a bare title.
@@ -163,7 +163,7 @@ test("the four sources that deferred their bodies are in desc:fill's queue", () 
   // Removing the in-connector detail fetch is only half the change; if the
   // backfill does not claim those sources, the postings simply never get a
   // body. Both halves or neither.
-  const src = readFileSync(join("scripts", "desc-fill.ts"), "utf8");
+  const src = readFileSync(join("scripts", "backfill", "desc-fill.ts"), "utf8");
   for (const s of ["arbeitsagentur", "ch-jobroom", "manfred", "linkedin"]) {
     assert.ok(src.includes(`"${s}"`), `${s} must appear in desc-fill`);
   }

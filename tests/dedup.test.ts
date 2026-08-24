@@ -7,7 +7,7 @@ import {
   parseSameRole,
   titlePrefilterPrompt,
   type DedupJob,
-} from "../src/lib/dedup";
+} from "../src/lib/scoring/dedup";
 
 const CANDS: DedupJob[] = [
   { id: "a1", title: "Senior Unity Developer", description: "Build gameplay systems in Unity." },

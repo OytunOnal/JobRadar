@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { backfill, clearRun, readRun } from "../src/lib/backfill";
-import { tuneAfterBatch } from "../scripts/embed-fill";
+import { backfill, clearRun, readRun } from "../src/lib/queue/backfill";
+import { tuneAfterBatch } from "../scripts/backfill/embed-fill";
 
 // Ten scripts carried a byte-identical log(). Three carried a byte-identical
 // eight-line GPU preamble. Four hand-wrote a fail-streak with four different
@@ -219,12 +219,11 @@ test("nothing outside backfill.ts hand-writes the run scaffolding", async () => 
   // is a one-off over raw SQL, and the worker IS the scheduler rather than a
   // backfill. Everything else goes through the runner.
   const ALLOW = new Set([
-    "scripts/board-sweep.ts",     // its own state file, network waits and RAM-aware slicing
-    "scripts/migrate-layered.ts", // one-off, over raw SQL rather than Prisma
-    "scripts/worker.ts",          // the scheduler, not a backfill: it SPAWNS these
+    "scripts/pipeline/board-sweep.ts",     // its own state file, network waits and RAM-aware slicing
+    "scripts/pipeline/worker.ts",          // the scheduler, not a backfill: it SPAWNS these
     // A one-shot importer: walks a fixed curated list once and creates boards.
     // No queue to drain, no GPU, nothing to resume — there is no run to own.
-    "scripts/import-sustainability.ts",
+    "scripts/tools/import-sustainability.ts",
   ]);
 
   for (const rel of readdirSync("scripts", { recursive: true }) as string[]) {
@@ -248,7 +247,7 @@ test("importing a backfill script does not start a backfill", () => {
     "facts-fill", "repair-descriptions", "fit-review", "fit-rereview",
   ];
   for (const name of BACKFILLS) {
-    const src = readFileSync(join("scripts", `${name}.ts`), "utf8");
+    const src = readFileSync(join("scripts", "backfill", `${name}.ts`), "utf8");
     if (!src.includes("isEntryPoint")) offenders.push(`${name} — runs on import`);
   }
   assert.deepEqual(offenders, [], offenders.join("\n"));

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { countryPassesAccept, regionsOf, resolveCountry } from "../src/lib/geo";
+import { countryPassesAccept, regionsOf, resolveCountry } from "../src/lib/location/geo";
 
 // ── resolveCountry — real location strings from our own pool ─────────────────
 

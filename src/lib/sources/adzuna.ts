@@ -1,4 +1,4 @@
-import { profile } from "../profile";
+import { profile } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // Adzuna aggregates many job boards (free developer API, strong EU coverage,

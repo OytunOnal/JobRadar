@@ -6,13 +6,13 @@ import {
   generationPrompt,
   validateGenerated,
   cleanVariants,
-} from "../src/lib/profilegen";
+} from "../src/lib/user/profilegen";
 import {
   deriveRoleNegatives,
   deriveRoleSignals,
   FAMILY_KEYS,
   ROLE_FAMILIES,
-} from "../src/lib/taxonomy";
+} from "../src/lib/scoring/taxonomy";
 
 // ── taxonomy invariants ──────────────────────────────────────────────────────
 

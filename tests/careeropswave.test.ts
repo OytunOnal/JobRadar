@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { parseEnvPayload, mapHit } from "../src/lib/sources/wttj";
 import { buildSearchBody, mapResult } from "../src/lib/sources/vdab";
 import { mapJustJoin, mapNoFluff } from "../src/lib/sources/poland";
-import { labelledSections } from "../src/lib/sections";
+import { labelledSections } from "../src/lib/text/sections";
 import { mapDoc } from "../src/lib/sources/thehub";
 import { mapAgentic, mapSpeedrun } from "../src/lib/sources/nichejobs";
 import { classifyLiveness, normalizeForMatch } from "../src/lib/liveness";
 import { canonicalJobUrl } from "../src/lib/domains";
 import { isOnCooldown } from "../src/lib/ingest";
-import { parseNl, parseGb, parseDk, parseIe, splitCsvLine, collapseName } from "../src/lib/sponsors";
+import { parseNl, parseGb, parseDk, parseIe, splitCsvLine, collapseName } from "../src/lib/visa/sponsors";
 import { mapHit as wnMap, buildQuery as wnQuery } from "../src/lib/sources/workingnomads";
 import { parseFeed as jiParse } from "../src/lib/sources/jobindexdk";
 

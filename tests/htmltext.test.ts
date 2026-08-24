@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { htmlToText, looksLikeHtml } from "../src/lib/html-text";
+import { htmlToText, looksLikeHtml } from "../src/lib/text/html-text";
 
 test("htmlToText: decodes BEFORE stripping — the bug that filled the pool with markup", () => {
   // Greenhouse ships HTML-encoded content. The old order (strip, then decode)

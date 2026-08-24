@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
-import { DISMISS_REASONS, reasonLabel } from "@/lib/dismiss-reasons";
+import { DISMISS_REASONS, reasonLabel } from "@/lib/view/dismiss-reasons";
 import { setStatus } from "../actions";
-import { dismissedWhere } from "@/lib/pool";
+import { dismissedWhere } from "@/lib/queue/pool";
 
 export const dynamic = "force-dynamic";
 

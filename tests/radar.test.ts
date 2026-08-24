@@ -7,8 +7,8 @@ import { join } from "node:path";
 import {
   radarFilters, radarWhere, radarFacetWhere, radarPaging, countryChips,
   allowedCountries, PAGE_SIZE,
-} from "../src/lib/radar";
-import { profile } from "../src/lib/profile";
+} from "../src/lib/view/radar";
+import { profile } from "../src/lib/user/profile";
 
 // The radar's query was 181 lines inside a page component, built by mutating
 // two `any` locals. Nothing could call it, so nothing could test it — and it

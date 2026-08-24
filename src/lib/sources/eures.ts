@@ -1,5 +1,5 @@
-import { COUNTRY_LANGUAGE, COUNTRY_NAMES, REGIONS } from "../geo";
-import { profileSearchGroups, type SearchGroup } from "../profile";
+import { COUNTRY_LANGUAGE, COUNTRY_NAMES, REGIONS } from "../location/geo";
+import { profileSearchGroups, type SearchGroup } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // EURES — the EU's official job-mobility portal (europa.eu/eures). Every

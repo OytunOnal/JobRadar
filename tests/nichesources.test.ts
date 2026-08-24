@@ -5,7 +5,7 @@ import { mapJob as landingMap } from "../src/lib/sources/landingjobs";
 import { mapJob as sdjMap } from "../src/lib/sources/swissdevjobs";
 import { parseFeed as bsjParse } from "../src/lib/sources/berlinstartupjobs";
 import { mapOffer, detailSections } from "../src/lib/sources/manfred";
-import { labelledSections } from "../src/lib/sections";
+import { labelledSections } from "../src/lib/text/sections";
 import { parseFeed as neParse } from "../src/lib/sources/netempregos";
 
 // ── HN Who is hiring ─────────────────────────────────────────────────────────

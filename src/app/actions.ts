@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
-import { isConcluded, OPEN_STATUSES } from "@/lib/pool";
-import { draftCoverLetter } from "@/lib/cover";
-import { analyzeFit, verdictFields } from "@/lib/fit";
+import { isConcluded, OPEN_STATUSES } from "@/lib/queue/pool";
+import { draftCoverLetter } from "@/lib/llm/cover";
+import { analyzeFit, verdictFields } from "@/lib/llm/fit";
 
 const FOLLOW_UP_DAYS = 10; // Europe answers slowly — first nudge after 10 days
 

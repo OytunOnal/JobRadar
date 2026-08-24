@@ -1,4 +1,4 @@
-import { profile } from "../profile";
+import { profile } from "../user/profile";
 import { apifyToken, runActor } from "./apify";
 import { stripHtml, type RawJob, type Source } from "./types";
 

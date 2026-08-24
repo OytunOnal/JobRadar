@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { derivedFields, statedFields, STORE_THRESHOLD, type CurrentRow } from "../src/lib/derive";
+import { derivedFields, statedFields, STORE_THRESHOLD, type CurrentRow } from "../src/lib/scoring/derive";
 import type { RawJob } from "../src/lib/sources/types";
 
 // A census of every write to a Job row found the derived fields listed by hand
@@ -108,7 +108,7 @@ test("derivation reads the text it is given, not the text that arrived", () => {
 // reappearing if something notices when one does.
 test("nothing outside derive.ts assembles the derived fields by hand", () => {
   const offenders: string[] = [];
-  const ALLOW = new Set(["src/lib/derive.ts"]);
+  const ALLOW = new Set(["src/lib/scoring/derive.ts"]);
 
   for (const dir of ["src", "scripts"]) {
     for (const rel of readdirSync(dir, { recursive: true }) as string[]) {
@@ -129,7 +129,7 @@ test("nothing outside derive.ts assembles the derived fields by hand", () => {
     }
   }
 
-  assert.deepEqual(offenders, [], `use derivedFields() from src/lib/derive.ts:\n${offenders.join("\n")}`);
+  assert.deepEqual(offenders, [], `use derivedFields() from src/lib/scoring/derive.ts:\n${offenders.join("\n")}`);
 });
 
 // A verdict without its stamp is invisible to the queue that would re-judge it.
@@ -141,7 +141,9 @@ test("nothing outside fit.ts writes a verdict without stamping the prompt versio
       const path = join(dir, String(rel));
       if (!/\.tsx?$/.test(path)) continue;
       const norm = path.replace(/\\/g, "/");
-      if (norm === "src/lib/fit.ts" || norm === "scripts/backfill-fit-version.ts") continue;
+      // backfill-fit-version.ts used to be excused here; it was a spent migration
+      // and has been deleted.
+      if (norm === "src/lib/llm/fit.ts") continue;
       const lines = readFileSync(path, "utf8").split("\n");
 
       lines.forEach((line, i) => {
@@ -154,5 +156,5 @@ test("nothing outside fit.ts writes a verdict without stamping the prompt versio
     }
   }
 
-  assert.deepEqual(offenders, [], `use verdictFields() from src/lib/fit.ts:\n${offenders.join("\n")}`);
+  assert.deepEqual(offenders, [], `use verdictFields() from src/lib/llm/fit.ts:\n${offenders.join("\n")}`);
 });

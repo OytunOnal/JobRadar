@@ -5,8 +5,8 @@ import { join } from "node:path";
 import {
   andWhere, liveWhere, openWhere, discoverableWhere,
   pursuedWhere, dismissedWhere, archiveWhere, OPEN_STATUSES,
-} from "../src/lib/pool";
-import { judgeTargetWhere, judgeQueueWhere, unjudgedWhere } from "../src/lib/fit";
+} from "../src/lib/queue/pool";
+import { judgeTargetWhere, judgeQueueWhere, unjudgedWhere } from "../src/lib/llm/fit";
 
 // These are the cheapest tests in the repo and they were the missing ones.
 // Every predicate here is a pure function returning a plain object, so a test
@@ -123,7 +123,7 @@ test("nothing outside pool.ts hand-assembles a population", () => {
     for (const rel of readdirSync(dir, { recursive: true }) as string[]) {
       const path = join(dir, String(rel));
       if (!/\.tsx?$/.test(path)) continue;
-      if (path.replace(/\\/g, "/") === "src/lib/pool.ts") continue;
+      if (path.replace(/\\/g, "/") === "src/lib/queue/pool.ts") continue;
       const lines = readFileSync(path, "utf8").split("\n");
 
       lines.forEach((line, i) => {
@@ -147,5 +147,5 @@ test("nothing outside pool.ts hand-assembles a population", () => {
     }
   }
 
-  assert.deepEqual(offenders, [], `use a population from src/lib/pool.ts:\n${offenders.join("\n")}`);
+  assert.deepEqual(offenders, [], `use a population from src/lib/queue/pool.ts:\n${offenders.join("\n")}`);
 });

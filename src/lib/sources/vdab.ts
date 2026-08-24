@@ -1,4 +1,4 @@
-import { profileSearchGroups } from "../profile";
+import { profileSearchGroups } from "../user/profile";
 import { type RawJob, type Source } from "./types";
 
 // VDAB — Flanders' public employment service (vdab.be), Belgium's biggest

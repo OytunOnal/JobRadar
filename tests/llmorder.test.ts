@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { providerStatus } from "../src/lib/llm";
+import { providerStatus } from "../src/lib/llm/llm";
 
 // The provider chain is a user CHOICE, so the choice has to be testable
 // without keys or a network. Each case writes a settings file, reloads the

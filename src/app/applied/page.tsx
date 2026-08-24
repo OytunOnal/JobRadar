@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
-import { postingLabels } from "@/lib/labels";
-import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/pool";
+import { postingLabels } from "@/lib/view/labels";
+import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 
 export const dynamic = "force-dynamic";
 

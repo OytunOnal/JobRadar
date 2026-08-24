@@ -1,4 +1,4 @@
-import { profile } from "../profile";
+import { profile } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
 // JSearch (via RapidAPI) indexes Google for Jobs — which carries LinkedIn,

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveVisaTier, needsSponsorship, visaEvidenceWins } from "../src/lib/visa";
+import { deriveVisaTier, needsSponsorship, visaEvidenceWins } from "../src/lib/visa/visa";
 
 const job = (over: Partial<Parameters<typeof deriveVisaTier>[0]>) => ({
   visa: "unknown", sponsorReg: false, source: "greenhouse:acme", country: "de", ...over,

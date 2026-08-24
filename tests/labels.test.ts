@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postingLabels, isVerdictStale, staleVerdictTitle, type LabelledPosting } from "../src/lib/labels";
-import { FIT_PROMPT_VERSION } from "../src/lib/fit";
-import { languageBarriers, profile } from "../src/lib/profile";
+import { postingLabels, isVerdictStale, staleVerdictTitle, type LabelledPosting } from "../src/lib/view/labels";
+import { FIT_PROMPT_VERSION } from "../src/lib/llm/fit";
+import { languageBarriers, profile } from "../src/lib/user/profile";
 
 // Every one of these rules used to be a ternary inside JSX, in 1,682 lines of
 // src/app that no test imported. Three of them had already been copied into

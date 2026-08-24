@@ -1,11 +1,11 @@
-import { profile, generatedProfileStale, seniorityFor } from "@/lib/profile";
-import { CV_CONTEXT, CV_PATH } from "@/lib/cv";
-import { LANG_NAMES } from "@/lib/langreq";
-import { SCORER_VERSION } from "@/lib/score";
-import { EXTRACTOR_VERSION } from "@/lib/facts";
-import { FIT_PROMPT_VERSION } from "@/lib/fit";
-import { providerStatus } from "@/lib/llm";
-import { settingsUnreadable } from "@/lib/settings";
+import { profile, generatedProfileStale, seniorityFor } from "@/lib/user/profile";
+import { CV_CONTEXT, CV_PATH } from "@/lib/llm/cv";
+import { LANG_NAMES } from "@/lib/scoring/langreq";
+import { SCORER_VERSION } from "@/lib/scoring/score";
+import { EXTRACTOR_VERSION } from "@/lib/llm/facts";
+import { FIT_PROMPT_VERSION } from "@/lib/llm/fit";
+import { providerStatus } from "@/lib/llm/llm";
+import { settingsUnreadable } from "@/lib/user/settings";
 import {
   addTrack, impactCounts, moveTrack, removeTrack, retierVisa,
   savePreferences, saveTrack, saveJudge, startTask, currentSettings,

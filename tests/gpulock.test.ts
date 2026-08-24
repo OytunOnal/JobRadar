@@ -17,7 +17,7 @@ function withLock<T>(fn: (path: string) => T): T {
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage } = await import("../src/lib/gpu-lock");
+const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage } = await import("../src/lib/queue/gpu-lock");
 
 test("acquire, then hold: the same process may re-acquire", () => {
   withLock(() => {

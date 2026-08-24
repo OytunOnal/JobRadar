@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { blendOrder, cosine, fromBuffer, jobEmbedText, normalize, toBuffer } from "../src/lib/embed";
+import { blendOrder, cosine, fromBuffer, jobEmbedText, normalize, toBuffer } from "../src/lib/llm/embed";
 
 test("embed: buffer round-trip preserves the vector", () => {
   const v = normalize([0.1, -0.5, 0.7, 0.2]);

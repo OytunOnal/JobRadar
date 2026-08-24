@@ -19,8 +19,14 @@
 //             and \s+ collapsed, so escaped markup was manifested into the
 //             text and all paragraph structure was destroyed.
 //   t2      — htmlToText: decode first, block tags to newlines, horizontal
-//             whitespace only.
-export const TEXT_VERSION = "t2";
+//             whitespace only. Decoding first also meant a decoded "&lt;" in
+//             prose opened a fake tag, so "&lt; 100ms … &gt; 99%" lost every
+//             word between the two.
+//   t3      — a tag must start like a tag (`<` then a letter, `/` or `!`).
+//             Rows written by t2 may be missing requirement text and cannot
+//             be repaired offline — the words are gone — so they are stale by
+//             version and get re-fetched.
+export const TEXT_VERSION = "t3";
 
 const ENTITIES: Record<string, string> = {
   amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'",
@@ -68,7 +74,16 @@ export function htmlToText(input: string | undefined | null): string {
   s = s.replace(HEADING_OPEN, "\n\n");
   s = s.replace(BLOCK_END, "\n");
   // Remaining tags carry no text.
-  s = s.replace(/<[^>]+>/g, " ");
+  //
+  // A tag must START like one: `<` followed by a letter, `/` or `!`. The
+  // looser `<[^>]+>` treated any `<`…`>` span as markup, and since entities
+  // are decoded FIRST, a posting written "&lt; 100ms" / "&gt; 99%" became
+  // "< 100ms … > 99%" and everything between the two was deleted as a tag.
+  // Verified: "Latency must be &lt; 100ms and uptime &gt; 99%." collapsed to
+  // "Latency must be 99%.", and "&lt;3 years exp &gt; junior" to "junior" —
+  // requirement text, silently removed, in the stage that exists to preserve
+  // requirement text.
+  s = s.replace(/<\/?[a-zA-Z!][^>]*>/g, " ");
   // Collapse horizontal whitespace only — newlines are the structure we just
   // rescued. Cap blank runs at one so the text stays compact.
   s = s.replace(/[ \t ]+/g, " ");

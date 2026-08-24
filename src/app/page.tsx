@@ -349,7 +349,7 @@ export default async function Page({
                 <p className="title">
                   {j.fitScore != null && (
                     <span
-                      className={`fitnum-inline v-${j.fitVerdict}${j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " stale"}`}
+                      className={`fitnum-inline v-${j.fitVerdict}${j.fitPromptVersion === FIT_PROMPT_VERSION ? "" : " verdict-stale"}`}
                       title={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "Judged by an older version — waiting to be re-judged."}
                     >{j.fitScore}</span>
                   )}{" "}
@@ -402,7 +402,7 @@ export default async function Page({
                   // worker re-judges it, so a stale verdict never reads as a
                   // fresh one.
                   <div
-                    className={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "stale"}
+                    className={j.fitPromptVersion === FIT_PROMPT_VERSION ? undefined : "verdict-stale"}
                     title={j.fitPromptVersion === FIT_PROMPT_VERSION
                       ? undefined
                       : `Judged by an older version (${j.fitPromptVersion ?? "?"}) on text we have since repaired — waiting to be re-judged by ${FIT_PROMPT_VERSION}.`}

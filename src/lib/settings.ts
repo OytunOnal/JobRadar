@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { TrackDef } from "./profile";
 
@@ -61,12 +61,20 @@ let cachedStamp = "";
 
 function fileStamp(path: string): string {
   try {
-    // Cheap staleness check: a developer editing the file by hand (or another
+    // Staleness check: a developer editing the file by hand (or another
     // process writing it) must not be shadowed by our in-memory copy. The path
     // is part of the stamp so switching files invalidates the cache too.
-    return `${path}:${existsSync(path) ? readFileSync(path).length : 0}`;
+    //
+    // stat, not read. This runs on every settings read and — through the
+    // profile memo — on every profile property access, which scoreJob touches
+    // 7-9 times per posting. Reading the whole file to learn its length made
+    // the "cheap check" as expensive as the thing it was guarding: memoising
+    // the profile on a read-based stamp measured SLOWER than not memoising at
+    // all (329 ms vs 246 ms for 2,000 reads).
+    const s = statSync(path);
+    return `${path}:${s.size}:${s.mtimeMs}`;
   } catch {
-    return `${path}:0`;
+    return `${path}:0`; // missing file is a valid state, not an error
   }
 }
 
@@ -75,6 +83,13 @@ function fileStamp(path: string): string {
 // radar would quietly retarget to the template and nothing would say why.
 // The profile page reads this to warn, and the loader says it once per load.
 export let settingsUnreadable: string | null = null;
+
+// The stamp loadSettings uses to decide whether its own cache is fresh.
+// Exported so other caches (profile's memo) can invalidate on the same event
+// rather than inventing a second notion of "settings changed".
+export function settingsStamp(): string {
+  return fileStamp(settingsPath());
+}
 
 export function loadSettings(): Settings {
   const path = settingsPath();

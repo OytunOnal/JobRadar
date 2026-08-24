@@ -92,16 +92,19 @@ function log(line: string): void {
   appendFileSync("embed-fill.log", stamped + "\n");
 }
 
-interface Row { id: string; title: string; content: { description: string } | null }
+interface Row { id: string; title: string; content: { description: string; textVersion: string | null } | null }
 
 // One multi-row statement per batch — SQLite pays the commit cost once, not
 // N times. $executeRawUnsafe with placeholders (values parameterized).
 async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
   const placeholders = rows.map(() => "(?, ?, ?, ?)").join(", ");
   const params: unknown[] = [];
-  const stamp = embedStamp();
   for (let i = 0; i < rows.length; i++) {
-    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])), stamp);
+    // Stamp the text version this row ACTUALLY had. A shared constant would
+    // claim every vector came from current text, and the next re-fetch of an
+    // old description would leave its vector silently stale.
+    params.push(rows[i].id, EMBED_MODEL, Buffer.from(toBuffer(vecs[i])),
+      embedStamp(rows[i].content?.textVersion));
   }
   await prisma.$executeRawUnsafe(
     `INSERT INTO JobEmbedding (jobId, model, vector, builtFrom) VALUES ${placeholders}
@@ -172,7 +175,7 @@ async function main() {
         },
         orderBy: { id: "asc" },
         take: BATCH,
-        select: { id: true, title: true, content: { select: { description: true } } },
+        select: { id: true, title: true, content: { select: { description: true, textVersion: true } } },
       });
       if (rows.length > 0) {
         lastId = rows[rows.length - 1].id;

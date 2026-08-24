@@ -260,10 +260,10 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
    real, it just came from a system we have replaced (pre-v7 judgments were
    formed on markup-filled text through a blind head-slice). The worker
    re-judges these, and until it does they must not look fresh. */
-.stale { opacity: 0.45; }
-.stale .fitnum { font-weight: 500; }
-.stale .vlabel { font-style: italic; }
-.fitnum-inline.stale { opacity: 0.45; font-weight: 500; }
+.verdict-stale { opacity: 0.45; }
+.verdict-stale .fitnum { font-weight: 500; }
+.verdict-stale .vlabel { font-style: italic; }
+.fitnum-inline.verdict-stale { opacity: 0.45; font-weight: 500; }
 
 /* Risk disclosures under the fit score. These replace two things that used to
    HIDE a posting or bury the warning: the 45-day age filter (which dropped 74

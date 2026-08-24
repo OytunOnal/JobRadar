@@ -26,8 +26,13 @@ export const EMBED_VIEW_VERSION = "s2500";
 // projection that chose which of that text to read. Anything that does not
 // match the current stamp is stale work, which is what makes the queue a
 // query rather than a guess.
-export function embedStamp(): string {
-  return `${TEXT_VERSION}/${EMBED_VIEW_VERSION}`;
+// `rowTextVersion` is the description's OWN stamp, not the constant. Using the
+// constant claimed every vector was built from current text — including ones
+// embedded while the description was still the old flat markup. When that
+// description was later re-fetched, staleVectorWhere saw a matching stamp and
+// left the vector alone: exactly the blindness builtFrom exists to remove.
+export function embedStamp(rowTextVersion?: string | null): string {
+  return `${rowTextVersion ?? "t0"}/${EMBED_VIEW_VERSION}`;
 }
 
 // "This job needs embedding." One definition, because there are three callers
@@ -43,7 +48,11 @@ export function staleVectorWhere() {
       { vector: { is: null } },
       { vector: { model: { not: EMBED_MODEL } } },
       { vector: { builtFrom: null } },
-      { vector: { builtFrom: { not: embedStamp() } } },
+      // A vector is current only when its stamp matches the description it
+      // was built from, so the comparison is row-to-row: JobContent's
+      // textVersion joined with the view version we embed at today.
+      { NOT: { content: { textVersion: TEXT_VERSION } } },
+      { vector: { builtFrom: { not: embedStamp(TEXT_VERSION) } } },
     ],
   };
 }

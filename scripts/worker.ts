@@ -88,6 +88,13 @@ function run(script: string, extra: string[] = []): Promise<number> {
     );
     const beat = setInterval(beatGpu, 20_000);
     child.on("exit", (code) => { clearInterval(beat); resolve(code ?? 1); });
+    // Without this the emitted error is unhandled and takes down the one
+    // process built to survive its children failing.
+    child.on("error", (e) => {
+      clearInterval(beat);
+      log(`  süreç başlatılamadı: ${e.message}`);
+      resolve(1);
+    });
   });
 }
 
@@ -119,17 +126,22 @@ type Lane =
 async function nextLane(): Promise<Lane | null> {
   const visa = await prisma.job.count({ where: andWhere(judgeableWhere(true), VISA_MARKED) });
   if (visa > 0) return { kind: "visa", n: visa };
-  // The pending histogram, straight from SQL: 27k rows is too many to pull
-  // into memory just to group them.
-  const hist: Array<{ score: number; n: bigint }> = await prisma.$queryRawUnsafe(
-    `SELECT score, COUNT(*) n FROM Job
-     WHERE disqualified = 0 AND delistedAt IS NULL AND duplicateOfId IS NULL
-       AND status IN ('new','interested') AND score >= 40
-       AND (fitScore IS NULL OR fitPromptVersion IS NOT ?)
-     GROUP BY score`,
-    FIT_PROMPT_VERSION,
-  );
-  const chunk = chunkFromHistogram(hist.map((h) => ({ score: h.score, n: Number(h.n) })));
+  // groupBy on judgeableWhere, NOT a hand-written SQL copy of it.
+  //
+  // The copy left out freshness-or-sponsor-marked and the country/remote test,
+  // so it counted 71,968 pending where 26,417 were actually judgeable. That is
+  // not merely a wrong number in a log line: the chunk it picked claimed 4,201
+  // rows at score 100 while only 1,929 could be judged, and once those were
+  // done the histogram still reported the rest. chunkFromHistogram would hand
+  // back the same {100,100} chunk forever, before === after would report "no
+  // progress", and the worker would back off to 30 minutes and never descend
+  // to score 99 — a permanent stall, roughly 33 hours from now.
+  const hist = await prisma.job.groupBy({
+    by: ["score"],
+    _count: { _all: true },
+    where: judgeableWhere(true),
+  });
+  const chunk = chunkFromHistogram(hist.map((h) => ({ score: h.score, n: h._count._all })));
   return chunk ? { kind: "chunk", chunk } : null;
 }
 

@@ -8,6 +8,7 @@ import { profile } from "@/lib/profile";
 import { SCORER_VERSION } from "@/lib/score";
 import { EXTRACTOR_VERSION } from "@/lib/facts";
 import { FIT_PROMPT_VERSION } from "@/lib/fit";
+import { staleVectorWhere } from "@/lib/embed";
 import { deriveVisaTier } from "@/lib/visa";
 import type { TrackDef } from "@/lib/profile";
 
@@ -16,15 +17,26 @@ import type { TrackDef } from "@/lib/profile";
 // the matching repair — the alternative (silently inconsistent pool) is the
 // failure mode this whole page exists to prevent.
 
+// An empty field means "no override", not "an empty list". They are not the
+// same thing here: buildProfile composes with `settings.acceptRegions ??
+// u.acceptRegions ?? defaultRegions`, and `[]` satisfies `??`. Clearing the
+// regions box therefore stored [], regionOk() rejected every locatable
+// posting, and the next rescore disqualified most of the pool with nothing on
+// screen saying why.
+const csvOrUndefined = (v: FormDataEntryValue | null): string[] | undefined => {
+  const list = csv(v);
+  return list.length ? list : undefined;
+};
+
 const csv = (v: FormDataEntryValue | null): string[] =>
   String(v ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 export async function savePreferences(formData: FormData): Promise<void> {
   patchSettings({
-    languages: csv(formData.get("languages")),
-    workAuthorization: csv(formData.get("workAuthorization")),
-    acceptRegions: csv(formData.get("acceptRegions")),
-    extraRoleNegatives: csv(formData.get("extraRoleNegatives")),
+    languages: csvOrUndefined(formData.get("languages")),
+    workAuthorization: csvOrUndefined(formData.get("workAuthorization")),
+    acceptRegions: csvOrUndefined(formData.get("acceptRegions")),
+    extraRoleNegatives: csvOrUndefined(formData.get("extraRoleNegatives")),
     seniority: {
       boost: csv(formData.get("seniorityBoost")),
       avoid: csv(formData.get("seniorityAvoid")),
@@ -192,7 +204,13 @@ export async function impactCounts(): Promise<ImpactCounts> {
           judgments: { none: { promptVersion: FIT_PROMPT_VERSION } },
         },
       }),
-      prisma.job.count({ where: { ...live, disqualified: false, vector: { is: null } } }),
+      // staleVectorWhere, not `vector IS NULL`. Every stored vector currently
+      // has builtFrom NULL — all stale — yet this panel rendered "vektörler
+      // güncel". A health panel that disagrees with the pipeline it reports on
+      // is worse than no panel.
+      prisma.job.count({
+        where: { ...live, disqualified: false, ...staleVectorWhere() },
+      }),
     ]);
   // Sample-based drift check — the same invariant `npm run doctor` audits.
   const sample = await prisma.job.findMany({

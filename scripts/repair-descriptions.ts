@@ -52,7 +52,10 @@ async function main() {
       if (!looksLikeHtml(r.description)) continue;
       const clean = safeSlice(htmlToText(r.description), 8000);
       // Guard against a conversion that would gut a posting (malformed markup).
-      if (clean.length < Math.min(120, r.description.length * 0.15)) continue;
+      // max, not min: with min() the bar is a flat 120 characters for anything
+      // over 800, so an 8,000-character posting that converts to 200 (2.5%
+      // kept) passed the guard and overwrote the original irrecoverably.
+      if (clean.length < Math.max(120, r.description.length * 0.15)) continue;
       writes.push(prisma.jobContent.update({
         where: { jobId: r.jobId },
         data: { description: clean, textVersion: TEXT_VERSION },

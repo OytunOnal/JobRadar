@@ -9,7 +9,7 @@
 import { user } from "../../config/user";
 import { CV_CONTEXT } from "./cv";
 import { cvHash, loadGeneratedProfile } from "./profilegen";
-import { loadSettings } from "./settings";
+import { loadSettings, settingsStamp } from "./settings";
 import { deriveRoleNegatives, deriveRoleSignals } from "./taxonomy";
 
 export type Track = string;
@@ -169,12 +169,32 @@ function buildProfile() {
 // A live view, not a frozen snapshot: the profile page writes settings.json and
 // the very next read here reflects it — no server restart, and every existing
 // `profile.x` call site keeps working untouched.
+//
+// Memoised on the settings file's own stamp, because the naive Proxy rebuilt
+// EVERYTHING on every property read: loadSettings (a readFileSync), then the
+// role-negative and role-signal derivations over the whole track list.
+// scoreJob touches profile 7-9 times per posting, so a rescore over half a
+// million rows meant millions of syscalls — measured at 0.12 ms per read,
+// roughly half of scoring. The stamp is what loadSettings already computes to
+// decide whether ITS cache is fresh, so a hand edit to settings.json is still
+// picked up on the next read.
+let memo: ReturnType<typeof buildProfile> | null = null;
+let memoStamp = "";
+
+function currentProfile(): ReturnType<typeof buildProfile> {
+  const stamp = settingsStamp();
+  if (memo !== null && stamp === memoStamp) return memo;
+  memo = buildProfile();
+  memoStamp = stamp;
+  return memo;
+}
+
 export const profile = new Proxy({} as ReturnType<typeof buildProfile>, {
-  get: (_t, key: string) => (buildProfile() as Record<string, unknown>)[key],
-  has: (_t, key: string) => key in buildProfile(),
-  ownKeys: () => Reflect.ownKeys(buildProfile()),
+  get: (_t, key: string) => (currentProfile() as Record<string, unknown>)[key],
+  has: (_t, key: string) => key in currentProfile(),
+  ownKeys: () => Reflect.ownKeys(currentProfile()),
   getOwnPropertyDescriptor: (_t, key: string) => ({
-    ...Object.getOwnPropertyDescriptor(buildProfile(), key),
+    ...Object.getOwnPropertyDescriptor(currentProfile(), key),
     configurable: true,
   }),
 });

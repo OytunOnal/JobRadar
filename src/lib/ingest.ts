@@ -571,12 +571,17 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       const keepIncoming = betterText(job.description, existing.content?.description);
       const kept = keepIncoming ? job.description : existing.content?.description ?? job.description;
       const rescored = keepIncoming ? s : scoreJob({ ...job, description: kept });
+      const rescoreRejected = rescored.disqualified || rescored.score < STORE_THRESHOLD;
 
       // Refresh score/text but never clobber the user's pipeline status/notes.
       await prisma.job.update({
         where: { id: existing.id },
         data: {
-          score: rescored.disqualified ? 0 : rescored.score,
+          // The SAME gate creation uses: `rejected = disqualified || score <
+          // STORE_THRESHOLD`. Writing only `rescored.disqualified` dropped the
+          // threshold half, so a re-sighting that scored 12 came back as a
+          // live candidate while an identical NEW posting was gated out.
+          score: rescoreRejected ? 0 : rescored.score,
           track: rescored.track,
           scoreReason: rescored.reason,
           scoredBy: "keyword",
@@ -612,7 +617,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
                 seniorityBy: rescored.seniorityLevel === "unknown" ? null : "detector",
               }),
           // A re-score can flip the gate verdict in either direction.
-          disqualified: rescored.disqualified,
+          disqualified: rescoreRejected,
           // Pool-diff freshness: the job is still listed at its source.
           lastSeenAt: new Date(),
           delistedAt: null, // it's back (or never left)

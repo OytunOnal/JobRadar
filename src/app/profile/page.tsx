@@ -62,7 +62,7 @@ export default async function ProfilePage() {
         <h2 className="grouphead">Havuz durumu</h2>
         <div className="statstrip">
           <span><b>{counts.totalJobs.toLocaleString("tr")}</b> ilan</span>
-          <span><b>{counts.candidates.toLocaleString("tr")}</b> aday</span>
+          <span><b>{counts.open.toLocaleString("tr")}</b> açık ilan</span>
           <span className="src">scorer {SCORER_VERSION} · facts {EXTRACTOR_VERSION} · prompt {FIT_PROMPT_VERSION}</span>
         </div>
         <div className="impacts">

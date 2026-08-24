@@ -5,6 +5,8 @@ import { profile, seniorityFor } from "./profile";
 import { detectLanguageRequirements, LANG_NAMES } from "./langreq";
 import { signalExcerpts, trimBoilerplate } from "./posting-text";
 import { postingView } from "./sections";
+import { andWhere, openWhere } from "./pool";
+import { VISA_MARKED } from "./visa";
 
 export { trimBoilerplate };
 
@@ -36,82 +38,66 @@ function langReqLine(langReq: string | null): string {
 
 export type FitCategory = "NONE" | "NO_VISA" | "LANGUAGE" | "PROFILE" | "SENIORITY" | "OTHER";
 
-// WHICH postings are eligible for judging. Exported because two callers need
-// the same answer: fit-fill builds its queue from it, and the worker decides
-// whether to start fit-fill at all. When those two disagreed, the worker
-// counted 67k eligible while the queue held 21k — so once the queue drained
-// the worker would keep spawning a child that exited immediately.
+// Where the user could actually take a job. Judging anywhere else spends a
+// minute of GPU to produce a verdict nobody can act on.
 const JUDGE_TARGETS = ["de", "nl", "es", "ch", "dk", "se", "be", "pl", "fr", "pt", "at", "ie", "gb", "no", "fi"];
-
-// A posting the user already acted on is not up for re-judging: their own
-// decision outranks any verdict of ours.
-const OPEN = { status: { in: ["new", "interested"] } };
-
-// "Marked as sponsoring" — the signals we have WITHOUT asking a model: the
-// company sits in a public sponsor register, the source shipped a structured
-// visa flag, or the posting itself says so. These are the user's stated
-// priority, and unlike the LLM's reading they are known before any GPU time
-// is spent.
-export const VISA_MARKED = {
-  OR: [{ visaTier: "yes" }, { visaTier: "not-needed" }, { sponsorReg: true }, { visa: "yes" }],
-};
-
-// Combine Prisma filters without one silently erasing another.
-//
-// Spreading two filter objects into one looks like composition and is not:
-// `{...a, ...b}` keeps only b's `OR`, only b's `AND`, only b's `score`. That
-// cost us two silent bugs — a visa filter that vanished (the worker queued
-// 72,111 postings instead of 3,509) and a staleness check that matched
-// nothing. Every part lands in the AND list here, so nothing can be shadowed.
-export function andWhere(...parts: Array<Record<string, unknown> | null | undefined>) {
-  return { AND: parts.filter(Boolean) as Record<string, unknown>[] };
-}
 
 // "Not judged" is the wrong question; "not judged by THIS system" is the
 // right one. All 5,622 existing verdicts came from a pre-v7 prompt reading
 // markup-filled text through a blind head-slice — keeping them would freeze
 // the radar on a system we have replaced.
 //
-// Exported because the queue builder and the row fetch BOTH need it, and
-// when the fetch kept its own `fitScore: null` the stale-verdict postings
-// were queued and then silently dropped before they could be re-judged.
+// This is the WORK axis: what a posting is missing. It composes with a
+// population from pool.ts and, for the judge, with judgeTargetWhere below.
 export function unjudgedWhere() {
   return { OR: [{ fitScore: null }, { fitPromptVersion: { not: FIT_PROMPT_VERSION } }] };
 }
 
-export function judgeableWhere(wide: boolean) {
-  const unjudged = unjudgedWhere();
-  const base = {
-    delistedAt: null, duplicateOfId: null, disqualified: false,
-    ...OPEN,
-    AND: [unjudged],
-  };
-  if (!wide) {
-    return { ...base, score: { gt: 50 }, AND: [unjudged, VISA_MARKED] };
-  }
-  return {
-    ...base,
+// WHERE THE JUDGE'S TIME GOES. Policy, not pool membership: a posting scoring
+// high enough, recent enough or visa-marked, somewhere the user could work.
+//
+// Deliberately says nothing about which postings exist, are live, or have been
+// judged — the caller composes those:
+//
+//   andWhere(openWhere(), judgeTargetWhere(true, now), unjudgedWhere())
+//
+// The predecessor (judgeableWhere) bundled all three, which is why the worker
+// could count a lane its own child process had no way to express: embed-fill
+// needs the population and the policy but must NOT filter on judgement.
+//
+// `now` is a parameter because it was not. The cut-off used to be computed
+// inside, so the worker's before-and-after progress check ran with cut-offs up
+// to four hours apart and a posting ageing out of the window read as work
+// getting done.
+export function judgeTargetWhere(wide: boolean, now: Date = new Date()) {
+  if (!wide) return andWhere({ score: { gt: 50 } }, VISA_MARKED);
+  return andWhere(
     // 40+: a single title hit scores 40, and title-only sources cap around
     // it — the 50 bar was hiding half the eligible pool.
-    score: { gte: 40 },
-    AND: [
-      unjudged,
-      // Freshness, with the visa-marked exempt. postedAt is the source's
-      // claim and the schema already warns it lies on evergreen boards
-      // (Lever createdAt from 2019); worse, a NULL excludes the posting
-      // outright. That filter alone was keeping 1,250 of the 2,009 unjudged
-      // sponsor-marked postings out of the queue — exactly the ones the user
-      // most wants judged. delistedAt is what actually retires a dead
-      // posting, so a sponsor-marked one may stay regardless of its date.
-      {
-        OR: [
-          VISA_MARKED,
-          { postedAt: { gte: new Date(Date.now() - 45 * 86_400_000) } },
-        ],
-      },
-      { OR: [{ country: { in: JUDGE_TARGETS } }, { workMode: "remote" }] },
-    ],
-  };
+    { score: { gte: 40 } },
+    // Freshness, with the visa-marked exempt. postedAt is the source's claim
+    // and the schema already warns it lies on evergreen boards (Lever
+    // createdAt from 2019); worse, a NULL excludes the posting outright. That
+    // filter alone was keeping 1,250 of the 2,009 unjudged sponsor-marked
+    // postings out of the queue — exactly the ones the user most wants judged.
+    // delistedAt is what actually retires a dead posting, so a sponsor-marked
+    // one may stay regardless of its date.
+    { OR: [VISA_MARKED, { postedAt: { gte: new Date(now.getTime() - 45 * 86_400_000) } }] },
+    { OR: [{ country: { in: JUDGE_TARGETS } }, { workMode: "remote" }] },
+  );
+}
+
+// THE JUDGING QUEUE: all three axes at once.
+//
+// Exported rather than left to the two callers to compose, because they are
+// fit-fill and the worker and they must agree exactly — when they did not, the
+// worker counted 67k eligible against a queue of 21k and kept respawning a
+// child that exited immediately. What changed is that the composition is now
+// visible and its parts are separately reusable: embed-fill takes the first two
+// and leaves out unjudgedWhere, which is the whole reason it can finally
+// express the lane the worker counted.
+export function judgeQueueWhere(wide: boolean, now: Date = new Date()) {
+  return andWhere(openWhere(), judgeTargetWhere(wide, now), unjudgedWhere());
 }
 
 // Bumped MANUALLY whenever the prompt text changes — LlmJudgmentHistory rows

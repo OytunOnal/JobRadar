@@ -1,4 +1,6 @@
-import { analyzeFit, andWhere, judgeableWhere, unjudgedWhere, VISA_MARKED, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { analyzeFit, judgeQueueWhere, unjudgedWhere, FIT_PROMPT_VERSION } from "../src/lib/fit";
+import { andWhere } from "../src/lib/pool";
+import { VISA_MARKED } from "../src/lib/visa";
 import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
 import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
@@ -57,11 +59,12 @@ const CHUNK = chunkFromArgs(args);
 // register, a source's structured flag, or the posting's own words). The
 // user's stated priority, and knowable without spending a second of GPU.
 const VISA_ONLY = args.includes("--visa-marked");
-// Composed through andWhere, and judgeableWhere is called ONCE: it computes a
-// `new Date()` cut-off internally, so calling it twice in one expression made
-// two subtly different filters out of what reads as one.
+// One clock for the whole run, frozen here. The 45-day cut-off inside
+// judgeTargetWhere used to be computed per call, so evaluating it twice in one
+// expression produced two subtly different filters out of what reads as one.
+const NOW = new Date();
 const where = andWhere(
-  judgeableWhere(WIDE),
+  judgeQueueWhere(WIDE, NOW),
   chunkWhere(CHUNK),
   VISA_ONLY ? VISA_MARKED : null,
 );

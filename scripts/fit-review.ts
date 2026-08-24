@@ -14,6 +14,8 @@
 // clouds stay free for whatever else is running tonight.
 
 process.env.LLM_DISABLE = "anthropic,cerebras,groq,gemini,deepseek";
+
+import { andWhere, openWhere } from "../src/lib/pool";
 process.env.OLLAMA_MODEL = process.env.REVIEW_MODEL || "qwen3.8:27b";
 
 import { appendFileSync } from "node:fs";
@@ -32,14 +34,14 @@ function log(line: string): void {
 // wave-1 was deliberately visa-first, so the unreliable "pre" pool is
 // CONCENTRATED exactly in the visa filter the user reads.
 const VISA_ONLY = process.argv.includes("--visa-only");
-const where = {
-  fitScore: { gte: 40 },
-  fitBy: null,
-  delistedAt: null,
-  duplicateOfId: null,
-  status: { in: ["new", "interested"] },
-  ...(VISA_ONLY ? { OR: [{ sponsorReg: true }, { visa: "yes" }] } : {}),
-};
+// openWhere, not a hand-written copy of it. The copy omitted `disqualified`,
+// so this pass was spending 27B minutes on postings the keyword gates had
+// already rejected — they can never reach the radar, whatever the verdict.
+const where = andWhere(
+  openWhere(),
+  { fitScore: { gte: 40 }, fitBy: null },
+  VISA_ONLY ? { OR: [{ sponsorReg: true }, { visa: "yes" }] } : null,
+);
 
 const total = await prisma.job.count({ where });
 log(`=== fit:review (${process.env.OLLAMA_MODEL}) — kuyrukta ${total} ilan (fit>=40, incelenmemiş${VISA_ONLY ? ", SADECE VISA-POZITIF" : ""}) ===`);

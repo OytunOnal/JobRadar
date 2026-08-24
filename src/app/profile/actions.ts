@@ -7,9 +7,10 @@ import { patchSettings, loadSettings } from "@/lib/settings";
 import { profile } from "@/lib/profile";
 import { SCORER_VERSION } from "@/lib/score";
 import { EXTRACTOR_VERSION } from "@/lib/facts";
-import { FIT_PROMPT_VERSION } from "@/lib/fit";
+import { FIT_PROMPT_VERSION, judgeQueueWhere, judgeTargetWhere } from "@/lib/fit";
 import { staleVectorWhere } from "@/lib/embed";
 import { deriveVisaTier } from "@/lib/visa";
+import { andWhere, liveWhere, openWhere } from "@/lib/pool";
 import type { TrackDef } from "@/lib/profile";
 
 // Editing the profile is never just a save: it invalidates work the pipeline
@@ -177,7 +178,7 @@ export async function startTask(formData: FormData): Promise<void> {
 
 export interface ImpactCounts {
   totalJobs: number;
-  candidates: number;
+  open: number;
   staleScores: number;
   staleFacts: number;
   staleJudgments: number;
@@ -186,41 +187,40 @@ export interface ImpactCounts {
 }
 
 export async function impactCounts(): Promise<ImpactCounts> {
-  const live = { delistedAt: null, duplicateOfId: null } as const;
-  const [totalJobs, candidates, staleScores, staleFacts, staleJudgments, missingVectors] =
+  // A health panel that disagrees with the pipeline it reports on is worse
+  // than no panel. It said so already about vectors — and then answered every
+  // other row with its own hand-written filter. Each count below is now the
+  // queue it reports on, composed from the same functions that queue feeds on.
+  //
+  // Two of them changed answer as a result. staleFacts was missing the
+  // freshness and target-country policy that facts:fill applies, so it reported
+  // work that queue would never do. staleJudgments asked a different COLUMN
+  // than the pipeline — a join against the judgment history rather than the
+  // posting's own stamp — which is a third opinion on "judged by an old
+  // prompt", where two were already one too many.
+  const NOW = new Date();
+  const [totalJobs, open, staleScores, staleFacts, staleJudgments, missingVectors] =
     await Promise.all([
       prisma.job.count(),
-      prisma.job.count({ where: { ...live, disqualified: false } }),
+      prisma.job.count({ where: openWhere() }),
       prisma.job.count({ where: { scores: { none: { scorerVersion: SCORER_VERSION } } } }),
       prisma.job.count({
-        where: {
-          ...live, disqualified: false, score: { gte: 40 },
+        where: andWhere(openWhere(), judgeTargetWhere(true, NOW), {
           OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }],
-        },
+        }),
       }),
-      prisma.job.count({
-        where: {
-          ...live, fitScore: { not: null },
-          judgments: { none: { promptVersion: FIT_PROMPT_VERSION } },
-        },
-      }),
-      // staleVectorWhere, not `vector IS NULL`. Every stored vector currently
-      // has builtFrom NULL — all stale — yet this panel rendered "vektörler
-      // güncel". A health panel that disagrees with the pipeline it reports on
-      // is worse than no panel.
-      prisma.job.count({
-        where: { ...live, disqualified: false, ...staleVectorWhere() },
-      }),
+      prisma.job.count({ where: andWhere(judgeQueueWhere(true, NOW), { fitScore: { not: null } }) }),
+      prisma.job.count({ where: andWhere(openWhere(), staleVectorWhere()) }),
     ]);
   // Sample-based drift check — the same invariant `npm run doctor` audits.
   const sample = await prisma.job.findMany({
-    where: live,
+    where: liveWhere(),
     select: { visa: true, sponsorReg: true, source: true, country: true, visaTier: true },
     take: 5000,
     orderBy: { updatedAt: "desc" },
   });
   const visaDrift = sample.filter((j) => deriveVisaTier(j, profile.workAuthorization) !== j.visaTier).length;
-  return { totalJobs, candidates, staleScores, staleFacts, staleJudgments, missingVectors, visaDrift };
+  return { totalJobs, open, staleScores, staleFacts, staleJudgments, missingVectors, visaDrift };
 }
 
 export async function currentSettings() {

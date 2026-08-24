@@ -3,7 +3,9 @@ import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL, embedStamp, staleVectorWhere } from "../src/lib/embed";
 import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
-import { VISA_MARKED } from "../src/lib/fit";
+import { andWhere, archiveWhere, openWhere } from "../src/lib/pool";
+import { judgeTargetWhere } from "../src/lib/fit";
+import { VISA_MARKED } from "../src/lib/visa";
 
 // Embedding backfill: vectors for every job that doesn't have one. Local
 // (Ollama), no API cost. Candidates first, disqualified rows after them (the
@@ -23,16 +25,20 @@ import { VISA_MARKED } from "../src/lib/fit";
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
 const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
-// --candidates: stop after the live pool instead of walking into the
-// disqualified archive. The archive is worth embedding (a scorer fix can
-// revive it, and the rescue lane mines it by similarity) but it is 445k rows
-// of work that must not stand between a text change and the judging queue.
-const CANDIDATES_ONLY = args.includes("--candidates");
+// --open: stop after the open pool instead of walking into the disqualified
+// archive. The archive is worth embedding (a scorer fix can revive it, and the
+// rescue lane mines it by similarity) but it is 445k rows of work that must not
+// stand between a text change and the judging queue.
+const OPEN_ONLY = args.includes("--open");
 // --archive: the mirror image — ONLY the disqualified archive. Without it the
 // worker's idle lane said "filling the archive" while embed-fill walked the
 // live pool first, so the archive was never reached as long as one
-// non-judgeable candidate was stale, and the log said otherwise.
+// non-judgeable posting was stale, and the log said otherwise.
 const ARCHIVE_ONLY = args.includes("--archive");
+// --judge-target: restrict to where the judge's time actually goes. The worker
+// passes it so the rows this embeds are the rows it is about to judge; without
+// it a lane spent GPU vectorising postings no judging pass would ever read.
+const JUDGE_TARGET = args.includes("--judge-target");
 // --min-score / --max-score: embed one score chunk. The worker walks chunks
 // top-down and wants vectors for the chunk it is about to judge, not for the
 // whole pool — seconds of work instead of a quarter of an hour.
@@ -41,6 +47,32 @@ const CHUNK = chunkFromArgs(args);
 // pass vectorises 2,373 postings instead of the whole 74k pool before it can
 // judge the ones the user asked for first.
 const VISA_ONLY = args.includes("--visa-marked");
+// Frozen once. judgeTargetWhere carries a 45-day cut-off, and a run that
+// recomputed it per query would be walking a population that moves underneath
+// it — the same hazard that made the worker's progress check unreliable.
+const NOW = new Date();
+
+// THE POPULATION THIS RUN WALKS — one definition, used by the header count and
+// by the walker.
+//
+// They used to be written separately, twelve lines apart, and they disagreed:
+// the count left `disqualified` unconstrained while the walker pinned it per
+// phase, so a plain `npm run embed:fill` announced a queue it was not walking.
+// Same class of bug as everything pool.ts exists to prevent, in the file that
+// imports the most predicates.
+function populationWhere(phase: 0 | 1) {
+  return andWhere(
+    phase === 1 ? archiveWhere() : openWhere(),
+    JUDGE_TARGET ? judgeTargetWhere(true, NOW) : null,
+    chunkWhere(CHUNK),
+    VISA_ONLY ? VISA_MARKED : null,
+    // "Missing" is not the only kind of stale. A vector built from text we have
+    // since re-fetched, or from a projection we have since redesigned, is wrong
+    // in a way `vector IS NULL` cannot express — which is how the pool once
+    // reported zero pending work while every vector was outdated.
+    staleVectorWhere(),
+  );
+}
 
 // Adaptive batch size: the ideal depends on GPU state we can't see (VRAM
 // occupancy, partial offload, background load) and it CHANGES mid-run —
@@ -124,22 +156,14 @@ async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
 }
 
 async function main() {
-  const total = await prisma.job.count({
-    // "Missing" is not the only kind of stale. A vector built from text we
-    // have since re-fetched, or from a projection we have since redesigned,
-    // is wrong in a way `vector IS NULL` cannot express — which is how the
-    // pool once reported zero pending work while every vector was outdated.
-    //
-    // Counted over the same population the run will actually walk: a header
-    // that promises 520k and stops at 78k reads like a crash.
-    where: {
-      delistedAt: null, duplicateOfId: null,
-      ...(CANDIDATES_ONLY ? { disqualified: false } : {}),
-      ...(ARCHIVE_ONLY ? { disqualified: true } : {}),
-      ...chunkWhere(CHUNK),
-      AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
-    },
-  });
+  // Counted over exactly the population the run will walk, phase by phase: a
+  // header that promises 520k and stops at 78k reads like a crash.
+  const total = ARCHIVE_ONLY
+    ? await prisma.job.count({ where: populationWhere(1) })
+    : OPEN_ONLY
+      ? await prisma.job.count({ where: populationWhere(0) })
+      : (await prisma.job.count({ where: populationWhere(0) })) +
+        (await prisma.job.count({ where: populationWhere(1) }));
   log(`=== embed:fill (${EMBED_MODEL}, pipelined) — kuyrukta ${total} ilan ===`);
 
   let done = 0;
@@ -156,22 +180,17 @@ async function main() {
   // tokenization/transfer overlaps the first's compute. Cursor-paged fetches
   // (id > lastId among vectorless rows) keep the two in-flight batches from
   // ever being the same rows, independent of write timing.
-  // Two phases keep the "candidates first" priority: phase 0 walks
-  // disqualified=false, phase 1 the archive. Within a phase, id-cursor pages.
+  // Two phases keep the "open pool first" priority: phase 0 walks the open
+  // pool, phase 1 the archive. Within a phase, id-cursor pages.
   let lastId = "";
-  // --archive starts at the archive phase and never touches the live pool;
-  // --candidates does the reverse. Both are needed: the worker's idle lane
-  // must be able to say "only the archive" and mean it.
-  let phase = ARCHIVE_ONLY ? 1 : 0;
+  // --archive starts at the archive phase and never touches the open pool;
+  // --open does the reverse. Both are needed: the worker's idle lane must be
+  // able to say "only the archive" and mean it.
+  let phase: 0 | 1 = ARCHIVE_ONLY ? 1 : 0;
   const fetchAfter = async (): Promise<Row[]> => {
     for (;;) {
       const rows = await prisma.job.findMany({
-        where: {
-          delistedAt: null, duplicateOfId: null,
-          disqualified: phase === 1, id: { gt: lastId },
-          ...chunkWhere(CHUNK),
-          AND: [...(VISA_ONLY ? [VISA_MARKED] : []), staleVectorWhere()],
-        },
+        where: andWhere(populationWhere(phase), { id: { gt: lastId } }),
         orderBy: { id: "asc" },
         take: BATCH,
         select: { id: true, title: true, content: { select: { description: true, textVersion: true } } },
@@ -180,7 +199,7 @@ async function main() {
         lastId = rows[rows.length - 1].id;
         return rows;
       }
-      if (phase === 1 || CANDIDATES_ONLY) return [];
+      if (phase === 1 || OPEN_ONLY) return [];
       phase = 1;
       lastId = "";
     }

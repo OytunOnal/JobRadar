@@ -40,9 +40,33 @@ A posting that is not disqualified, not a duplicate and not delisted. The
 single population every reader of the pool is asking about.
 _Avoid_: candidate, eligible, active, valid, open
 
+**Open posting**:
+A live posting the pipeline still considers: the user has neither dismissed it
+nor started pursuing it. What every work queue is about.
+_Avoid_: pending, unprocessed, queued
+
+**Discoverable posting**:
+An open posting the user has not reacted to at all. The radar's population, and
+the only one the radar ranks.
+_Avoid_: unseen, fresh, new job
+
+**Pursued posting**:
+One the user has applied to and is tracking. It leaves the radar on the way in,
+because the radar is for finding work, not for following it.
+_Avoid_: in progress, active application
+
+**Dismissed posting**:
+One the user said no to, with a reason. It stays in the pool as labelled
+feedback and leaves every work queue.
+_Avoid_: ignored, hidden, rejected (rejected is what an employer does)
+
+**Archive**:
+The disqualified part of the pool. Worked only when nothing else needs the GPU.
+_Avoid_: rejects, trash, cold storage
+
 **Radar**:
-The ranked reading surface for live postings. Its defining rule is that it
-labels a posting's risks rather than hiding the posting.
+The ranked reading surface for discoverable postings. Its defining rule is that
+it labels a posting's risks rather than hiding the posting.
 _Avoid_: dashboard, feed, board, results
 
 ## Where postings come from
@@ -146,6 +170,12 @@ The reading that a posting is unlikely to be one real, active opening —
 talent-pool voice, an agency advertising an unnamed employer, requirements that
 contradict each other. Disclosed on the radar, never used to hide a posting.
 _Avoid_: fake, spam, low quality
+
+**Judge target**:
+An open posting worth spending the judge on — scoring high enough, recent
+enough or visa-marked, and somewhere the user could work. A policy about where
+the GPU goes, not a statement about the pool.
+_Avoid_: eligible, queued, judgeable
 
 **Track**:
 One of the user's career directions. A posting is scored against each track and

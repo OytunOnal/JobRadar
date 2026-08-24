@@ -6,6 +6,7 @@ import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
 import { detectLanguageRequirements, LANG_NAMES } from "@/lib/langreq";
+import { discoverableWhere, liveWhere, pursuedWhere } from "@/lib/pool";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,6 @@ const VISA_TIER_LABELS: Record<(typeof VISA_TIERS)[number], string> = {
 };
 const PAGE_SIZE = 30;
 
-// Jobs the user is actively pursuing stay visible whatever their age.
-const PURSUED = ["applied", "interview", "offer"];
 
 function RadarMark() {
   return (
@@ -75,13 +74,12 @@ export default async function Page({
   const q = (sp.q ?? "").trim();
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
 
-  // Semantic duplicates (reposts of a tracked role) never render.
-  const where: any = { duplicateOfId: null };
+  // discoverableWhere: live, and not yet reacted to. Four columns that used to
+  // be spelled out here — and spelled out differently in ten other files.
+  // Interested postings render in their own strip above the list.
+  const where: any = { ...discoverableWhere() };
   const and: any[] = [];
   if (trackSet.size > 0) where.track = { in: [...trackSet] };
-  where.status = "new"; // interested jobs render in their own strip above the list
-  where.delistedAt = null; // closed roles have no discovery value
-  where.disqualified = false; // store-all keeps gate-rejects in the DB, never on the radar
   if (verdict !== "all") where.fitVerdict = verdict;
   if (locSet.size > 0) where.workMode = { in: [...locSet] };
   if (q) and.push({ OR: [{ title: { contains: q } }, { company: { contains: q } }] });
@@ -107,15 +105,20 @@ export default async function Page({
   // trying to catch — carries its own, judged by a model that read the
   // posting instead of inferred from a date. Hiding decides for the user with
   // worse information than they have.
-  const clauses: any[] = [{ delistedAt: null }]; // closed roles are gone, not risky
   if (poolNewest) {
     const delistCutoff = new Date(poolNewest.getTime() - DELISTED_AFTER_DAYS * 86_400_000);
-    clauses.push({
+    and.push({
       NOT: { AND: [{ source: { contains: ":" } }, { lastSeenAt: { lt: delistCutoff } }] },
     });
   }
-  // Jobs being pursued stay visible even after their source drops them.
-  and.push({ OR: [{ AND: clauses }, { status: { in: PURSUED } }] });
+  // There used to be an OR arm here re-admitting pursued postings, so a job you
+  // had applied to stayed visible after its source dropped it. It could never
+  // match: the population above pins status to "new", and the two met in the
+  // same AND. The comment described behaviour the query could not produce.
+  //
+  // Deleted rather than honoured, because the radar is for FINDING work and a
+  // posting you have applied to has been found — /applied tracks it, and shows
+  // the closure as a warning rather than dropping the row.
   // ── Region / country facet ─────────────────────────────────────────────
   // Country chips cascade from the region selection: top 10 by count within
   // the allowed set + "other" (the long tail) + "remote" (no location) +
@@ -184,7 +187,7 @@ export default async function Page({
   // Starred ("interested") jobs — a compact always-visible shortlist above the
   // discovery list, unaffected by the filters.
   const starred = await prisma.job.findMany({
-    where: { status: "interested", delistedAt: null, duplicateOfId: null, disqualified: false },
+    where: { ...liveWhere(), status: "interested" },
     orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
   });
 
@@ -193,7 +196,7 @@ export default async function Page({
   // dismissals).
   const appliedCompanies = new Set(
     (await prisma.job.findMany({
-      where: { status: { in: PURSUED } },
+      where: pursuedWhere(),
       select: { company: true },
       distinct: ["company"],
     })).map((r) => r.company),

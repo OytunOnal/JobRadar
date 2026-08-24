@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { DISMISS_REASONS, reasonLabel } from "@/lib/dismiss-reasons";
 import { setStatus } from "../actions";
+import { dismissedWhere } from "@/lib/pool";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ export default async function DismissedPage({
   const radarHref = from ? `/?${from}` : "/";
   const fromQS = from ? `?from=${encodeURIComponent(from)}` : "";
   const jobs = await prisma.job.findMany({
-    where: { status: "ignored" },
+    where: dismissedWhere(),
     orderBy: [{ lastSeenAt: "desc" }],
     take: 300,
   });

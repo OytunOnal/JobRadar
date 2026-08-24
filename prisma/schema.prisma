@@ -146,7 +146,7 @@ model Job {
   duplicateOfId String?
 
   // Application pipeline (current-state projection; history in UserActionLog)
-  status      String   @default("new") // new | interested | applied | interview | rejected | offer | ignored
+  status      String   @default("new") // new | interested | applied | interview | rejected | offer | ghosted | ignored
   // coverLetter moved to JobContent (layered split).
   notes       String?
 

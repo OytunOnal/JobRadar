@@ -3,6 +3,8 @@ import { prisma } from "../src/lib/db";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 import { extractFacts, EXTRACTOR_VERSION } from "../src/lib/facts";
 import { applyFactsToJob } from "../src/lib/visa-write";
+import { andWhere, openWhere } from "../src/lib/pool";
+import { judgeTargetWhere } from "../src/lib/fit";
 
 // Refuse rather than compete: two processes alternating between the 27B and
 // the embedder spend their time reloading 17.7 GB of weights, not working.
@@ -39,18 +41,20 @@ function log(line: string): void {
   appendFileSync("facts-fill.log", stamped + "\n");
 }
 
-const where = {
-  delistedAt: null,
-  duplicateOfId: null,
-  disqualified: false,
-  status: { in: ["new", "interested"] },
-  score: { gte: 40 },
+// Same population and the same policy as the judging queue — facts exist to
+// feed it — but a different work axis: facts, not verdicts. Written out by hand
+// here until pool.ts existed, which is how it came to carry its own copy of the
+// score gate and of the four eligibility columns.
+const NOW = new Date();
+const where = andWhere(
+  openWhere(),
+  judgeTargetWhere(true, NOW),
   // Queue = "no facts yet, or facts from an older extractor". Version-aware
   // like the keyword rescore: improving the extractor re-runs only what it
   // must, and the improvement reaches existing rows without a manual sweep.
-  OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }],
-  ...(JUDGED_FIRST ? { fitScore: { not: null } } : {}),
-};
+  { OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }] },
+  JUDGED_FIRST ? { fitScore: { not: null } } : null,
+);
 
 async function main() {
   const total = await prisma.job.count({ where });

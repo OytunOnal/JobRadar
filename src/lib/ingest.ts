@@ -49,6 +49,7 @@ import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefres
 import { deriveWorkMode, safeSlice, type RawJob, type Source } from "./sources/types";
 import { TEXT_VERSION } from "./html-text";
 import { invalidateVector } from "./embed";
+import { andWhere, openWhere } from "./pool";
 import { visaFields } from "./visa-write";
 import { normalizeLocation, resolveCountry } from "./geo";
 import { detectVisa } from "./visa";
@@ -779,7 +780,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // dashboard can rank by real fit, not just keyword score. No-ops without a key.
   if (llmEnabled()) {
     const toAnalyze = await prisma.job.findMany({
-      where: { fitScore: null, status: { in: ["new", "interested"] }, duplicateOfId: null, disqualified: false },
+      // openWhere, not a hand-written near-copy. The copy omitted delistedAt,
+      // so the one queue that ran right after a fetch was also the one queue
+      // that would spend a minute of LLM time on a posting already closed.
+      where: andWhere(openWhere(), { fitScore: null }),
       orderBy: { score: "desc" },
       take: AUTO_FIT_TOP_N,
       include: { content: { select: { description: true } } },

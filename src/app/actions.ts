@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
+import { OPEN_STATUSES } from "@/lib/pool";
 import { draftCoverLetter } from "@/lib/cover";
 import { analyzeFit, FIT_PROMPT_VERSION } from "@/lib/fit";
 
@@ -54,7 +55,7 @@ export async function dismissCompanyRest(formData: FormData) {
   const company = String(formData.get("company"));
   if (!company) return;
   const affected = await prisma.job.findMany({
-    where: { company, status: { in: ["new", "interested"] } },
+    where: { company, status: { in: [...OPEN_STATUSES] } },
     select: { id: true },
   });
   await prisma.job.updateMany({

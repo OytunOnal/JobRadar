@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
 import { staleVectorWhere } from "../src/lib/embed";
-import { andWhere, FIT_PROMPT_VERSION, judgeableWhere, VISA_MARKED } from "../src/lib/fit";
+import { FIT_PROMPT_VERSION, judgeQueueWhere } from "../src/lib/fit";
+import { andWhere, archiveWhere } from "../src/lib/pool";
+import { VISA_MARKED } from "../src/lib/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../src/lib/chunks";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
 
@@ -101,14 +103,18 @@ function run(script: string, extra: string[] = []): Promise<number> {
   });
 }
 
-const CANDIDATE = { disqualified: false, delistedAt: null, duplicateOfId: null } as const;
-
 // The same rows the child will work on — used for the before/after progress
 // check, so "did that do anything" is asked about the right population.
-function laneWhere(lane: Lane) {
+//
+// `now` is threaded in rather than taken fresh. judgeQueueWhere carries a
+// 45-day cut-off, and this function is called twice around a child that runs
+// for roughly four hours: with two cut-offs that far apart, a posting could
+// leave the population by AGEING OUT and the progress check would read that as
+// work getting done.
+function laneWhere(lane: Lane, now: Date) {
   return lane.kind === "visa"
-    ? andWhere(judgeableWhere(true), VISA_MARKED)
-    : andWhere(judgeableWhere(true), chunkWhere(lane.chunk));
+    ? andWhere(judgeQueueWhere(true, now), VISA_MARKED)
+    : andWhere(judgeQueueWhere(true, now), chunkWhere(lane.chunk));
 }
 
 // What the worker works on next, in one place.
@@ -126,10 +132,10 @@ type Lane =
   | { kind: "visa"; n: number }
   | { kind: "chunk"; chunk: Chunk };
 
-async function nextLane(): Promise<Lane | null> {
-  const visa = await prisma.job.count({ where: andWhere(judgeableWhere(true), VISA_MARKED) });
+async function nextLane(now: Date): Promise<Lane | null> {
+  const visa = await prisma.job.count({ where: andWhere(judgeQueueWhere(true, now), VISA_MARKED) });
   if (visa > 0) return { kind: "visa", n: visa };
-  // groupBy on judgeableWhere, NOT a hand-written SQL copy of it.
+  // groupBy on judgeQueueWhere, NOT a hand-written SQL copy of it.
   //
   // The copy left out freshness-or-sponsor-marked and the country/remote test,
   // so it counted 71,968 pending where 26,417 were actually judgeable. That is
@@ -142,7 +148,7 @@ async function nextLane(): Promise<Lane | null> {
   const hist = await prisma.job.groupBy({
     by: ["score"],
     _count: { _all: true },
-    where: judgeableWhere(true),
+    where: judgeQueueWhere(true, now),
   });
   const chunk = chunkFromHistogram(hist.map((h) => ({ score: h.score, n: h._count._all })));
   return chunk ? { kind: "chunk", chunk } : null;
@@ -152,7 +158,10 @@ async function pass(): Promise<boolean> {
   const busy = gpuBusyMessage();
   if (busy) { log(busy); return false; }
 
-  const lane = await nextLane();
+  // One clock for the whole pass: every count below, and the child's own view
+  // of the same lane, are asked about the same instant.
+  const now = new Date();
+  const lane = await nextLane(now);
   if (lane) {
     // Scope both stages to the SAME selection: vectors for exactly what we
     // are about to judge, which is seconds of work, not the twenty minutes a
@@ -164,7 +173,7 @@ async function pass(): Promise<boolean> {
       ? `vize işaretli (${lane.n.toLocaleString("tr")})`
       : `${chunkLabel(lane.chunk)} (${lane.chunk.n.toLocaleString("tr")})`;
 
-    const before = await prisma.job.count({ where: laneWhere(lane) });
+    const before = await prisma.job.count({ where: laneWhere(lane, now) });
 
     // ONE acquire for the whole lane. Releasing between embedding and judging
     // let a manual script slip into the gap and start swapping models against
@@ -172,11 +181,11 @@ async function pass(): Promise<boolean> {
     if (!acquireGpu("worker/lane")) return false;
     try {
       const stale = await prisma.job.count({
-        where: andWhere(laneWhere(lane), staleVectorWhere()),
+        where: andWhere(laneWhere(lane, now), staleVectorWhere()),
       });
       if (stale > 0) {
         log(`${label} — ${stale.toLocaleString("tr")} vektör eksik/bayat, önce onlar`);
-        const code = await run("scripts/embed-fill.ts", ["--candidates", ...childArgs]);
+        const code = await run("scripts/embed-fill.ts", ["--open", "--judge-target", ...childArgs]);
         // A crashed embed pass must not be followed by judging on the stale
         // vectors it failed to replace: that is a whole batch ordered by a
         // queue we know is wrong, and nothing would say so.
@@ -194,8 +203,8 @@ async function pass(): Promise<boolean> {
     // Did anything actually happen? A child that exits without judging —
     // because every row was skipped, or a predicate drifted apart from this
     // count — would otherwise be respawned forever. Belt and braces on top of
-    // sharing judgeableWhere: this catches the NEXT such mismatch too.
-    const after = await prisma.job.count({ where: laneWhere(lane) });
+    // sharing judgeQueueWhere: this catches the NEXT such mismatch too.
+    const after = await prisma.job.count({ where: laneWhere(lane, now) });
     if (after >= before) {
       log(`  ilerleme yok (${after} hâlâ sırada) — bekleniyor`);
       return false;
@@ -207,10 +216,7 @@ async function pass(): Promise<boolean> {
   // scorer fix can requalify those rows, and the rescue lane mines them by
   // similarity — but they must never delay live work, so they run last.
   const archive = await prisma.job.count({
-    where: andWhere(
-      { disqualified: true, delistedAt: null, duplicateOfId: null },
-      staleVectorWhere(),
-    ),
+    where: andWhere(archiveWhere(), staleVectorWhere()),
   });
   if (archive > 0) {
     if (!acquireGpu("worker/archive")) return false;

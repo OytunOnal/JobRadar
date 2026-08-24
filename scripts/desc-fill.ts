@@ -20,6 +20,7 @@ import { deriveWorkMode, stripHtml } from "../src/lib/sources/types";
 import { labelledSections as labelled } from "../src/lib/sections";
 import { TEXT_VERSION } from "../src/lib/html-text";
 import { invalidateVector } from "../src/lib/embed";
+import { andWhere, openWhere } from "../src/lib/pool";
 
 const args = process.argv.slice(2);
 const bIdx = args.indexOf("--budget");
@@ -194,14 +195,14 @@ const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("desc-fill.ts
 
 async function main() {
 const rows = await prisma.job.findMany({
-  where: {
-    delistedAt: null,
-    duplicateOfId: null,
-    // Store-all: never spend detail fetches on gate-rejected rows; if a
-    // scorer fix requalifies them, they re-enter this queue on the next run.
-    disqualified: false,
-    OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })),
-  },
+  // openWhere: store-all means never spending detail fetches on gate-rejected
+  // rows (a scorer fix re-enters them on the next run), and the status half
+  // means never spending them on postings the user has dismissed — which this
+  // queue used to do, because it constrained no status at all.
+  where: andWhere(
+    openWhere(),
+    { OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })) },
+  ),
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
   select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, content: { select: { description: true, textVersion: true } } },
 });

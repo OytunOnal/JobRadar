@@ -9,6 +9,19 @@
 
 export type VisaSignal = "yes" | "no" | "unknown";
 
+// "Marked as sponsoring" — the signals we have WITHOUT asking a model: the
+// company sits in a public sponsor register, the source shipped a structured
+// visa flag, or the posting itself says so. These are the user's stated
+// priority, and unlike the LLM's reading they are known before any GPU time
+// is spent.
+//
+// It lives here rather than in fit.ts because it is a fact about a posting's
+// visa evidence, not a judging policy — the worker uses it to pick a lane and
+// the embedding queue uses it to order one, neither of which is judging.
+export const VISA_MARKED = {
+  OR: [{ visaTier: "yes" }, { visaTier: "not-needed" }, { sponsorReg: true }, { visa: "yes" }],
+};
+
 const NEGATIVE_RE = new RegExp(
   [
     "no visa sponsorship",

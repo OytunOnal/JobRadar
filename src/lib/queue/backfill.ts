@@ -103,8 +103,13 @@ function receiptPath(script: string): string {
 // reintroduced by a directory rename.
 //
 // It lives here, next to the writer, so one test can hold both halves.
+// `[^.]` and not `[a-z]`: an extension with a digit in it (.ps1, .mjs is fine,
+// .ts is fine) would otherwise survive the strip and end up inside the receipt
+// name. Only .ts scripts go through here today, so this is the cheap kind of
+// correctness — nothing is broken, and the next caller will not have to find
+// out that the general-sounding helper was only ever general for letters.
 export function runNameFor(scriptPath: string): string {
-  return scriptPath.replace(/^.*[\\/]/, "").replace(/\.[a-z]+$/i, "");
+  return scriptPath.replace(/^.*[\\/]/, "").replace(/\.[^.]+$/, "");
 }
 
 // Clear a script's receipt before spawning it, so what is read afterwards can

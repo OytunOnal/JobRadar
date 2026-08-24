@@ -3,7 +3,6 @@ import { andWhere } from "../../src/lib/queue/pool";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromArgs, chunkWhere } from "../../src/lib/queue/chunks";
 import { prisma } from "../../src/lib/db";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../../src/lib/queue/gpu-lock";
 import { blendOrder, cosine, cvVector, fromBuffer } from "../../src/lib/llm/embed";
 import { extractFacts, EXTRACTOR_VERSION } from "../../src/lib/llm/facts";
 import { applyFactsToJob } from "../../src/lib/visa/visa-write";

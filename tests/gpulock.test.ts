@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +18,34 @@ function withLock<T>(fn: (path: string) => T): T {
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage } = await import("../src/lib/queue/gpu-lock");
+// A pid that cannot exist anywhere, rather than one that happens not to.
+// Linux caps pid_max at 2^22 and Windows pids are multiples of four well below
+// this; picking a number in the plausible range would make the test a bet on
+// what else the machine is running.
+const GONE = 0x7ffffff;
+
+// A REAL other process, because since the liveness check landed a made-up pid
+// no longer means anything.
+//
+// These cases used to write `process.pid + 1` to mean "someone else". That was
+// never a live pid — it was an arbitrary number that happened to answer the way
+// the test wanted, and only on Windows, where OpenProcess ignores the low two
+// bits of a pid and so probes THIS process for +1, +2 and +3 alike. Measured
+// both ways: on Windows all three report alive; under Linux, which is what CI
+// runs, all three are ESRCH. So the fixture would have passed here and failed
+// there — the worst shape a test can have. Spawn something instead: an idle
+// node holding a timer is unambiguously alive and unambiguously not us.
+function withLiveProcess<T>(fn: (pid: number) => T): T {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    assert.ok(child.pid, "could not spawn the stand-in process");
+    return fn(child.pid);
+  } finally {
+    child.kill();
+  }
+}
+
+const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild } = await import("../src/lib/queue/gpu-lock");
 
 test("acquire, then hold: the same process may re-acquire", () => {
   withLock(() => {
@@ -30,27 +58,31 @@ test("acquire, then hold: the same process may re-acquire", () => {
 });
 
 test("another live process is refused, and told who holds it", () => {
-  withLock((path) => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/judge", pid: process.pid + 1,
+      holder: "worker/judge", pid: other,
       since: new Date().toISOString(), beat: Date.now(),
     }));
     assert.equal(acquireGpu("manual/embed"), false);
     assert.match(gpuBusyMessage() ?? "", /GPU meşgul.*worker\/judge/);
-  });
+  }));
 });
 
-test("a dead holder's lock is taken over, not waited on forever", () => {
-  withLock((path) => {
-    // A crashed process leaves the file behind; only the heartbeat says so.
+// The OTHER half of the pair: a holder that is still running but has stopped
+// beating. Deliberately a live pid, so this exercises the staleness rule and
+// not the liveness one — a hung holder is exactly the case the clock is for,
+// and it is the only case where taking the lock is a judgement call rather
+// than an observation.
+test("a holder that stopped beating loses the lock, alive or not", () => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "worker/judge", pid: process.pid + 1,
+      holder: "worker/judge", pid: other,
       since: new Date(Date.now() - 3600_000).toISOString(), beat: Date.now() - 3600_000,
     }));
     assert.equal(gpuHolder(), null, "stale lock must not count as held");
     assert.equal(acquireGpu("worker/embed"), true);
     releaseGpu();
-  });
+  }));
 });
 
 test("a corrupt lock file blocks nothing", () => {
@@ -63,13 +95,13 @@ test("a corrupt lock file blocks nothing", () => {
 });
 
 test("releasing someone else's lock is a no-op", () => {
-  withLock((path) => {
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      holder: "other", pid: process.pid + 1, since: new Date().toISOString(), beat: Date.now(),
+      holder: "other", pid: other, since: new Date().toISOString(), beat: Date.now(),
     }));
     releaseGpu();
     assert.equal(gpuHolder()?.holder, "other");
-  });
+  }));
 });
 
 // A dead holder is not a holder.
@@ -83,7 +115,7 @@ test("a lock whose process is gone is takeable immediately, however fresh", () =
   withLock((path) => {
     writeFileSync(path, JSON.stringify({
       holder: "worker/lane",
-      pid: 0x7ffffff, // no such process
+      pid: GONE,
       since: new Date().toISOString(),
       beat: Date.now(), // beating as of this instant
     }), "utf8");
@@ -94,17 +126,57 @@ test("a lock whose process is gone is takeable immediately, however fresh", () =
   });
 });
 
+// The direction the liveness check could regress into, and the reason the two
+// tests above had to stop faking a pid: if `alive` ever answered too readily,
+// nothing here would notice a lock being handed away from a working process.
 test("a live holder still blocks, even when it is someone else", () => {
-  withLock((path) => {
-    // This process is alive by construction, and it is not us only because we
-    // claim a different pid — the point is that liveness alone must not hand
-    // the lock over.
+  withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
       holder: "manual/fit",
-      pid: process.pid,
+      pid: other,
       since: new Date().toISOString(),
       beat: Date.now(),
     }), "utf8");
     assert.notEqual(gpuHolder(), null, "a living holder is a holder");
-  });
+    assert.equal(acquireGpu("worker/lane"), false, "and it is not takeable");
+  }));
+});
+
+// A dead parent with a living child still holds the GPU.
+//
+// The worker takes the lock and then delegates: the model is loaded by the
+// child, and a kill aimed at the parent alone (taskkill, Task Manager) leaves
+// that child judging. Asking only about the parent's pid would hand a 6 GB
+// card to a second 27B load — the failure the lock exists to prevent, arrived
+// at through the fix for a different one.
+test("a delegated child keeps the lock alive after its parent is gone", () => {
+  withLock((path) => withLiveProcess((kid) => {
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane",
+      pid: GONE, // the parent is gone
+      child: kid, // but the work is not
+      since: new Date().toISOString(),
+      beat: Date.now(),
+    }), "utf8");
+    assert.equal(gpuHolder()?.holder, "worker/lane");
+    assert.equal(acquireGpu("worker/lane"), false, "no second judge on one card");
+  }));
+});
+
+test("setGpuChild records and clears, and never edits another process's lock", () => {
+  withLock(() => withLiveProcess((kid) => {
+    assert.equal(acquireGpu("worker/lane"), true);
+    setGpuChild(kid);
+    assert.equal(gpuHolder()?.child, kid);
+    setGpuChild(null);
+    assert.equal(gpuHolder()?.child, undefined, "a finished child leaves no claim behind");
+    releaseGpu();
+
+    // Someone else's lock: writing a child into it would be forging a claim.
+    writeFileSync(process.env.JOBRADAR_GPU_LOCK!, JSON.stringify({
+      holder: "other", pid: kid, since: new Date().toISOString(), beat: Date.now(),
+    }), "utf8");
+    setGpuChild(process.pid);
+    assert.equal(gpuHolder()?.child, undefined);
+  }));
 });

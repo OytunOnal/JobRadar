@@ -248,6 +248,11 @@ test("runNameFor takes the bare script name, whatever the directory", () => {
   // string — the naive spelling of this case asserts on a backspace character
   // and passes for the wrong reason.
   assert.equal(runNameFor(String.raw`scripts\backfill\fit-fill.ts`), "fit-fill");
+  // A digit in the extension. Nothing routes a .ps1 through here today, but
+  // the helper reads as general and a letters-only strip would have left
+  // `chain-embed-then-fit.ps1` in the receipt name.
+  assert.equal(runNameFor("scripts/chain-embed-then-fit.ps1"), "chain-embed-then-fit");
+  assert.equal(runNameFor("scripts/init-config.mjs"), "init-config");
 });
 
 test("nothing outside backfill.ts hand-writes the run scaffolding", async () => {

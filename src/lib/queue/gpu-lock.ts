@@ -25,7 +25,19 @@ function lockPath(): string {
 // rows longer. This only has to be shorter than "the process is really gone".
 const STALE_MS = 5 * 60_000;
 
-export interface LockInfo { holder: string; pid: number; since: string; beat: number }
+export interface LockInfo {
+  holder: string;
+  pid: number;
+  since: string;
+  beat: number;
+  /**
+   * The delegated child actually using the GPU, when the holder is a parent
+   * that spawned one. The lock records the worker's pid, but the worker only
+   * supervises — the 27B model is loaded by the child, and the two can outlive
+   * each other. See `gpuHolder`.
+   */
+  child?: number;
+}
 
 function read(): LockInfo | null {
   try {
@@ -68,8 +80,29 @@ export function gpuHolder(): LockInfo | null {
   // Pid reuse could in principle make this wrong in the other direction, but
   // only in the window where the OS has recycled the number AND the lock has
   // not gone stale — and the consequence is one taken lock, not corruption.
-  if (!alive(info.pid)) return null;
+  //
+  // ASK ABOUT THE CHILD TOO. The worker holds the lock and then delegates the
+  // real work: the 17.7 GB of weights is loaded by a child, not by the pid in
+  // this file. Killing the worker alone — taskkill, or Task Manager, either of
+  // which reaches the parent and not the group Ctrl-C would — leaves that child
+  // judging for up to four hours with a dead parent's pid on the lock. Asking
+  // only about the parent would then hand the GPU to a replacement instantly
+  // and put two 27B loads on a 6 GB card, which is the one thing this file
+  // exists to prevent. The old five-minute rule blunted that by accident; this
+  // asks the question directly.
+  if (!alive(info.pid) && !(info.child && alive(info.child))) return null;
   return Date.now() - info.beat > STALE_MS ? null : info;
+}
+
+// Record the delegated child that is really using the GPU, or clear it when
+// that child is gone. A no-op for a process that does not hold the lock, on
+// the same principle as `beatGpu`: never edit someone else's claim.
+export function setGpuChild(pid: number | null): void {
+  const info = read();
+  if (!info || info.pid !== process.pid) return;
+  if (pid === null) delete info.child;
+  else info.child = pid;
+  try { writeFileSync(lockPath(), JSON.stringify(info), "utf8"); } catch { /* transient */ }
 }
 
 // Take the GPU for `holder`, or return false if someone else has it. Callers

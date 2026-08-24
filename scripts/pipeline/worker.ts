@@ -8,7 +8,7 @@ import { andWhere, archiveWhere } from "../../src/lib/queue/pool";
 import { clearRun, readRun, runNameFor, type RunResult } from "../../src/lib/queue/backfill";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../../src/lib/queue/chunks";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../../src/lib/queue/gpu-lock";
+import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu, setGpuChild } from "../../src/lib/queue/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
 // which is right for a migration and wrong for a tool that lives on your
@@ -101,11 +101,16 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
       },
     );
     const beat = setInterval(beatGpu, 20_000);
-    child.on("exit", (code) => { clearInterval(beat); resolve(code ?? 1); });
+    // Put the child on the lock. We hold it, but IT is the process holding the
+    // model, and a kill aimed at us alone would leave it running behind a pid
+    // that no longer exists.
+    setGpuChild(child.pid ?? null);
+    const stop = (): void => { clearInterval(beat); setGpuChild(null); };
+    child.on("exit", (code) => { stop(); resolve(code ?? 1); });
     // Without this the emitted error is unhandled and takes down the one
     // process built to survive its children failing.
     child.on("error", (e) => {
-      clearInterval(beat);
+      stop();
       log(`  süreç başlatılamadı: ${e.message}`);
       resolve(1);
     });

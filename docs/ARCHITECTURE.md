@@ -298,6 +298,27 @@ this and can still crash the machine — a real gap, deliberately out of scope,
 since the lock could only withdraw our own work rather than prevent another
 process's load.
 
+**Amended (2026-08-25), closing the two questions the first review left open:**
+
+- **Creation is exclusive.** Taking the card was a read then a write, so two
+  processes could both see it free, both write, and both believe they had
+  acquired — the loser working on uncovered while warning into a log nobody
+  reads mid-run. Runs are now created with an exclusive write (`wx`): exactly
+  one create lands, the loser re-reads and is told the truth. Updates stay on
+  the atomic-replace path — those races are between participants of the same
+  run, and re-entry on every beat already heals them.
+- **A run is stamped with its boot.** A pid only means anything on the boot
+  that issued it. A crash leaves the file behind; the OS reissues low numbers
+  quickly after a restart; a listed pid landing on an innocent system process
+  held the card for the whole backstop, with the busy message pointing the
+  reader at that innocent process. A run stamped by a previous boot is now over
+  before liveness is even asked. Runs written before the stamp keep the old
+  rules.
+- **The lock lives outside anything synced.** The old default, `data/gpu.lock`,
+  sat inside a OneDrive folder — and a lock whose correctness rests on
+  millisecond renames does not belong under a sync engine's open handles. The
+  default is now under `LOCALAPPDATA`; `JOBRADAR_GPU_LOCK` still overrides.
+
 **Testing.** Two seams. The module's own interface covers the rules. A second,
 narrow seam spawns real processes through the same wrapper the worker uses,
 because four of the five review rounds found their worst defect in the gap

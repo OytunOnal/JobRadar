@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 
 // SEAM 1: the lock module's own interface, with the lock file redirected.
@@ -319,5 +319,46 @@ test("a run abandoned by a graceful exit still says so", () => {
     leaveGpu(); // the worker stops politely; the child judges on
     assert.deepEqual(read(path).participants, [child], "we are out of the list");
     assert.equal(read(path).startedBy, process.pid, "but who began it is not forgotten");
+  }));
+});
+
+// ---- The two questions deferred from the run redesign, now closed. ----
+
+test("a new run records which boot it belongs to", () => {
+  withLock((path) => {
+    assert.equal(claimGpu("worker/lane"), "acquired");
+    const stamped = read(path).bootEpoch;
+    const now = Date.now() - uptime() * 1000;
+    assert.ok(Math.abs(stamped - now) < 60_000, "the stamp is this boot's");
+    leaveGpu();
+  });
+});
+
+// A crash or power loss leaves the file behind, and after a reboot the OS
+// reissues low pids quickly. Without the stamp, a listed pid landing on an
+// innocent system process held the card for the whole eight-hour backstop —
+// and the busy message told the reader to go stop that innocent process.
+test("a run from a previous boot is over, however alive its numbers look", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-reboot", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+      bootEpoch: Date.now() - uptime() * 1000 - 86_400_000, // a boot that is gone
+    }), "utf8");
+    assert.equal(gpuRun(), null, "its pids were issued by a machine that no longer exists");
+    assert.equal(claimGpu("worker/lane"), "acquired");
+    leaveGpu();
+  }));
+});
+
+test("a run with no boot stamp keeps the old rules", () => {
+  withLock((path) => withLiveProcess((other) => {
+    // Written by the build before the stamp existed: same shape, no bootEpoch.
+    writeFileSync(path, JSON.stringify({
+      id: "run-old", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    assert.notEqual(gpuRun(), null, "a live participant still holds it");
+    assert.equal(claimGpu("worker2/lane"), "busy");
   }));
 });

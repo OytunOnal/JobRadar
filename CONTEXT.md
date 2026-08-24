@@ -268,9 +268,11 @@ whether it is still alive.
 _Avoid_: owner, holder, child
 
 **Takeover**:
-Beginning a new run on a card whose previous run has no participant left alive.
+Beginning a new run on a card whose previous run is over — no participant left
+alive, or the run was stamped by a previous boot, whose pids mean nothing now.
 Immediate, because a run with nobody in it is already over. A run whose
-participants are alive is never taken, however long it has been silent.
+participants are alive on this boot is never taken, however long it has been
+silent.
 _Avoid_: steal, break the lock, force, reclaim
 
 **Band**:

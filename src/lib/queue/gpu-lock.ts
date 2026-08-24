@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { tmpdir, uptime } from "node:os";
 
 // One GPU, and a laptop that falls over if two models are on it.
 //
@@ -33,7 +34,19 @@ function lockPath(): string {
   // Read per call, not at module load: a packaged build puts state outside the
   // repo, and a test needs its own file. Freezing it at import is the same bug
   // twice — settings.ts had it too.
-  return process.env.JOBRADAR_GPU_LOCK || "data/gpu.lock";
+  //
+  // The default lives OUTSIDE anything synced. It used to be data/gpu.lock,
+  // which sits inside a OneDrive folder — and a lock whose correctness rests on
+  // millisecond renames does not belong under a sync engine's and antivirus's
+  // open handles; those produce exactly the write failures writeLock reports
+  // and the three-strike rule stops the worker over. Runtime state, not data.
+  //
+  // Migration note: a worker from the old build watches the old path and
+  // cannot see this one — the upgrade happens with the worker stopped, the
+  // same discipline the run redesign already required.
+  if (process.env.JOBRADAR_GPU_LOCK) return process.env.JOBRADAR_GPU_LOCK;
+  const base = process.env.LOCALAPPDATA || tmpdir();
+  return join(base, "jobradar", "gpu.lock");
 }
 
 // The environment variable a spawned process inherits, carrying the id of the
@@ -52,6 +65,13 @@ const TOKEN = "JOBRADAR_GPU_RUN";
 // hours — and it is not a limit on how long work may take.
 export const BACKSTOP_MS = 8 * 60 * 60_000;
 
+// now − uptime drifts a few milliseconds between calls (measured: 13ms); the
+// tolerance only has to be far smaller than the time a reboot takes.
+const BOOT_TOLERANCE_MS = 60_000;
+function bootEpochNow(): number {
+  return Date.now() - uptime() * 1000;
+}
+
 export interface Run {
   /** Generated when the run is created. The card's identity; never a pid. */
   id: string;
@@ -62,6 +82,16 @@ export interface Run {
   beat: number;
   /** Pids taking part. Liveness only. */
   participants: number[];
+  /**
+   * When the machine that issued these pids booted. A pid only means anything
+   * on the boot that issued it: after a crash leaves the file behind and the
+   * machine restarts, the OS reissues low numbers quickly, and a listed pid
+   * landing on an innocent system process used to hold the card for the whole
+   * backstop — with the busy message pointing the reader at that innocent
+   * process. Absent on runs written before the stamp existed; those keep the
+   * old rules.
+   */
+  bootEpoch?: number;
   /**
    * The pid that began the run, kept for the busy MESSAGE alone: whether it is
    * gone is the difference between "still working" and "abandoned but still
@@ -162,6 +192,10 @@ export function gpuRun(): Run | null {
   // what makes a restart instant: the old worker's participants are dead the
   // moment it is killed, so the replacement starts at once rather than waiting
   // out a timer for a process that no longer exists.
+  // A run stamped by a previous boot is over before liveness is even asked:
+  // its pids were issued by a machine that no longer exists, so a live answer
+  // for one of them is about a stranger, not a participant.
+  if (run.bootEpoch !== undefined && Math.abs(run.bootEpoch - bootEpochNow()) > BOOT_TOLERANCE_MS) return null;
   if (!run.participants.some(alive)) return null;
   if (Date.now() - run.beat > BACKSTOP_MS) return null;
   return run;
@@ -222,10 +256,48 @@ export function claimGpu(holder: string): GpuClaim {
     beat: Date.now(),
     participants: [process.pid],
     startedBy: process.pid,
+    bootEpoch: bootEpochNow(),
   };
-  if (!writeLock(run)) return "unwritable";
-  myRun = run.id;
-  return "acquired";
+  // CREATION IS EXCLUSIVE, because taking the card is a read and then a write.
+  // Two processes could both see it free and both write; the later rename won
+  // silently, and BOTH walked away believing they had acquired — the loser
+  // kept working uncovered, warning into a log nobody reads mid-run. With
+  // `wx`, exactly one create lands; the loser re-reads and is told the truth.
+  //
+  // Updates stay on the tmp+rename path: those races are between participants
+  // of the SAME run, and re-entry on every beat already heals them.
+  const created = createLock(run);
+  if (created === "created") {
+    myRun = run.id;
+    return "acquired";
+  }
+  if (created === "exists") {
+    const winner = gpuRun();
+    if (winner) {
+      if (!mine(winner)) return "busy";
+      // Ours after all — the race was against a sibling holding our token.
+      return enter(winner) ? "joined" : "unwritable";
+    }
+    // A file is there, but no live run is in it — corrupt, or a dead run's
+    // leftover. "An unreadable lock is no lock" still holds; replacing what a
+    // fresh create cannot get past is the one place the non-exclusive write
+    // remains right.
+    if (!writeLock(run)) return "unwritable";
+    myRun = run.id;
+    return "acquired";
+  }
+  return "unwritable";
+}
+
+function createLock(run: Run): "created" | "exists" | "failed" {
+  const path = lockPath();
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(run), { encoding: "utf8", flag: "wx" });
+    return "created";
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EEXIST" ? "exists" : "failed";
+  }
 }
 
 /** True when this process is now taking part in a run for its work. */

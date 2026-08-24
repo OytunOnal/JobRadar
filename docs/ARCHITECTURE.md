@@ -325,6 +325,34 @@ because four of the five review rounds found their worst defect in the gap
 *between* processes — a gap the in-process seam cannot see, and which fixtures
 inventing a pid actively hid.
 
+### ADR-12 · The pursuit lifecycle defines effects, not permissions
+
+The rules that read pursuit statuses had one tested home (`pool.ts`); the
+rules that produce them had none. One policy — nudge 10 days after applying,
+a concluded pursuit needs no nudge, suggest ghosted after 14 more days of
+silence — lived as constants and branches in three files, one of them a render
+function, with zero tests on the write side. Its one invariant was enforced
+only on read: dismissing left the follow-up date behind and `/applied`
+compensated with a status guard.
+
+**Decision: one module owns every consequence of a status change, and it
+validates nothing.** Any status may follow any status. This is deliberate and
+was re-examined under a product lens, since a state-machine validator is the
+textbook move here: the tool is local-first, so even as a product each user
+remains the authority over their own pursuit data, and `applied → new` is
+almost always an undo, not an error. Rejecting it fights the user. The
+asymmetry seals it — adding validation later is one function at the seam this
+module creates; removing it later breaks users' habits. If a real API surface
+ever exists, legality belongs at that boundary, not in the domain effects.
+
+**The price of no permissions is total effects.** Every jump must mean
+something, including the ones a single-user tool never sees: a pursuit tracked
+late enters at interview or offer with no applied stamp, and under the old
+partial rules the follow-up machinery simply never engaged for it. So:
+entering any pursued status stamps `appliedAt` if unset; entering an awaiting
+status ensures a follow-up date; entering anything else clears it; dismissing
+records the reason (ADR-5's data), leaving dismissal clears it.
+
 ## Evolution note
 
 The system did not start with this architecture, deliberately: a single fat

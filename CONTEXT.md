@@ -60,6 +60,14 @@ One the user has taken into their pipeline, whether it is still open or has
 ended. Pursued plus the outcomes.
 _Avoid_: application, stage, my jobs
 
+**Pursuit lifecycle**:
+Everything that changes alongside a posting's status when it changes: the
+applied stamp, the follow-up date, the dismissal reason, the action-log entry.
+One policy with one home. It defines consequences, never permissions — any
+status may follow any status, and the effects are total over every jump,
+including tracking a pursuit late (straight into interview or offer).
+_Avoid_: state machine, workflow, transition rules
+
 **Awaiting a reply**:
 A pursued posting where the other side still owes an answer. The only state a
 follow-up nudge is for.

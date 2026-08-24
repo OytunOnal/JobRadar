@@ -3,45 +3,28 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { runIngest } from "@/lib/ingest";
-import { isConcluded, OPEN_STATUSES } from "@/lib/queue/pool";
+import { OPEN_STATUSES } from "@/lib/queue/pool";
+import { followUpDate, pursuitEvent, transitionFields } from "@/lib/queue/pursuit";
 import { draftCoverLetter } from "@/lib/llm/cover";
 import { analyzeFit, verdictFields } from "@/lib/llm/fit";
 
-const FOLLOW_UP_DAYS = 10; // Europe answers slowly — first nudge after 10 days
-
+// The rules — stamps, nudges, reasons, the event shape — live in
+// queue/pursuit.ts (ADR-12). These handlers read the form and apply what the
+// lifecycle says; nothing here decides anything.
 export async function setStatus(formData: FormData) {
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
-  const extra: { appliedAt?: Date; followUpAt?: Date | null; dismissReason?: string | null } = {};
-  if (status === "applied") {
-    const cur = await prisma.job.findUnique({ where: { id }, select: { appliedAt: true } });
-    if (!cur?.appliedAt) {
-      extra.appliedAt = new Date();
-      extra.followUpAt = new Date(Date.now() + FOLLOW_UP_DAYS * 86_400_000);
-    }
-  }
-  // A concluded pursuit does not need nudging.
-  if (isConcluded(status)) extra.followUpAt = null;
-  // Dismissing records why (labeled feedback for scorer tuning); leaving the
-  // dismissed state clears it.
-  if (status === "ignored") {
-    const reason = String(formData.get("reason") ?? "");
-    extra.dismissReason = reason || null;
-  } else {
-    extra.dismissReason = null;
-  }
+  const current = await prisma.job.findUnique({
+    where: { id },
+    select: { status: true, appliedAt: true, followUpAt: true },
+  });
+  if (!current) return;
+  const { fields, event } = transitionFields(current, status, {
+    reason: String(formData.get("reason") ?? "") || null,
+  });
   await prisma.job.update({
     where: { id },
-    data: {
-      status, ...extra,
-      actions: {
-        create: {
-          type: status === "ignored" ? "dismissed" : "status-change",
-          payload: JSON.stringify({ to: status, ...(extra.dismissReason ? { reason: extra.dismissReason } : {}) }),
-          at: new Date(),
-        },
-      },
-    },
+    data: { ...fields, actions: { create: event } },
   });
   revalidatePath("/");
   revalidatePath("/applied");
@@ -56,16 +39,22 @@ export async function dismissCompanyRest(formData: FormData) {
   if (!company) return;
   const affected = await prisma.job.findMany({
     where: { company, status: { in: [...OPEN_STATUSES] } },
-    select: { id: true },
+    select: { id: true, status: true, appliedAt: true, followUpAt: true },
   });
+  if (affected.length === 0) return;
+  // Open postings share one lifecycle answer, so ask once and apply to all —
+  // the same definition the single-row path uses, not a second spelling of it.
+  const { fields, event } = transitionFields(
+    { status: "new", appliedAt: null, followUpAt: null },
+    "ignored",
+    { reason: "company-applied", bulk: true },
+  );
   await prisma.job.updateMany({
     where: { id: { in: affected.map((a) => a.id) } },
-    data: { status: "ignored", dismissReason: "company-applied" },
+    data: fields,
   });
   await prisma.userActionLog.createMany({
-    data: affected.map((a) => ({
-      jobId: a.id, type: "dismissed", payload: '{"reason":"company-applied","bulk":true}', at: new Date(),
-    })),
+    data: affected.map((a) => ({ jobId: a.id, ...event })),
   });
   revalidatePath("/");
   revalidatePath("/dismissed");
@@ -76,7 +65,7 @@ export async function setFollowUp(formData: FormData) {
   const days = String(formData.get("days")); // "3" | "7" | "clear"
   await prisma.job.update({
     where: { id },
-    data: { followUpAt: days === "clear" ? null : new Date(Date.now() + Number(days) * 86_400_000) },
+    data: { followUpAt: followUpDate(days) },
   });
   revalidatePath("/applied");
 }
@@ -86,7 +75,7 @@ export async function saveNote(formData: FormData) {
   const note = String(formData.get("note") ?? "").slice(0, 500);
   await prisma.job.update({
     where: { id },
-    data: { note: note || null, actions: { create: { type: "note", payload: null, at: new Date() } } },
+    data: { note: note || null, actions: { create: pursuitEvent("note", null) } },
   });
   revalidatePath("/applied");
 }

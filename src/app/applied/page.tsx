@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
 import { postingLabels } from "@/lib/view/labels";
 import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
+import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,6 @@ const GROUPS: Array<{ status: string; label: string }> = [
   { status: "rejected", label: "Rejected" },
   { status: "ghosted", label: "Ghosted" },
 ];
-const GHOST_SUGGEST_DAYS = 14; // follow-up long overdue and still silent
-
 function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
@@ -41,15 +40,13 @@ export default async function AppliedPage({
   ]);
   const nowDate = new Date();
   const now = nowDate.getTime();
-  const dueToday = jobs.filter(
-    (j) => j.followUpAt && j.followUpAt.getTime() <= now && isAwaitingReply(j.status),
-  );
+  // Lifecycle rules come from queue/pursuit.ts — a render function is where
+  // one of them used to live, which meant it could only be tested by
+  // rendering. The page asks; it does not decide.
+  const dueToday = jobs.filter((j) => followUpDue(j, nowDate));
 
   const card = (j: (typeof jobs)[number]) => {
-    const ghostSuggest =
-      j.status === "applied" &&
-      j.followUpAt &&
-      now - j.followUpAt.getTime() > GHOST_SUGGEST_DAYS * 86_400_000;
+    const ghostSuggest = ghostSuggested(j, nowDate);
     return (
       <article className="job trackrow" key={j.id}>
         <div className="jobmain">

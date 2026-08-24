@@ -55,6 +55,21 @@ One the user has applied to and is tracking. It leaves the radar on the way in,
 because the radar is for finding work, not for following it.
 _Avoid_: in progress, active application
 
+**Tracked posting**:
+One the user has taken into their pipeline, whether it is still open or has
+ended. Pursued plus the outcomes.
+_Avoid_: application, stage, my jobs
+
+**Awaiting a reply**:
+A pursued posting where the other side still owes an answer. The only state a
+follow-up nudge is for.
+_Avoid_: pending, open application, waiting
+
+**Concluded**:
+A pursuit that ended — an offer, a rejection, or silence long past the
+follow-up date. Nothing is nudged after this.
+_Avoid_: closed, finished, done
+
 **Dismissed posting**:
 One the user said no to, with a reason. It stays in the pool as labelled
 feedback and leaves every work queue.
@@ -186,6 +201,17 @@ _Avoid_: category, role type, discipline
 The levels one track will accept. Per track, because ten years in one field and
 two in another want different answers.
 _Avoid_: level filter, experience range
+
+**Label**:
+Something a posting's card says about it — a risk, a plain fact, or good news.
+Every surface draws from one vocabulary, so the same fact cannot read as
+`sponsor✓` on one page and `sponsor?` on another.
+_Avoid_: badge, chip, tag, flag
+
+**Tone**:
+Whether a label is a risk, a note, or good news. The label's meaning; the
+colour is the page's business.
+_Avoid_: severity, level, colour
 
 ## Freshness
 

@@ -264,3 +264,14 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .stale .fitnum { font-weight: 500; }
 .stale .vlabel { font-style: italic; }
 .fitnum-inline.stale { opacity: 0.45; font-weight: 500; }
+
+/* Risk disclosures under the fit score. These replace two things that used to
+   HIDE a posting or bury the warning: the 45-day age filter (which dropped 74
+   already-judged postings, 72 of them real openings by the model's own
+   reading) and a ghost badge lost among the meta chips. Showing the risk lets
+   the reader weigh it; hiding decided for them on worse evidence. */
+.risk {
+  margin-top: 6px; font-size: 10px; line-height: 1.25; letter-spacing: 0.02em;
+  color: var(--muted); text-align: center; cursor: help;
+}
+.risk.warn { color: var(--weak); }

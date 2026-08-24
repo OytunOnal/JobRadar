@@ -1,12 +1,7 @@
 import { prisma } from "@/lib/db";
 import { profile } from "@/lib/profile";
 import { FIT_PROMPT_VERSION } from "@/lib/fit";
-import {
-  ageLabel,
-  classifyFreshness,
-  DELISTED_AFTER_DAYS,
-  FRESH_MAX_DAYS,
-} from "@/lib/freshness";
+import { ageLabel, classifyFreshness, DELISTED_AFTER_DAYS } from "@/lib/freshness";
 import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "@/lib/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/dismiss-reasons";
@@ -25,7 +20,6 @@ const WORK_MODES = [
   { value: "onsite", label: "on-site" },
 ] as const;
 const STATUSES = ["active", "all", "new", "interested", "applied", "interview", "offer", "rejected"] as const;
-const AGES = ["fresh", "all"] as const;
 // The visa axis: a derived tier, not raw evidence (see lib/visa.ts). Hidden
 // entirely when the profile says no sponsorship is needed anywhere.
 const VISA_TIERS = ["yes", "maybe", "no", "unknown", "not-needed"] as const;
@@ -52,7 +46,7 @@ function RadarMark() {
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; age?: string; region?: string; country?: string; visa?: string }>;
+  searchParams: Promise<{ track?: string; status?: string; verdict?: string; loc?: string; q?: string; page?: string; region?: string; country?: string; visa?: string }>;
 }) {
   const sp = await searchParams;
   // track is a comma list of track keys; empty = all.
@@ -67,7 +61,6 @@ export default async function Page({
     (sp.loc ?? "").split(",").map((s) => s.trim()).filter((s) => WORK_MODES.some((m) => m.value === s)),
   );
   const loc = [...locSet].sort().join(",");
-  const age = sp.age ?? "fresh";
   // region: comma list of region keys; country: comma list of alpha-2 codes
   // plus the special buckets "other" | "remote" | "unknown".
   const regionSet = new Set(
@@ -98,29 +91,31 @@ export default async function Page({
   // the delisted check against "we simply haven't ingested lately".
   const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
 
-  if (age === "fresh") {
-    const now = Date.now();
-    const freshCutoff = new Date(now - FRESH_MAX_DAYS * 86_400_000);
-    const clauses: any[] = [
-      { delistedAt: null }, // swept-away roles are gone from the default view
-      // Anchor (postedAt, else firstSeenAt) within the fresh window...
-      {
-        OR: [
-          { postedAt: { gte: freshCutoff } },
-          { postedAt: null, firstSeenAt: { gte: freshCutoff } },
-        ],
-      },
-    ];
-    // ...and, for direct-source jobs, still listed at the source.
-    if (poolNewest) {
-      const delistCutoff = new Date(poolNewest.getTime() - DELISTED_AFTER_DAYS * 86_400_000);
-      clauses.push({
-        NOT: { AND: [{ source: { contains: ":" } }, { lastSeenAt: { lt: delistCutoff } }] },
-      });
-    }
-    // Jobs being pursued are never hidden by age.
-    and.push({ OR: [{ AND: clauses }, { status: { in: PURSUED } }] });
+  // A posting is hidden only when it is GONE, never when it is merely old.
+  //
+  // The age filter used to drop anything whose postedAt fell outside a 45-day
+  // window, and it was measured hiding 74 already-judged postings — 72 of
+  // which the model had read and called real openings, 16 of them strong.
+  // The reason is that postedAt does not mean what the filter assumed: Ashby
+  // reports Elicit's still-open ML Engineer role as published 2021-01-23 with
+  // isListed true, because the field records when the record was created, not
+  // when the opening appeared. Filtering on it discards live jobs and keeps
+  // dead ones whose dates happen to look recent.
+  //
+  // So age is now DISCLOSED rather than enforced: the card carries a "may not
+  // be fresh" badge, and ghost risk — the thing the age filter was really
+  // trying to catch — carries its own, judged by a model that read the
+  // posting instead of inferred from a date. Hiding decides for the user with
+  // worse information than they have.
+  const clauses: any[] = [{ delistedAt: null }]; // closed roles are gone, not risky
+  if (poolNewest) {
+    const delistCutoff = new Date(poolNewest.getTime() - DELISTED_AFTER_DAYS * 86_400_000);
+    clauses.push({
+      NOT: { AND: [{ source: { contains: ":" } }, { lastSeenAt: { lt: delistCutoff } }] },
+    });
   }
+  // Jobs being pursued stay visible even after their source drops them.
+  and.push({ OR: [{ AND: clauses }, { status: { in: PURSUED } }] });
   // ── Region / country facet ─────────────────────────────────────────────
   // Country chips cascade from the region selection: top 10 by count within
   // the allowed set + "other" (the long tail) + "remote" (no location) +
@@ -210,14 +205,13 @@ export default async function Page({
   const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
 
   // Build hrefs that preserve every other filter (page resets on filter change).
-  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "age" | "region" | "country" | "visa", string>>) => {
+  const href = (over: Partial<Record<"track" | "status" | "verdict" | "loc" | "q" | "page" | "region" | "country" | "visa", string>>) => {
     const p = new URLSearchParams();
-    const merged = { track, status, verdict, loc, q, age, region, country, visa, page: "", ...over };
+    const merged = { track, status, verdict, loc, q, region, country, visa, page: "", ...over };
     if (merged.track) p.set("track", merged.track);
     if (merged.status !== "active") p.set("status", merged.status);
     if (merged.verdict !== "all") p.set("verdict", merged.verdict);
     if (merged.loc) p.set("loc", merged.loc);
-    if (merged.age !== "fresh") p.set("age", merged.age);
     if (merged.region) p.set("region", merged.region);
     if (merged.country) p.set("country", merged.country);
     if (merged.visa) p.set("visa", merged.visa);
@@ -344,12 +338,6 @@ export default async function Page({
             );
           })}
         </div>
-        <div className="fgroup">
-          <span className="flabel">age</span>
-          {AGES.map((a) => (
-            <a key={a} href={href({ age: a })} className={`chip ${age === a ? "active" : ""}`}>{a}</a>
-          ))}
-        </div>
       </div>
 
       {starred.length > 0 && (
@@ -441,6 +429,27 @@ export default async function Page({
                   <div className="vlabel unscored">keyword</div>
                 </>
               )}
+
+              {/* Risks are disclosed here rather than used to hide the card.
+                  Both were previously reasons a posting never appeared: the
+                  age filter dropped it outright, and ghost risk was a badge
+                  buried among the meta chips. Neither is a reason to decide
+                  for the reader — an evergreen posting can be a real opening
+                  (Ashby reports Elicit's still-listed ML role as published in
+                  2021) and a ghost flag is a judgement worth showing, not
+                  acting on silently. */}
+              {(freshness === "aging" || freshness === "evergreen") && (
+                <div
+                  className="risk"
+                  title={`The source dates this posting ${ageLabel(j.postedAt ?? j.firstSeenAt)} old. That often means the record was created long ago rather than the opening being stale — it is still listed — but treat the date with suspicion.`}
+                >may not be fresh</div>
+              )}
+              {j.ghostRisk && (
+                <div
+                  className="risk warn"
+                  title="The model read this posting and thought it may not be one real, active opening — talent-pool wording, an unnamed client, or contradictory requirements."
+                >ghost risk</div>
+              )}
             </div>
 
             <div className="jobmain">
@@ -450,10 +459,7 @@ export default async function Page({
               <div className="meta">
                 {j.track && <span className="badge">{j.track}</span>}
                 {j.workMode !== "onsite" && <span className="badge">{j.workMode}</span>}
-                {(freshness === "evergreen" || freshness === "delisted") && (
-                  <span className={`badge age-${freshness}`}>{freshness}</span>
-                )}
-                {j.ghostRisk && <span className="badge ghost">ghost?</span>}
+                {freshness === "delisted" && <span className="badge age-delisted">delisted</span>}
                 {j.visa === "yes" && <span className="badge s-strong">visa</span>}
                 {j.visaTier === "yes" && (
                   <span className="badge s-strong" title="The posting itself states it sponsors visas / offers relocation.">sponsor✓</span>

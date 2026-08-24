@@ -4,9 +4,11 @@ Grouped by **who runs it**, because that was the question the flat directory
 could not answer. Thirty-five files sat here with no way to tell a nightly
 worker from a migration that had already run once in 2026.
 
-Every script listed below has an `npm run` entry; the two files in the root —
-`init-config.mjs` (postinstall) and `chain-embed-then-fit.ps1` — are the
-exceptions, and both are called by something other than you.
+Most of what follows has an `npm run` entry. Five do not — `embed-eval` in
+`measure/` and all four in `tools/` — and those you invoke directly:
+`npx tsx scripts/<dir>/<name>.ts`. The two files in the root, `init-config.mjs`
+(postinstall) and `chain-embed-then-fit.ps1`, are called by something other
+than you.
 
 ## `pipeline/` — the regular passes
 
@@ -21,14 +23,18 @@ The ones you or a schedule actually start.
 
 ## `backfill/` — fill in what is missing or behind
 
-Every one of these runs inside `backfill()` (`src/lib/queue/backfill.ts`), which
-owns the budget, the log, the GPU lock, the fail-streak and the run receipt in
-`.run/<script>.json`. They are all safe to interrupt: each resumes from what the
-database already holds.
+Eight of these run inside `backfill()` (`src/lib/queue/backfill.ts`), which owns
+the budget, the log, the GPU lock, the fail-streak and the run receipt in
+`.run/<script>.json`. Those eight are safe to interrupt and each resumes from
+what the database already holds:
 
 `desc-fill` · `embed-fill` · `fit-fill` · `facts-fill` · `rescore` ·
-`repair-descriptions` · `fit-review` · `fit-rereview` · `fit-batch` ·
-`locations-fill` · `visa-retier`
+`repair-descriptions` · `fit-review` · `fit-rereview`
+
+Three are not converted yet, so they have no budget flag, no fail-streak and
+leave no receipt: `fit-batch` · `locations-fill` · `visa-retier`. They still
+resume — their queues consume themselves — but interrupting one leaves no
+record of where it stopped.
 
 The worker spawns two of them (`embed-fill`, `fit-fill`) and reads their
 receipts; the rest you run yourself.

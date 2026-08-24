@@ -91,6 +91,22 @@ function receiptPath(script: string): string {
   return join(".run", `${script}.json`);
 }
 
+// The name a spawned script will file its receipt under.
+//
+// A script is spawned by PATH and files its receipt by NAME, and those two
+// have to agree. They stopped agreeing the moment the scripts moved into
+// subdirectories: the worker was stripping only a leading "scripts/", so it
+// looked for `.run/backfill/embed-fill.json` while the child wrote
+// `.run/embed-fill.json`. Every receipt read came back null, every pass
+// reported no progress, and the backoff ladder climbed to its 30-minute rung
+// and stayed there — the exact stall this whole channel exists to prevent,
+// reintroduced by a directory rename.
+//
+// It lives here, next to the writer, so one test can hold both halves.
+export function runNameFor(scriptPath: string): string {
+  return scriptPath.replace(/^.*[\\/]/, "").replace(/\.[a-z]+$/i, "");
+}
+
 // Clear a script's receipt before spawning it, so what is read afterwards can
 // only be THIS run's. Without it, a child that never reached its finish — the
 // 0xC0000142 case, where the process could not start at all — leaves the

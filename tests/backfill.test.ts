@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { backfill, clearRun, readRun } from "../src/lib/queue/backfill";
+import { backfill, clearRun, readRun, runNameFor } from "../src/lib/queue/backfill";
 import { tuneAfterBatch } from "../scripts/backfill/embed-fill";
 
 // Ten scripts carried a byte-identical log(). Three carried a byte-identical
@@ -211,6 +211,43 @@ test("the endings a single exit code could not tell apart", async () => {
   });
   assert.equal(readRun("t-end-a")?.stopped, "drained");
   assert.equal(readRun("t-end-b")?.stopped, "failstreak");
+});
+
+// A script is SPAWNED BY PATH and files its receipt BY NAME. Those two agreed
+// until the scripts moved into subdirectories, at which point the worker looked
+// for `.run/backfill/embed-fill.json` while the child wrote
+// `.run/embed-fill.json` — every read came back null, every pass reported no
+// progress, and the backoff ladder pinned itself at thirty minutes. A rename
+// reintroduced the stall the whole receipt channel exists to prevent, and
+// nothing caught it because nothing held the two halves together.
+test("the name the worker reads is the name the child writes", () => {
+  const worker = readFileSync(join("scripts", "pipeline", "worker.ts"), "utf8");
+
+  // Every script the worker spawns, taken from the spawn calls themselves.
+  const spawned = [...worker.matchAll(/runChild\(\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(spawned.length >= 2, `expected spawn calls, found ${spawned.length}`);
+
+  for (const path of new Set(spawned)) {
+    const src = readFileSync(path, "utf8");
+    // The name the child hands to backfill() is the name it files under.
+    const declared = src.match(/backfill\(\s*"([^"]+)"/)?.[1];
+    assert.ok(declared, `${path} does not call backfill() with a name`);
+    assert.equal(
+      runNameFor(path),
+      declared,
+      `the worker would read .run/${runNameFor(path)}.json but ${path} writes .run/${declared}.json`,
+    );
+  }
+});
+
+test("runNameFor takes the bare script name, whatever the directory", () => {
+  assert.equal(runNameFor("scripts/backfill/embed-fill.ts"), "embed-fill");
+  assert.equal(runNameFor("scripts/embed-fill.ts"), "embed-fill");
+  assert.equal(runNameFor("embed-fill.ts"), "embed-fill");
+  // String.raw, because `\b` and `\f` are escape sequences in an ordinary TS
+  // string — the naive spelling of this case asserts on a backspace character
+  // and passes for the wrong reason.
+  assert.equal(runNameFor(String.raw`scripts\backfill\fit-fill.ts`), "fit-fill");
 });
 
 test("nothing outside backfill.ts hand-writes the run scaffolding", async () => {

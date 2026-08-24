@@ -230,7 +230,7 @@ const VIEWS: Record<string, {
 }> = {
   fit: {
     rescue: ["company", "benefits"],
-    // Measured over 4,000 candidates (scripts/tune-fit-window.ts). Capping
+    // Measured over 4,000 candidates (scripts/measure/tune-fit-window.ts). Capping
     // requirements at 1200 delivered the section WHOLE in only 79.5% of
     // postings — one in five judgments was made on a truncated list of what
     // the job demands, which produces a confidently wrong verdict rather
@@ -329,7 +329,7 @@ export type Consumer = keyof typeof VIEWS;
 export function viewParts(
   text: string,
   consumer: Consumer,
-  // Budget override, for experiments only (scripts/embed-eval.ts compares
+  // Budget override, for experiments only (scripts/measure/embed-eval.ts compares
   // window sizes). Production callers take the measured default.
   budgetOverride?: number,
 ): Array<{ kind: SectionKind; text: string; full: number }> {

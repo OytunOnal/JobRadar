@@ -5,7 +5,7 @@ import { prisma } from "../../src/lib/db";
 import { staleVectorWhere } from "../../src/lib/llm/embed";
 import { FIT_PROMPT_VERSION, judgeQueueWhere } from "../../src/lib/llm/fit";
 import { andWhere, archiveWhere } from "../../src/lib/queue/pool";
-import { clearRun, readRun, type RunResult } from "../../src/lib/queue/backfill";
+import { clearRun, readRun, runNameFor, type RunResult } from "../../src/lib/queue/backfill";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../../src/lib/queue/chunks";
 import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../../src/lib/queue/gpu-lock";
@@ -119,7 +119,7 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
 // would otherwise leave the previous run's receipt in place and have it read
 // as today's answer.
 async function runChild(script: string, extra: string[] = []): Promise<ChildOutcome> {
-  const name = script.replace(/^scripts\//, "").replace(/\.ts$/, "");
+  const name = runNameFor(script);
   clearRun(name);
   const code = await spawnChild(script, extra);
   return { code, result: readRun(name) };

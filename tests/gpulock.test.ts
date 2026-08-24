@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -51,7 +51,19 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild, beatGpu, claimGpuChild, releaseGpuChild } = await import("../src/lib/queue/gpu-lock");
+// Beating as the delegated process is how a child claims the lock, so a case
+// that plays the child has to say so the way the real one does — through the
+// environment the worker sets on the spawn.
+function asDelegated<T>(fn: () => T): T {
+  const prev = process.env.JOBRADAR_GPU_DELEGATED;
+  process.env.JOBRADAR_GPU_DELEGATED = "1";
+  try { return fn(); } finally {
+    if (prev === undefined) delete process.env.JOBRADAR_GPU_DELEGATED;
+    else process.env.JOBRADAR_GPU_DELEGATED = prev;
+  }
+}
+
+const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, beatGpu, releaseGpuChild } = await import("../src/lib/queue/gpu-lock");
 
 test("acquire, then hold: the same process may re-acquire", () => {
   withLock(() => {
@@ -169,61 +181,47 @@ test("a delegated child keeps the lock alive after its parent is gone", () => {
   }));
 });
 
-// The clock has to ask about the work, not about the supervisor.
-//
-// Recording the child stopped a replacement taking the GPU instantly, but only
-// until the beat went stale: nobody was beating, because the beat came from
-// the holder and the holder was dead. Five minutes of protection for four
-// hours of work. The child beats now, so the staleness rule finally means what
-// it says — still working, or genuinely hung.
-test("a delegated child's beat is what keeps the lock alive", () => {
-  withLock((path) => {
-    const old = Date.now() - 6 * 60_000;
-    writeFileSync(path, JSON.stringify({
-      holder: "worker/lane",
-      pid: GONE, // the worker was killed
-      child: process.pid, // and WE are the child still judging
-      since: new Date(old).toISOString(),
-      beat: old, // nobody has beaten for six minutes
-    }), "utf8");
-    assert.equal(gpuHolder(), null, "a child that stopped beating is hung, and loses it");
-
-    beatGpu();
-    assert.equal(gpuHolder()?.holder, "worker/lane", "a beating child holds it, orphan or not");
-    assert.equal(acquireGpu("worker/lane-2"), false, "so no second 27B lands on the card");
-  });
-});
-
 // The pid the parent can see is not the pid that does the work.
 //
-// The worker spawns `node tsx/cli <script>` and tsx re-spawns, so what
-// `setGpuChild` records is a wrapper. The test above fakes `child:
-// process.pid` and so cannot see this at all — measured through the real
-// spawn, the parent recorded 31116 while the script ran as 29748, and the
-// beat from 29748 was rejected as a stranger's. Only the process doing the
-// work can name itself.
-test("the process doing the work claims the lock itself, whatever the parent guessed", () => {
-  withLock((path) => withLiveProcess((wrapper) => {
+// The worker spawns `node tsx/cli <script>` and tsx re-spawns, so a pid
+// recorded from outside names a wrapper that loads no model. Measured through
+// the real spawn: the parent saw 31116 while the script ran as 29748, and a
+// beat from 29748 was rejected as a stranger's. Nobody can name the working
+// process but itself.
+test("the process doing the work claims the lock by beating, and is the only one who can", () => {
+  withLock((path) => {
     const old = Date.now() - 6 * 60_000;
-    writeFileSync(path, JSON.stringify({
+    const write = () => writeFileSync(path, JSON.stringify({
       holder: "worker/lane",
-      pid: GONE, // the worker is dead
-      child: wrapper, // and it recorded the tsx wrapper, not us
+      pid: GONE, // the worker was killed
       since: new Date(old).toISOString(),
       beat: old,
     }), "utf8");
 
-    beatGpu();
-    assert.equal(gpuHolder(), null, "a beat from an unnamed process must not count");
+    write();
+    beatGpu(); // not delegated, not the holder: not ours to touch
+    assert.equal(gpuHolder(), null, "a beat from an unrelated process must not count");
 
-    claimGpuChild(); // what backfill() now does when delegated
-    beatGpu();
-    assert.equal(gpuHolder()?.child, process.pid, "the worker's guess is corrected");
-    assert.equal(acquireGpu("worker/lane-2"), false, "and the card is protected");
+    write();
+    asDelegated(() => {
+      beatGpu();
+      assert.equal(gpuHolder()?.child, process.pid, "the beat says who is working");
+      assert.equal(acquireGpu("worker/lane-2"), false, "so the card is protected");
+      // Self-healing: a stale write from the parent cannot end the claim,
+      // because the next beat asserts it again. A one-shot claim could be
+      // erased for good, and was — measured, by a single stale parent beat.
+      writeFileSync(path, JSON.stringify({
+        holder: "worker/lane", pid: GONE,
+        since: new Date().toISOString(), beat: Date.now(),
+      }), "utf8");
+      assert.equal(gpuHolder(), null, "claim gone");
+      beatGpu();
+      assert.equal(gpuHolder()?.child, process.pid, "and back, twenty seconds later");
 
-    releaseGpuChild();
-    assert.equal(gpuHolder(), null, "handing the claim back frees it, parent dead or not");
-  }));
+      releaseGpuChild();
+      assert.equal(gpuHolder(), null, "handing it back frees it, parent dead or not");
+    });
+  });
 });
 
 test("a graceful stop does not release the lock out from under a live child", () => {
@@ -251,29 +249,26 @@ test("the busy message names the process a reader can act on", () => {
 });
 
 test("changing phase does not drop the child that is doing the work", () => {
-  withLock(() => withLiveProcess((kid) => {
-    assert.equal(acquireGpu("worker/lane"), true);
-    setGpuChild(kid);
+  withLock((path) => withLiveProcess((kid) => {
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane", pid: process.pid, child: kid,
+      since: new Date().toISOString(), beat: Date.now(),
+    }), "utf8");
     acquireGpu("worker/archive"); // same process, new phase
     assert.equal(gpuHolder()?.child, kid, "the orphan protection survives a re-acquire");
-    releaseGpu();
   }));
 });
 
-test("setGpuChild records and clears, and never edits another process's lock", () => {
-  withLock(() => withLiveProcess((kid) => {
-    assert.equal(acquireGpu("worker/lane"), true);
-    setGpuChild(kid);
-    assert.equal(gpuHolder()?.child, kid);
-    setGpuChild(null);
-    assert.equal(gpuHolder()?.child, undefined, "a finished child leaves no claim behind");
-    releaseGpu();
-
-    // Someone else's lock: writing a child into it would be forging a claim.
-    writeFileSync(process.env.JOBRADAR_GPU_LOCK!, JSON.stringify({
-      holder: "other", pid: kid, since: new Date().toISOString(), beat: Date.now(),
-    }), "utf8");
-    setGpuChild(process.pid);
-    assert.equal(gpuHolder()?.child, undefined);
-  }));
+// A write that fails must not read as one that worked.
+//
+// acquireGpu used to throw when it could not write; routing it through an
+// atomic replace that swallowed errors turned that into a silent lie — measured
+// with the rename failing, it returned true while gpuHolder() was null and
+// gpuBusyMessage() told everyone else the card was free.
+test("acquireGpu reports failure instead of claiming a lock it could not write", () => {
+  withLock((path) => {
+    mkdirSync(path); // the lock path is a directory: the rename cannot land
+    assert.equal(acquireGpu("worker/lane"), false, "no lock, no claim of one");
+    assert.equal(gpuHolder(), null);
+  });
 });

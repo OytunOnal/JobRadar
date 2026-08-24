@@ -8,7 +8,7 @@ import { andWhere, archiveWhere } from "../../src/lib/queue/pool";
 import { clearRun, readRun, runNameFor, type RunResult } from "../../src/lib/queue/backfill";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { chunkFromHistogram, chunkLabel, chunkWhere, type Chunk } from "../../src/lib/queue/chunks";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu, setGpuChild } from "../../src/lib/queue/gpu-lock";
+import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../../src/lib/queue/gpu-lock";
 
 // The steady state. Everything before this was a batch you started by hand,
 // which is right for a migration and wrong for a tool that lives on your
@@ -100,12 +100,12 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
         env: { ...process.env, JOBRADAR_GPU_DELEGATED: "1" },
       },
     );
+    // We keep beating while the child boots. Once it is up it puts ITSELF on
+    // the lock and beats for both of us — we cannot name it from here, because
+    // between us and the script sits a tsx wrapper whose pid is the only one
+    // we get to see.
     const beat = setInterval(beatGpu, 20_000);
-    // Put the child on the lock. We hold it, but IT is the process holding the
-    // model, and a kill aimed at us alone would leave it running behind a pid
-    // that no longer exists.
-    setGpuChild(child.pid ?? null);
-    const stop = (): void => { clearInterval(beat); setGpuChild(null); };
+    const stop = (): void => { clearInterval(beat); };
     child.on("exit", (code) => { stop(); resolve(code ?? 1); });
     // Without this the emitted error is unhandled and takes down the one
     // process built to survive its children failing.

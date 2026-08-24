@@ -36,7 +36,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../db";
-import { acquireGpu, beatGpu, claimGpuChild, gpuBusyMessage, releaseGpu, releaseGpuChild } from "./gpu-lock";
+import { acquireGpu, beatGpu, gpuBusyMessage, gpuHolder, releaseGpu, releaseGpuChild } from "./gpu-lock";
 
 export type StopReason = "drained" | "budget" | "stalled" | "failstreak" | "gpu-busy" | "error";
 
@@ -213,12 +213,26 @@ export async function backfill(
       stopped = "gpu-busy";
       return finish();
     }
-    if (process.env.JOBRADAR_GPU_DELEGATED === "1") {
-      claimGpuChild();
+    // Delegated only counts if the parent's lock is really there. It might not
+    // be: the parent may have failed to write it, or it may have gone stale.
+    // Taking "delegated" on faith would then run a four-hour judging pass with
+    // no lock at all and nothing said about it — the same shape as the bug
+    // above, a protection that is not there while reading as though it is.
+    const under = process.env.JOBRADAR_GPU_DELEGATED === "1" && gpuHolder() !== null;
+    if (process.env.JOBRADAR_GPU_DELEGATED === "1" && !under) {
+      log("Üst süreçten devralınacak GPU kilidi yok — kilidi bu koşu alıyor.");
+    }
+    if (under) {
+      // The beat is also the claim, so the first one says who we are.
+      beatGpu();
       process.on("exit", releaseGpuChild);
-    } else {
-      acquireGpu(opts.gpu);
+    } else if (acquireGpu(opts.gpu)) {
       process.on("exit", releaseGpu);
+    } else {
+      log("GPU kilidi yazılamadı — koşulmuyor, çünkü tuttuğunu sanmak tutmamaktan kötü.");
+      stopped = "error";
+      error = "GPU kilidi yazılamadı";
+      return finish();
     }
     heartbeat = setInterval(beatGpu, 20_000);
     heartbeat.unref();

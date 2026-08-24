@@ -31,10 +31,19 @@ export interface LockInfo {
   since: string;
   beat: number;
   /**
-   * The delegated child actually using the GPU, when the holder is a parent
-   * that spawned one. The lock records the worker's pid, but the worker only
-   * supervises — the 27B model is loaded by the child, and the two can outlive
-   * each other. See `gpuHolder`.
+   * The delegated process actually using the GPU, when the holder is a parent
+   * that spawned one. The holder only supervises — the 27B model is loaded by
+   * the child, and the two can outlive each other.
+   *
+   * ONLY THAT PROCESS EVER WRITES THIS, on every beat. The parent used to
+   * write its own guess here as well, and the guess was wrong twice over: it
+   * named the tsx wrapper rather than the script, so the field pointed at a
+   * process that loads no model; and having two writers with two meanings in
+   * one field meant the parent could erase the child's claim — on a stale
+   * beat, or by clearing it when the wrapper exited while the real work went
+   * on. One writer, one meaning. The cost is the second or two of tsx boot
+   * before the claim lands, during which the lock rests on the holder's pid
+   * alone.
    */
   child?: number;
 }
@@ -49,25 +58,39 @@ function read(): LockInfo | null {
   }
 }
 
-// Replace the lock in one step, because "an unreadable lock is no lock" turns
-// a half-written file into a free GPU.
+// Replace the lock in one step, and say whether it worked.
 //
-// There are two steady writers now — the worker and the delegated child both
-// beat every 20 seconds — and `writeFileSync` truncates before it writes. A
-// reader landing inside that window gets "", `read()` swallows the parse error
-// and answers null, and the next `acquireGpu` hands out a card that is already
-// full. Writing beside the lock and renaming over it makes the swap atomic;
-// the temp name carries the pid so two writers cannot tear each other's
-// scratch file instead.
-function writeLock(info: LockInfo): void {
+// ATOMIC, because "an unreadable lock is no lock" turns a half-written file
+// into a free GPU. Two processes beat this file 20 seconds apart and
+// `writeFileSync` truncates before it writes; a reader landing inside that
+// window gets "", `read()` swallows the parse error and answers null, and the
+// next `acquireGpu` hands out a card that is already full. Writing beside the
+// lock and renaming over it closes that; the temp name carries the pid so the
+// two writers cannot tear each other's scratch file instead.
+//
+// AND IT REPORTS, because a write that fails must never read as one that
+// worked. `acquireGpu` used to throw when the write failed; wrapping it in a
+// swallowing catch turned that into a silent lie. Measured with the rename
+// failing: acquireGpu returned true, gpuHolder() returned null, and
+// gpuBusyMessage() told every other process the card was free.
+function writeLock(info: LockInfo): boolean {
   const path = lockPath();
   const tmp = `${path}.${process.pid}.tmp`;
   try {
     writeFileSync(tmp, JSON.stringify(info), "utf8");
     renameSync(tmp, path);
+    return true;
   } catch {
     try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
+    return false;
   }
+}
+
+// The worker sets this on the environment of the script it spawns, and every
+// descendant inherits it. It means: the lock belongs to a process above me,
+// and the work it covers is mine.
+function delegated(): boolean {
+  return process.env.JOBRADAR_GPU_DELEGATED === "1";
 }
 
 // Is the process that wrote this lock still running?
@@ -115,39 +138,6 @@ export function gpuHolder(): LockInfo | null {
   return Date.now() - info.beat > STALE_MS ? null : info;
 }
 
-// Record the delegated child that is really using the GPU, or clear it when
-// that child is gone. A no-op for a process that does not hold the lock, on
-// the same principle as `beatGpu`: never edit someone else's claim.
-//
-// What the parent records here is its BEST GUESS, and it is routinely wrong.
-// The worker spawns `node tsx/cli <script>`, and tsx re-spawns: the script runs
-// in a grandchild, so the pid the parent sees belongs to a wrapper that loads
-// no model at all. Measured — parent recorded 31116, the script ran as 29748
-// with ppid 31116. The guess is still worth writing, because the wrapper lives
-// exactly as long as the grandchild and so answers the liveness question
-// correctly; it is the BEAT that cannot come from it. `claimGpuChild` is how
-// that gets corrected by the only process that knows for certain.
-export function setGpuChild(pid: number | null): void {
-  const info = read();
-  if (!info || info.pid !== process.pid) return;
-  if (pid === null) delete info.child;
-  else info.child = pid;
-  writeLock(info);
-}
-
-// I am the process actually using the GPU — put my own pid on the lock.
-//
-// Only the delegated process can say this, and only about itself. The parent
-// cannot: between it and the work sits a tsx wrapper whose pid is the one the
-// parent gets to see. Guessing from the outside is what made the heartbeat a
-// no-op that documented itself as protection.
-export function claimGpuChild(): void {
-  const info = read();
-  if (!info) return; // nothing to attach to
-  info.child = process.pid;
-  writeLock(info);
-}
-
 // Give the claim back. The exiting child does this itself so that the lock
 // stops naming it the moment it stops working — including when its parent is
 // already dead and there is nobody else left to do the clearing.
@@ -179,8 +169,7 @@ export function acquireGpu(holder: string): boolean {
     // hold the lock on behalf of a stranger.
     ...(current?.child && alive(current.child) ? { child: current.child } : {}),
   };
-  writeLock(info);
-  return true;
+  return writeLock(info);
 }
 
 // Must be called periodically while working, or the lock goes stale and
@@ -194,9 +183,23 @@ export function acquireGpu(holder: string): boolean {
 // as long as the clock allowed, five minutes, while the child went on holding
 // 17.7 GB for up to four hours. Letting the child beat is what makes the
 // staleness rule mean what it says.
+//
+// THE BEAT IS ALSO THE CLAIM, and that is not tidiness — it is the only way
+// the claim survives. It used to be written once, by a separate call, into the
+// same field the parent was writing its own guess into. Every caller does
+// read → mutate → write with no atomicity across the pair, so the parent's
+// next beat could rename its stale copy over the top and erase the claim for
+// good; a one-shot claim never comes back, and from then on the child's beats
+// were rejected as a stranger's. Measured: claim written, one parent beat, and
+// the field was gone. Re-asserting it here makes it self-healing — whoever is
+// doing the work says so twenty seconds later, and the twenty seconds after
+// that.
 export function beatGpu(): void {
   const info = read();
-  if (!info || (info.pid !== process.pid && info.child !== process.pid)) return;
+  if (!info) return;
+  // A delegated process is the work; the lock above it is its parent's.
+  if (delegated()) info.child = process.pid;
+  else if (info.pid !== process.pid) return;
   info.beat = Date.now();
   writeLock(info);
 }
@@ -237,6 +240,11 @@ export function gpuBusyMessage(): string | null {
   // just as misleading now, because `releaseGpu` refuses while its child is
   // working: stop the worker as instructed and the GPU stays locked for the
   // rest of the judging pass, by a process the message never mentioned.
+  //
+  // Safe to point at, now that the only thing that writes `child` is the
+  // process doing the work. While the parent also wrote a guess here, this
+  // could name a tsx wrapper — a pid whose death frees nothing on Windows,
+  // because the grandchild holding the model is in no job object with it.
   const working = h.child && alive(h.child) ? h.child : null;
   const who = working
     ? `pid ${working}${alive(h.pid) ? "" : ", terk edilmiş"} alt süreç`

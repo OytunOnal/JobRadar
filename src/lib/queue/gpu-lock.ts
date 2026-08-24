@@ -118,6 +118,13 @@ export function acquireGpu(holder: string): boolean {
     pid: process.pid,
     since: current?.since ?? new Date().toISOString(),
     beat: Date.now(),
+    // Carry a live child across a re-acquire. This function is how a holder
+    // changes phase — worker/lane becomes worker/archive — and rebuilding the
+    // record from scratch would drop the orphan protection silently, at the
+    // one moment nothing is watching for it. A child that has since died is
+    // not carried: there is nothing left to protect, and a recycled pid would
+    // hold the lock on behalf of a stranger.
+    ...(current?.child && alive(current.child) ? { child: current.child } : {}),
   };
   writeFileSync(path, JSON.stringify(info), "utf8");
   return true;
@@ -125,9 +132,18 @@ export function acquireGpu(holder: string): boolean {
 
 // Must be called periodically while working, or the lock goes stale and
 // another process takes it mid-phase.
+//
+// THE BEAT COMES FROM WHOEVER IS USING THE GPU, which is the holder OR the
+// child it delegated to. It used to come from the holder alone, and that made
+// the clock ask the wrong question: not "is the work still going?" but "is the
+// supervisor still up?". Kill the worker and leave its child judging and
+// nobody beats at all — so the child's own liveness kept the lock for exactly
+// as long as the clock allowed, five minutes, while the child went on holding
+// 17.7 GB for up to four hours. Letting the child beat is what makes the
+// staleness rule mean what it says.
 export function beatGpu(): void {
   const info = read();
-  if (!info || info.pid !== process.pid) return;
+  if (!info || (info.pid !== process.pid && info.child !== process.pid)) return;
   info.beat = Date.now();
   try { writeFileSync(lockPath(), JSON.stringify(info), "utf8"); } catch { /* transient */ }
 }
@@ -135,6 +151,14 @@ export function beatGpu(): void {
 export function releaseGpu(): void {
   const info = read();
   if (info && info.pid !== process.pid) return; // never release someone else's
+  // Nor release on behalf of a child that is still working. The worker's
+  // SIGINT/SIGTERM handler unlinks the lock on its way out, which is right
+  // when it was doing the work itself and wrong the moment it delegated: a
+  // graceful stop during a four-hour judging pass would drop the lock, leave
+  // the child holding the model, and let the next process take a card that is
+  // already full. The child clears itself out of the lock when it exits, so
+  // this refusal cannot outlive the work it is protecting.
+  if (info?.child && info.child !== process.pid && alive(info.child)) return;
   const path = lockPath();
   try { if (existsSync(path)) unlinkSync(path); } catch { /* already gone */ }
 }
@@ -149,5 +173,12 @@ export function gpuBusyMessage(): string | null {
   const h = gpuHolder();
   if (!h || h.pid === process.pid) return null;
   const mins = Math.round((Date.now() - Date.parse(h.since)) / 60000);
-  return `GPU meşgul: "${h.holder}" (pid ${h.pid}, ${mins} dk). Ya onun bitmesini bekleyin ya da durdurun.`;
+  // Name the pid the reader can actually act on. Telling someone to wait for
+  // or stop a process that no longer exists is the exact confusion that
+  // started all of this — "GPU busy: worker/lane (pid 12940, 43 min)" for a
+  // pid that had already been killed. When the holder is gone and its child is
+  // still judging, the child is the one to wait for.
+  const orphan = !alive(h.pid) && h.child && alive(h.child);
+  const who = orphan ? `pid ${h.child}, terk edilmiş alt süreç` : `pid ${h.pid}`;
+  return `GPU meşgul: "${h.holder}" (${who}, ${mins} dk). Ya onun bitmesini bekleyin ya da durdurun.`;
 }

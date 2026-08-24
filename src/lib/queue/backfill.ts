@@ -194,10 +194,12 @@ export async function backfill(
   // the embedder spend their time reloading 17.7 GB of weights, not working.
   //
   // Under the worker, JOBRADAR_GPU_DELEGATED means the PARENT holds the lock —
-  // so we neither acquire it nor release it, and we do not install a heartbeat.
-  // Three scripts used to install one anyway; beatGpu returns immediately for a
-  // non-owner, so all three were starting a timer that did nothing while
-  // reading as if it were keeping the lock alive.
+  // so we neither acquire it nor release it. We DO beat, though, and that is a
+  // reversal: the heartbeat used to be skipped here because beatGpu ignored
+  // anyone but the holder, which made a delegated timer a no-op that read like
+  // protection. Now the lock records the child and beatGpu accepts it, so this
+  // timer is the thing keeping the lock alive while the child does the work —
+  // and it is the only beat left once the worker is killed out from under it.
   let heartbeat: NodeJS.Timeout | undefined;
   if (opts.gpu) {
     const busy = gpuBusyMessage();
@@ -209,9 +211,9 @@ export async function backfill(
     if (process.env.JOBRADAR_GPU_DELEGATED !== "1") {
       acquireGpu(opts.gpu);
       process.on("exit", releaseGpu);
-      heartbeat = setInterval(beatGpu, 20_000);
-      heartbeat.unref();
     }
+    heartbeat = setInterval(beatGpu, 20_000);
+    heartbeat.unref();
   }
 
   const run: Run = {

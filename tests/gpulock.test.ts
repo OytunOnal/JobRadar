@@ -37,6 +37,12 @@ const GONE = 0x7ffffff;
 // node holding a timer is unambiguously alive and unambiguously not us.
 function withLiveProcess<T>(fn: (pid: number) => T): T {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  // spawn reports failure asynchronously through an `error` event, and an
+  // `error` with no listener is rethrown — so under memory pressure, the very
+  // condition this project already documents (0xC0000142), a failed stand-in
+  // would take down the whole test process instead of failing one case. The
+  // assert below is what should report it.
+  child.on("error", () => {});
   try {
     assert.ok(child.pid, "could not spawn the stand-in process");
     return fn(child.pid);
@@ -45,7 +51,7 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild } = await import("../src/lib/queue/gpu-lock");
+const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild, beatGpu } = await import("../src/lib/queue/gpu-lock");
 
 test("acquire, then hold: the same process may re-acquire", () => {
   withLock(() => {
@@ -160,6 +166,65 @@ test("a delegated child keeps the lock alive after its parent is gone", () => {
     }), "utf8");
     assert.equal(gpuHolder()?.holder, "worker/lane");
     assert.equal(acquireGpu("worker/lane"), false, "no second judge on one card");
+  }));
+});
+
+// The clock has to ask about the work, not about the supervisor.
+//
+// Recording the child stopped a replacement taking the GPU instantly, but only
+// until the beat went stale: nobody was beating, because the beat came from
+// the holder and the holder was dead. Five minutes of protection for four
+// hours of work. The child beats now, so the staleness rule finally means what
+// it says — still working, or genuinely hung.
+test("a delegated child's beat is what keeps the lock alive", () => {
+  withLock((path) => {
+    const old = Date.now() - 6 * 60_000;
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane",
+      pid: GONE, // the worker was killed
+      child: process.pid, // and WE are the child still judging
+      since: new Date(old).toISOString(),
+      beat: old, // nobody has beaten for six minutes
+    }), "utf8");
+    assert.equal(gpuHolder(), null, "a child that stopped beating is hung, and loses it");
+
+    beatGpu();
+    assert.equal(gpuHolder()?.holder, "worker/lane", "a beating child holds it, orphan or not");
+    assert.equal(acquireGpu("worker/lane-2"), false, "so no second 27B lands on the card");
+  });
+});
+
+test("a graceful stop does not release the lock out from under a live child", () => {
+  withLock((path) => withLiveProcess((kid) => {
+    // Exactly what the worker's SIGINT/SIGTERM handler does.
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane", pid: process.pid, child: kid,
+      since: new Date().toISOString(), beat: Date.now(),
+    }), "utf8");
+    releaseGpu();
+    assert.equal(gpuHolder()?.child, kid, "the child is still holding the model");
+  }));
+});
+
+test("the busy message names the process a reader can act on", () => {
+  withLock((path) => withLiveProcess((kid) => {
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane", pid: GONE, child: kid,
+      since: new Date().toISOString(), beat: Date.now(),
+    }), "utf8");
+    const msg = gpuBusyMessage() ?? "";
+    assert.match(msg, new RegExp(String(kid)), "the live child, not the dead parent");
+    assert.doesNotMatch(msg, new RegExp(String(GONE)));
+  }));
+});
+
+test("changing phase does not drop the child that is doing the work", () => {
+  withLock(() => withLiveProcess((kid) => {
+    assert.equal(acquireGpu("worker/lane"), true);
+    setGpuChild(kid);
+    acquireGpu("worker/archive"); // same process, new phase
+    assert.equal(gpuHolder()?.child, kid, "the orphan protection survives a re-acquire");
+    releaseGpu();
   }));
 });
 

@@ -261,6 +261,12 @@ Any value computed from a posting rather than stated by it — score, fit, facts
 vector, work mode, visa tier. Derivations are recomputable; the posting is not.
 _Avoid_: computed field, cache, projection
 
+**Stated field**:
+Something the source says about its own posting — its title, company,
+location, pay. Refreshed when the source changes its mind, unlike a derivation,
+which is refreshed when our own code changes.
+_Avoid_: raw field, source field, metadata
+
 **Stamp**:
 The version of whatever produced a derived value, recorded alongside it. Makes
 "which system said this" answerable after the fact.

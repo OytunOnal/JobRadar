@@ -1,5 +1,5 @@
-import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
+import { backfill } from "../src/lib/backfill";
 import { htmlToText, looksLikeHtml, TEXT_VERSION } from "../src/lib/html-text";
 import { safeSlice } from "../src/lib/sources/types";
 
@@ -18,36 +18,32 @@ import { safeSlice } from "../src/lib/sources/types";
 //
 //   npm run repair:descriptions [-- --budget 50000]
 
-const args = process.argv.slice(2);
-const bIdx = args.indexOf("--budget");
-const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
 const BATCH = 500;
 
-function log(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
-  console.log(stamped);
-  appendFileSync("repair-descriptions.log", stamped + "\n");
-}
-
-async function main() {
-  log("=== description repair (markup -> structured text) ===");
+export async function main() {
   let cursor = "";
   let scanned = 0;
-  let repaired = 0;
   let bytesSaved = 0;
-  while (repaired < BUDGET) {
+
+  await backfill("repair-descriptions", {}, async (run) => {
+   run.log("=== description repair (markup -> structured text) ===");
+   while (run.round()) {
     const rows = await prisma.jobContent.findMany({
       where: { jobId: { gt: cursor } },
       orderBy: { jobId: "asc" },
       take: BATCH,
       select: { jobId: true, description: true },
     });
-    if (rows.length === 0) break;
+    if (rows.length === 0) return run.drained();
+    // The cursor advances before any write and regardless of whether anything
+    // was repaired, which is why this pager could never spin — unlike the
+    // predicate-consuming ones. Kept as it was.
     cursor = rows[rows.length - 1].jobId;
     scanned += rows.length;
     // One transaction per batch, not per row: SQLite fsyncs on commit, and
     // ~360k individual commits is hours of disk sync for minutes of work.
     const writes = [];
+    let repairs = 0;
     for (const r of rows) {
       if (!looksLikeHtml(r.description)) continue;
       const clean = safeSlice(htmlToText(r.description), 8000);
@@ -65,16 +61,29 @@ async function main() {
         where: { jobId: r.jobId }, data: { builtFrom: null },
       }));
       bytesSaved += r.description.length - clean.length;
-      repaired++;
+      repairs++;
     }
-    if (writes.length) await prisma.$transaction(writes);
+    // One transaction per batch, not per row: SQLite fsyncs on commit, and
+    // ~360k individual commits is hours of disk sync for minutes of work. It is
+    // also all-or-nothing, so a single bad row costs its whole batch — hence
+    // the try, which the runner turns into a counted failure rather than a dead
+    // process with no record of where it stopped.
+    try {
+      if (writes.length) await prisma.$transaction(writes);
+      run.did(repairs);
+    } catch (e) {
+      run.failed(e);
+    }
     if (scanned % 25000 < BATCH) {
-      log(`  ${scanned} tarandı, ${repaired} onarıldı, ${(bytesSaved / 1e6).toFixed(1)} MB işaretleme atıldı`);
+      run.log(`  ${scanned} tarandı, ${run.done} onarıldı, ${(bytesSaved / 1e6).toFixed(1)} MB işaretleme atıldı`);
     }
-  }
-  log(`=== Bitti: ${scanned} tarandı, ${repaired} onarıldı, ${(bytesSaved / 1e6).toFixed(1)} MB kurtarıldı ===`);
-  log("Sonraki adımlar: npm run rescore (metin değişti), embed yeniden üretimi, fit yeniden yargılama.");
-  await prisma.$disconnect();
+   }
+  });
+
+  console.log(`${scanned} tarandı, ${(bytesSaved / 1e6).toFixed(1)} MB kurtarıldı.`);
+  console.log("Sonraki adımlar: npm run rescore (metin değişti), embed yeniden üretimi, fit yeniden yargılama.");
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// The repair runs only when this file is the entry point.
+const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("repair-descriptions.ts");
+if (isEntryPoint) await main();

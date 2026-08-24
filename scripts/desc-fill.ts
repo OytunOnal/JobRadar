@@ -12,8 +12,8 @@
 // Priority: sponsor-registered → score → recency. Resumable by nature (the
 // title-only check is the queue). Logs to desc-fill.log.
 
-import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
+import { backfill } from "../src/lib/backfill";
 import { derivedFields } from "../src/lib/derive";
 import { stripHtml } from "../src/lib/sources/types";
 import { labelledSections as labelled } from "../src/lib/sections";
@@ -21,17 +21,9 @@ import { TEXT_VERSION } from "../src/lib/html-text";
 import { invalidateVector } from "../src/lib/embed";
 import { andWhere, openWhere } from "../src/lib/pool";
 
-const args = process.argv.slice(2);
-const bIdx = args.indexOf("--budget");
-const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 100000 : 100000;
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-function log(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
-  console.log(stamped);
-  appendFileSync("desc-fill.log", stamped + "\n");
-}
 
 async function getJson(url: string): Promise<any | null> {
   try {
@@ -192,7 +184,8 @@ const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join
 // happened once.
 const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("desc-fill.ts");
 
-async function main() {
+export async function main() {
+ await backfill("desc-fill", { budget: 100_000 }, async (run) => {
 const rows = await prisma.job.findMany({
   // openWhere: store-all means never spending detail fetches on gate-rejected
   // rows (a scorer fix re-enters them on the next run), and the status half
@@ -224,7 +217,7 @@ const queue = rows.filter((r) => {
   return !d.includes("\n") && r.content?.textVersion !== TEXT_VERSION;
 });
 const titleOnly = queue.filter((r) => (r.content?.description ?? "").length < r.title.length + 60).length;
-log(`=== desc:fill — ${queue.length} ilan (${titleOnly} gövdesiz, ${queue.length - titleOnly} yapısız) / ${rows.length} aday ===`);
+run.log(`=== desc:fill — ${queue.length} ilan (${titleOnly} gövdesiz, ${queue.length - titleOnly} yapısız) / ${rows.length} aday ===`);
 
 let done = 0;
 let filled = 0;
@@ -237,8 +230,11 @@ const broken = new Set<string>();
 const misses = new Map<string, number>();
 const BREAK_AFTER = 25;
 let skipped = 0;
+// A fixed snapshot walked once — no re-query, so nothing to consume and
+// nothing that can spin. round() supplies the budget bound the loop used to
+// carry itself.
 for (const r of queue) {
-  if (done >= BUDGET) break;
+  if (run.exhausted()) break;
   const plat0 = r.source.split(":")[0];
   // Circuit breaker. A platform that answers nothing — rate-limited, moved,
   // or retired — will answer nothing for the whole run, and a 31k-row queue
@@ -247,6 +243,7 @@ for (const r of queue) {
   // half an hour of the run learning one fact. Stop asking, say so, move on.
   if (broken.has(plat0)) { skipped++; continue; }
   done++;
+  run.did();
   const desc = await fetchDescription(r.source, r.externalId, r.url);
   const plat = r.source.split(":")[0];
   const t = tally.get(plat) ?? { tried: 0, ok: 0, flat: 0 };
@@ -260,7 +257,7 @@ for (const r of queue) {
     misses.set(plat, m);
     if (m >= BREAK_AFTER) {
       broken.add(plat);
-      log(`   ! ${plat}: üst üste ${m} boş yanıt — bu koşuda atlanıyor`);
+      run.log(`   ! ${plat}: üst üste ${m} boş yanıt — bu koşuda atlanıyor`);
     }
   }
   if (desc.length >= r.title.length + 60) {
@@ -303,15 +300,16 @@ for (const r of queue) {
     filled++;
     if (newScore > 50) crossed++;
   }
-  if (done % 200 === 0) log(`  ${done}/${Math.min(queue.length, BUDGET)} işlendi — ${filled} metin geldi, ${crossed} ilan 50+ oldu`);
+  if (done % 200 === 0) run.log(`  ${done}/${queue.length} işlendi — ${filled} metin geldi, ${crossed} ilan 50+ oldu`);
   await sleep(300);
 }
-log(`=== Bitti: ${done} denendi, ${filled} açıklama dolduruldu, ${crossed} ilan fit eşiğini aştı` + (skipped ? `, ${skipped} atlandı (${[...broken].join(",")})` : "") + " ===");
+run.drained();
+run.log(`${done} denendi, ${filled} açıklama dolduruldu, ${crossed} ilan fit eşiğini aştı` + (skipped ? `, ${skipped} atlandı (${[...broken].join(",")})` : ""));
 for (const [plat, t] of [...tally].sort((a, b) => b[1].tried - a[1].tried)) {
   const pc = (n: number) => `${Math.round((n / t.tried) * 100)}%`;
-  log(`   ${plat.padEnd(12)} denendi ${String(t.tried).padStart(5)} | metin geldi ${pc(t.ok).padStart(4)} | gelen ama hâlâ düz ${t.ok ? Math.round((t.flat / t.ok) * 100) : 0}%`);
+  run.log(`   ${plat.padEnd(12)} denendi ${String(t.tried).padStart(5)} | metin geldi ${pc(t.ok).padStart(4)} | gelen ama hâlâ düz ${t.ok ? Math.round((t.flat / t.ok) * 100) : 0}%`);
 }
-await prisma.$disconnect();
+ });
 }
 
 if (isEntryPoint) await main();

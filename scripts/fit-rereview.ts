@@ -10,9 +10,9 @@
 process.env.LLM_DISABLE = "anthropic,cerebras,groq,gemini,deepseek";
 process.env.OLLAMA_MODEL = process.env.REVIEW_MODEL || "qwen3.8:27b";
 
-import { appendFileSync } from "node:fs";
 import { verdictFields, analyzeFit } from "../src/lib/fit";
 import { prisma } from "../src/lib/db";
+import { backfill } from "../src/lib/backfill";
 
 const LOCATION_TERMS = [
   "locat", "reloc", "izmir", "turkey", "based in", "on-site presence",
@@ -20,13 +20,10 @@ const LOCATION_TERMS = [
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-function log(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
-  console.log(stamped);
-  appendFileSync("fit-review.log", stamped + "\n");
-}
 
-const reviewed = await prisma.job.findMany({
+export async function main() {
+ await backfill("fit-rereview", { gpu: "manual/rereview" }, async (run) => {
+  const reviewed = await prisma.job.findMany({
   where: {
     fitBy: "qwen27b-review",
     delistedAt: null,
@@ -34,44 +31,38 @@ const reviewed = await prisma.job.findMany({
   },
   select: { id: true, fitComment: true },
 });
-const targets = reviewed.filter((j) => {
-  const c = (j.fitComment ?? "").toLowerCase();
-  return LOCATION_TERMS.some((t) => c.includes(t));
-});
+  const targets = reviewed.filter((j) => {
+    const c = (j.fitComment ?? "").toLowerCase();
+    return LOCATION_TERMS.some((t) => c.includes(t));
+  });
+  run.log(`=== fit:rereview (mobility-aware prompt) — ${targets.length}/${reviewed.length} incelemede konum gerekçesi var ===`);
 
-log(`=== fit:rereview (mobility-aware prompt) — ${targets.length}/${reviewed.length} incelemede konum gerekçesi var ===`);
-
-let done = 0;
-let raised = 0;
-let failStreak = 0;
-for (const t of targets) {
-  const j = await prisma.job.findUnique({ where: { id: t.id }, include: { content: { select: { description: true } } } });
-  if (!j) continue;
-  try {
-    const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
-    if (!fit) {
-      failStreak++;
-    } else {
-      failStreak = 0;
+  let raised = 0;
+  // A fixed list, walked once — this queue is derived from prior LLM prose, so
+  // there is nothing for a re-query to consume. round() still bounds it.
+  for (const t of targets) {
+    if (run.exhausted()) return;
+    const j = await prisma.job.findUnique({ where: { id: t.id }, include: { content: { select: { description: true } } } });
+    if (!j) { run.skip(); continue; }
+    try {
+      const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
+      if (!fit) { run.failed(); continue; }
       const delta = fit.fitScore - (j.fitScore ?? 0);
-      await prisma.job.update({
-        where: { id: j.id },
-        data: verdictFields(fit, "qwen27b-review2", j),
-      });
-      done++;
+      await prisma.job.update({ where: { id: j.id }, data: verdictFields(fit, "qwen27b-review2", j) });
+      run.did();
       if (delta >= 15) raised++;
-      log(`  ${done}/${targets.length} ${j.company.slice(0, 24)} | ${j.title.slice(0, 32)} | ${j.fitScore} → ${fit.fitScore} (${fit.verdict})`);
+      run.log(`  ${run.done}/${targets.length} ${j.company.slice(0, 24)} | ${j.title.slice(0, 32)} | ${j.fitScore} → ${fit.fitScore} (${fit.verdict})`);
+    } catch (e) {
+      run.failed(e);
     }
-  } catch (e: any) {
-    failStreak++;
-    log(`  hata (${j.company.slice(0, 20)}): ${String(e.message).slice(0, 90)}`);
+    await sleep(500);
   }
-  if (failStreak >= 3) {
-    log(`Yerel model cevap vermiyor — ${done} yeniden incelemeyle durdu.`);
-    break;
-  }
-  await sleep(500);
+  run.drained();
+  run.log(`${raised} ilan +15 puan ve üzeri yükseldi`);
+ });
 }
 
-log(`=== rereview bitti: ${done} ilan, ${raised} tanesi +15 puan ve üzeri yükseldi ===`);
-await prisma.$disconnect();
+// The re-review runs only when this file is the entry point. It also mutates
+// process.env above, so importing it must not be casual.
+const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("fit-rereview.ts");
+if (isEntryPoint) await main();

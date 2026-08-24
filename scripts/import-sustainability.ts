@@ -13,9 +13,11 @@ import { upsertCandidates } from "../src/lib/discovery/store";
 //
 //   npx tsx --env-file=.env scripts/import-sustainability.ts [--budget N]
 
-const args = process.argv.slice(2);
-const bIdx = args.indexOf("--budget");
-const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 300 : 300;
+// A one-shot importer, not a backfill: it walks a fixed curated list once and
+// creates boards. It parses its own bound because there is no run to own —
+// no queue to drain, no GPU, no resume. Kept deliberately outside backfill().
+const bIdx = process.argv.indexOf("--budget");
+const BUDGET = (bIdx !== -1 ? Number(process.argv[bIdx + 1]) : NaN) || 300;
 
 const RAW =
   "https://raw.githubusercontent.com/pogopaule/awesome-sustainability-jobs/main/src/data.yaml";

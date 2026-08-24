@@ -1,5 +1,5 @@
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/lib/db";
 import { submitFitBatch, getBatch, fetchResults, type JobForBatch } from "../src/lib/batch";
 import { verdictFields } from "../src/lib/fit";
 
@@ -10,7 +10,10 @@ const STATE = "data/last-batch.json";
 const POLL_MS = 15000;
 const MAX_WAIT_MS = 40 * 60 * 1000;
 
-const prisma = new PrismaClient();
+// The shared singleton, not a second client: db.ts sets
+// `PRAGMA busy_timeout = 30000`, and a client constructed here would sit at
+// Prisma's 5s default while the worker holds a write transaction.
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function collect(batchId: string) {

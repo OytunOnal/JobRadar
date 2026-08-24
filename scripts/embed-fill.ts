@@ -1,6 +1,5 @@
-import { appendFileSync } from "node:fs";
 import { prisma } from "../src/lib/db";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "../src/lib/gpu-lock";
+import { backfill, type Run } from "../src/lib/backfill";
 import { embedTexts, jobEmbedText, toBuffer, EMBED_MODEL, embedStamp, staleVectorWhere } from "../src/lib/embed";
 import { chunkFromArgs, chunkWhere } from "../src/lib/chunks";
 import { andWhere, archiveWhere, openWhere } from "../src/lib/pool";
@@ -23,8 +22,6 @@ import { VISA_MARKED } from "../src/lib/visa";
 //   npm run embed:fill -- --budget 5000
 
 const args = process.argv.slice(2);
-const bIdx = args.indexOf("--budget");
-const BUDGET = bIdx !== -1 ? Number(args[bIdx + 1]) || 1_000_000 : 1_000_000;
 // --open: stop after the open pool instead of walking into the disqualified
 // archive. The archive is worth embedding (a scorer fix can revive it, and the
 // rescue lane mines it by similarity) but it is 445k rows of work that must not
@@ -91,7 +88,7 @@ let windowStart = Date.now();
 let windowBatches = 0;
 let lastRate = 0;
 let sinceProbe = 0;
-function tuneAfterBatch(n: number): void {
+export function tuneAfterBatch(n: number, log: (l: string) => void): void {
   windowJobs += n;
   windowBatches++;
   if (windowBatches < WINDOW) return;
@@ -118,12 +115,6 @@ function tuneAfterBatch(n: number): void {
   }
 }
 
-function log(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
-  console.log(stamped);
-  appendFileSync("embed-fill.log", stamped + "\n");
-}
-
 interface Row { id: string; title: string; content: { description: string; textVersion: string | null } | null }
 
 // One multi-row statement per batch — SQLite pays the commit cost once, not
@@ -145,17 +136,9 @@ async function writeBatch(rows: Row[], vecs: number[][]): Promise<void> {
   );
 }
 
-// Refuse rather than compete: two processes alternating between the 27B and
-// the embedder spend their time reloading 17.7 GB of weights, not working.
-{
-  const busy = gpuBusyMessage();
-  if (busy) { log(busy); await prisma.$disconnect(); process.exit(0); }
-  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") acquireGpu("manual/embed");
-  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") process.on("exit", releaseGpu);
-  setInterval(beatGpu, 20_000).unref();
-}
-
-async function main() {
+export async function main() {
+ await backfill("embed-fill", { budget: 1_000_000, gpu: "manual/embed" }, async (run) => {
+  const log = (l: string) => run.log(l);
   // Counted over exactly the population the run will walk, phase by phase: a
   // header that promises 520k and stops at 78k reads like a crash.
   const total = ARCHIVE_ONLY
@@ -208,7 +191,7 @@ async function main() {
   let a = await fetchAfter();
   let b = await fetchAfter();
   let embedA: Promise<number[][] | Error> | null = a.length ? embedTexts(a.map((j) => jobEmbedText(j.title, j.content?.description ?? null))).catch((e) => e as Error) : null;
-  while (done < BUDGET && embedA) {
+  while (run.round() && embedA) {
     const embedB = b.length ? embedTexts(b.map((j) => jobEmbedText(j.title, j.content?.description ?? null))).catch((e) => e as Error) : null;
     let vecs = await embedA;
     if (vecs instanceof Error) {
@@ -227,19 +210,26 @@ async function main() {
     await pendingWrite;
     pendingWrite = writeBatch(a, vecs);
     done += a.length;
-    tuneAfterBatch(a.length);
+    run.did(a.length);
+    tuneAfterBatch(a.length, log);
     if (done - lastLogged >= 1500) {
       lastLogged = done;
       const rate = done / ((Date.now() - t0) / 1000);
-      log(`  ${done}/${Math.min(total, BUDGET)} embed edildi (ort ${rate.toFixed(0)}/sn, batch ${BATCH})`);
+      log(`  ${done}/${total} embed edildi (ort ${rate.toFixed(0)}/sn, batch ${BATCH})`);
     }
     a = b;
     embedA = embedB;
     b = await fetchAfter();
   }
   await pendingWrite;
-  log(`=== Bitti: ${done} ilan embed edildi (${(done / ((Date.now() - t0) / 1000)).toFixed(0)}/sn ort) ===`);
-  await prisma.$disconnect();
+  run.drained();
+  log(`${(done / ((Date.now() - t0) / 1000)).toFixed(0)}/sn ortalama`);
+ });
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// The backfill runs only when this file is the entry point. tuneAfterBatch is
+// 40 lines of hill-climbing with direction reversal and a periodic re-probe —
+// pure, integer in, integer out — and until now it sat on the wrong side of
+// main() where no test could reach it.
+const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("embed-fill.ts");
+if (isEntryPoint) await main();

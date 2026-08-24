@@ -23,34 +23,16 @@ import { profile, seniorityFor } from "../src/lib/profile";
 //   npm run fit:fill -- --wide        (wave 2: score > 50, target-or-remote, fresh)
 //   npm run fit:fill -- --limit 500
 
-import { appendFileSync } from "node:fs";
+import { backfill } from "../src/lib/backfill";
 
 const args = process.argv.slice(2);
 const WIDE = args.includes("--wide");
-const limIdx = args.indexOf("--limit");
-const LIMIT = limIdx !== -1 ? Number(args[limIdx + 1]) || 100000 : 100000;
-// --wait N: on chain exhaustion, sleep N minutes and retry instead of exiting
+// --wait N: on chain exhaustion, sleep N minutes and retry instead of stopping
 // (free quotas refill on rolling/daily windows — an overnight run rides them).
 const waitIdx = args.indexOf("--wait");
 const WAIT_MIN = waitIdx !== -1 ? Number(args[waitIdx + 1]) || 30 : 0;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-function log(line: string): void {
-  const stamped = `[${new Date().toISOString().slice(0, 19)}] ${line}`;
-  console.log(stamped);
-  appendFileSync("fit-fill.log", stamped + "\n");
-}
-
-
-// Refuse rather than compete: two processes alternating between the 27B and
-// the embedder spend their time reloading 17.7 GB of weights, not working.
-{
-  const busy = gpuBusyMessage();
-  if (busy) { log(busy); await prisma.$disconnect(); process.exit(0); }
-  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") acquireGpu("manual/fit");
-  if (process.env.JOBRADAR_GPU_DELEGATED !== "1") process.on("exit", releaseGpu);
-  setInterval(beatGpu, 20_000).unref();
-}
 
 // --min-score / --max-score: judge one score chunk. Which postings come next
 // is the chunk's job; which of them is read first stays the blend's.
@@ -75,11 +57,6 @@ const where = andWhere(
 // during a big pull, visa-positive jobs arriving mid-run must jump ahead of
 // an old snapshot's tail, not wait for the next process restart.
 let cv: number[] | null = null;
-try {
-  cv = await cvVector();
-} catch {
-  log("(embedding modeli erişilemez — kuyruk salt keyword sırasıyla)");
-}
 
 const skipped: string[] = []; // title-only rows wait for desc:fill
 
@@ -128,23 +105,35 @@ async function buildQueue(): Promise<string[]> {
 }
 
 const RESNAPSHOT = 100;
-let queue = await buildQueue();
-log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${queue.length} ilan (harmanlı sıra${cv ? "" : " YOK"}, ${RESNAPSHOT} analizde bir tazelenir) ===`);
-const total = queue.length;
+
+export async function main() {
+ await backfill("fit-fill", { budget: 100_000, gpu: "manual/fit" }, async (run) => {
+  // The CV vector is a network call to the embedder — it used to run at
+  // IMPORT, so merely importing this file to reach factsRuleOut or buildQueue
+  // opened a connection and started the run behind it.
+  try {
+    cv = await cvVector();
+  } catch {
+    run.log("(embedding modeli erişilemez — kuyruk salt keyword sırasıyla)");
+  }
+
+  let queue = await buildQueue();
+  run.log(`=== fit:fill ${WIDE ? "wave-2 (geniş)" : "wave-1 (visa-pozitif)"} — kuyrukta ${queue.length} ilan (harmanlı sıra${cv ? "" : " YOK"}, ${RESNAPSHOT} analizde bir tazelenir) ===`);
+  const total = queue.length;
 
 let done = 0;
-let failStreak = 0;
+let chainFails = 0;
 let factsDone = 0;
 let ruledOut = 0;
 let cursor = 0;
 let sinceSnapshot = 0;
-while (done < LIMIT) {
+while (run.round()) {
   if (sinceSnapshot >= RESNAPSHOT || cursor >= queue.length) {
     queue = await buildQueue();
     cursor = 0;
     sinceSnapshot = 0;
-    if (queue.length === 0) break;
-    log(`  kuyruk tazelendi: ${queue.length} ilan`);
+    if (queue.length === 0) return run.drained();
+    run.log(`  kuyruk tazelendi: ${queue.length} ilan`);
   }
   const ids = queue.slice(cursor, cursor + 25);
   cursor += ids.length;
@@ -163,7 +152,7 @@ while (done < LIMIT) {
   const batch = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => Boolean(r));
   if (batch.length === 0) continue;
   for (const j of batch) {
-    if (done >= LIMIT) break;
+    if (run.exhausted()) break;
     // Title-only rows have nothing for the model to read — desc:fill feeds
     // them; skip in-memory only, so they re-enter once a description lands.
     const desc = j.content?.description ?? "";
@@ -201,38 +190,48 @@ while (done < LIMIT) {
       if (factsRuleOut(j.facts as any, j.track)) ruledOut++;
       const fit = await analyzeFit({ ...job, description: desc, visaTier: job.visaTier, seniorityLevel: job.seniorityLevel, langReq: job.langReq });
       if (!fit) {
-        failStreak++;
-      } else {
-        failStreak = 0;
-        await prisma.job.update({
-          where: { id: j.id },
-          // Single-tier regime (user decision 2026-08-21): the 27B judges
-          // directly — no 8B triage, no separate review pass to await.
-          data: verdictFields(fit, "qwen27b", j),
-        });
-        done++;
-        sinceSnapshot++;
-        if (done % 25 === 0) log(`  ${done}/${total} analiz edildi, ${factsDone} çıkarım (son: ${j.company.slice(0, 24)} — ${fit.fitScore})`);
+        chainFails++;
+        if (!(await waited(run, chainFails))) run.failed();
+        else chainFails = 0;
+        continue;
       }
-    } catch (e: any) {
-      failStreak++;
-      log(`  hata (${j.company.slice(0, 20)}): ${String(e.message).slice(0, 90)}`);
-    }
-    if (failStreak >= 3) {
-      if (WAIT_MIN > 0) {
-        log(`Zincir tükendi — ${WAIT_MIN} dk uyuyup tekrar denenecek (şu ana dek ${done} analiz).`);
-        await sleep(WAIT_MIN * 60_000);
-        failStreak = 0;
-      } else {
-        log(`Zincir tükendi görünüyor (3 ardışık başarısızlık) — ${done} analizle zarifçe duruldu. Sonra tekrar koş.`);
-        await prisma.$disconnect();
-        process.exit(0);
-      }
+      chainFails = 0;
+      await prisma.job.update({
+        where: { id: j.id },
+        // Single-tier regime (user decision 2026-08-21): the 27B judges
+        // directly — no 8B triage, no separate review pass to await.
+        data: verdictFields(fit, "qwen27b", j),
+      });
+      done++;
+      sinceSnapshot++;
+      run.did();
+      if (done % 25 === 0) run.log(`  ${done}/${total} analiz edildi, ${factsDone} çıkarım (son: ${j.company.slice(0, 24)} — ${fit.fitScore})`);
+    } catch (e) {
+      chainFails++;
+      if (!(await waited(run, chainFails))) run.failed(e);
+      else chainFails = 0;
     }
     // Politeness pacing is for cloud quotas; a local Ollama needs none.
     await sleep(Number(process.env.FIT_SLEEP_MS ?? 1_500));
   }
 }
 
-log(`=== Bitti: ${done} analiz, ${factsDone} çıkarım, ${ruledOut} ilan gerçekleriyle son kademede ===`);
-await prisma.$disconnect();
+run.log(`${factsDone} çıkarım, ${ruledOut} ilan gerçekleriyle son kademede`);
+ });
+}
+
+// --wait rides out an exhausted provider chain instead of stopping, so those
+// failures must NOT reach the runner's fail-streak — the whole point of the
+// flag is that an overnight run survives them.
+async function waited(run: { log(l: string): void; done: number }, fails: number): Promise<boolean> {
+  if (WAIT_MIN <= 0 || fails < 3) return false;
+  run.log(`Zincir tükendi — ${WAIT_MIN} dk uyuyup tekrar denenecek (şu ana dek ${run.done} analiz).`);
+  await sleep(WAIT_MIN * 60_000);
+  return true;
+}
+
+// The backfill runs only when this file is the entry point. buildQueue and
+// factsRuleOut are the interesting parts of this file and neither could be
+// reached from a test while importing it started a judging run.
+const isEntryPoint = process.argv[1]?.replace(/\\/g, "/").endsWith("fit-fill.ts");
+if (isEntryPoint) await main();

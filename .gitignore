@@ -34,3 +34,4 @@ prisma/dev.db.pre-layered-backup
 migrate-layered.log
 embed-fill.log
 config/settings.json
+.run/

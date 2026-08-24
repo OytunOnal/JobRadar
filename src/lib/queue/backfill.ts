@@ -36,7 +36,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../db";
-import { acquireGpu, beatGpu, gpuBusyMessage, releaseGpu } from "./gpu-lock";
+import { acquireGpu, beatGpu, claimGpuChild, gpuBusyMessage, releaseGpu, releaseGpuChild } from "./gpu-lock";
 
 export type StopReason = "drained" | "budget" | "stalled" | "failstreak" | "gpu-busy" | "error";
 
@@ -194,12 +194,17 @@ export async function backfill(
   // the embedder spend their time reloading 17.7 GB of weights, not working.
   //
   // Under the worker, JOBRADAR_GPU_DELEGATED means the PARENT holds the lock —
-  // so we neither acquire it nor release it. We DO beat, though, and that is a
-  // reversal: the heartbeat used to be skipped here because beatGpu ignored
-  // anyone but the holder, which made a delegated timer a no-op that read like
-  // protection. Now the lock records the child and beatGpu accepts it, so this
-  // timer is the thing keeping the lock alive while the child does the work —
-  // and it is the only beat left once the worker is killed out from under it.
+  // so we neither acquire it nor release it. We DO beat, and we say who we are
+  // first, which is the part that cannot be skipped.
+  //
+  // The parent cannot name us. It spawns `node tsx/cli <script>` and tsx
+  // re-spawns, so the pid it records belongs to a wrapper and this code runs
+  // in the wrapper's child. A beat from here was therefore rejected as coming
+  // from a stranger — measured: the parent recorded 31116, this ran as 29748,
+  // and the beat never landed. That is the trap the old comment here warned
+  // about in a different form: a timer that does nothing while reading like
+  // protection. `claimGpuChild` closes it by having the one process that knows
+  // its own pid write it down.
   let heartbeat: NodeJS.Timeout | undefined;
   if (opts.gpu) {
     const busy = gpuBusyMessage();
@@ -208,7 +213,10 @@ export async function backfill(
       stopped = "gpu-busy";
       return finish();
     }
-    if (process.env.JOBRADAR_GPU_DELEGATED !== "1") {
+    if (process.env.JOBRADAR_GPU_DELEGATED === "1") {
+      claimGpuChild();
+      process.on("exit", releaseGpuChild);
+    } else {
       acquireGpu(opts.gpu);
       process.on("exit", releaseGpu);
     }

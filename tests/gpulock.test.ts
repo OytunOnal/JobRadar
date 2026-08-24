@@ -51,7 +51,7 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
   }
 }
 
-const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild, beatGpu } = await import("../src/lib/queue/gpu-lock");
+const { acquireGpu, releaseGpu, gpuHolder, gpuBusyMessage, setGpuChild, beatGpu, claimGpuChild, releaseGpuChild } = await import("../src/lib/queue/gpu-lock");
 
 test("acquire, then hold: the same process may re-acquire", () => {
   withLock(() => {
@@ -192,6 +192,38 @@ test("a delegated child's beat is what keeps the lock alive", () => {
     assert.equal(gpuHolder()?.holder, "worker/lane", "a beating child holds it, orphan or not");
     assert.equal(acquireGpu("worker/lane-2"), false, "so no second 27B lands on the card");
   });
+});
+
+// The pid the parent can see is not the pid that does the work.
+//
+// The worker spawns `node tsx/cli <script>` and tsx re-spawns, so what
+// `setGpuChild` records is a wrapper. The test above fakes `child:
+// process.pid` and so cannot see this at all — measured through the real
+// spawn, the parent recorded 31116 while the script ran as 29748, and the
+// beat from 29748 was rejected as a stranger's. Only the process doing the
+// work can name itself.
+test("the process doing the work claims the lock itself, whatever the parent guessed", () => {
+  withLock((path) => withLiveProcess((wrapper) => {
+    const old = Date.now() - 6 * 60_000;
+    writeFileSync(path, JSON.stringify({
+      holder: "worker/lane",
+      pid: GONE, // the worker is dead
+      child: wrapper, // and it recorded the tsx wrapper, not us
+      since: new Date(old).toISOString(),
+      beat: old,
+    }), "utf8");
+
+    beatGpu();
+    assert.equal(gpuHolder(), null, "a beat from an unnamed process must not count");
+
+    claimGpuChild(); // what backfill() now does when delegated
+    beatGpu();
+    assert.equal(gpuHolder()?.child, process.pid, "the worker's guess is corrected");
+    assert.equal(acquireGpu("worker/lane-2"), false, "and the card is protected");
+
+    releaseGpuChild();
+    assert.equal(gpuHolder(), null, "handing the claim back frees it, parent dead or not");
+  }));
 });
 
 test("a graceful stop does not release the lock out from under a live child", () => {

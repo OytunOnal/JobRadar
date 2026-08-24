@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 // One GPU, several workers that all want it.
@@ -46,6 +46,27 @@ function read(): LockInfo | null {
     return JSON.parse(readFileSync(path, "utf8")) as LockInfo;
   } catch {
     return null; // an unreadable lock is no lock
+  }
+}
+
+// Replace the lock in one step, because "an unreadable lock is no lock" turns
+// a half-written file into a free GPU.
+//
+// There are two steady writers now — the worker and the delegated child both
+// beat every 20 seconds — and `writeFileSync` truncates before it writes. A
+// reader landing inside that window gets "", `read()` swallows the parse error
+// and answers null, and the next `acquireGpu` hands out a card that is already
+// full. Writing beside the lock and renaming over it makes the swap atomic;
+// the temp name carries the pid so two writers cannot tear each other's
+// scratch file instead.
+function writeLock(info: LockInfo): void {
+  const path = lockPath();
+  const tmp = `${path}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(info), "utf8");
+    renameSync(tmp, path);
+  } catch {
+    try { unlinkSync(tmp); } catch { /* nothing to clean up */ }
   }
 }
 
@@ -97,12 +118,44 @@ export function gpuHolder(): LockInfo | null {
 // Record the delegated child that is really using the GPU, or clear it when
 // that child is gone. A no-op for a process that does not hold the lock, on
 // the same principle as `beatGpu`: never edit someone else's claim.
+//
+// What the parent records here is its BEST GUESS, and it is routinely wrong.
+// The worker spawns `node tsx/cli <script>`, and tsx re-spawns: the script runs
+// in a grandchild, so the pid the parent sees belongs to a wrapper that loads
+// no model at all. Measured — parent recorded 31116, the script ran as 29748
+// with ppid 31116. The guess is still worth writing, because the wrapper lives
+// exactly as long as the grandchild and so answers the liveness question
+// correctly; it is the BEAT that cannot come from it. `claimGpuChild` is how
+// that gets corrected by the only process that knows for certain.
 export function setGpuChild(pid: number | null): void {
   const info = read();
   if (!info || info.pid !== process.pid) return;
   if (pid === null) delete info.child;
   else info.child = pid;
-  try { writeFileSync(lockPath(), JSON.stringify(info), "utf8"); } catch { /* transient */ }
+  writeLock(info);
+}
+
+// I am the process actually using the GPU — put my own pid on the lock.
+//
+// Only the delegated process can say this, and only about itself. The parent
+// cannot: between it and the work sits a tsx wrapper whose pid is the one the
+// parent gets to see. Guessing from the outside is what made the heartbeat a
+// no-op that documented itself as protection.
+export function claimGpuChild(): void {
+  const info = read();
+  if (!info) return; // nothing to attach to
+  info.child = process.pid;
+  writeLock(info);
+}
+
+// Give the claim back. The exiting child does this itself so that the lock
+// stops naming it the moment it stops working — including when its parent is
+// already dead and there is nobody else left to do the clearing.
+export function releaseGpuChild(): void {
+  const info = read();
+  if (!info || info.child !== process.pid) return;
+  delete info.child;
+  writeLock(info);
 }
 
 // Take the GPU for `holder`, or return false if someone else has it. Callers
@@ -126,7 +179,7 @@ export function acquireGpu(holder: string): boolean {
     // hold the lock on behalf of a stranger.
     ...(current?.child && alive(current.child) ? { child: current.child } : {}),
   };
-  writeFileSync(path, JSON.stringify(info), "utf8");
+  writeLock(info);
   return true;
 }
 
@@ -145,7 +198,7 @@ export function beatGpu(): void {
   const info = read();
   if (!info || (info.pid !== process.pid && info.child !== process.pid)) return;
   info.beat = Date.now();
-  try { writeFileSync(lockPath(), JSON.stringify(info), "utf8"); } catch { /* transient */ }
+  writeLock(info);
 }
 
 export function releaseGpu(): void {
@@ -156,8 +209,10 @@ export function releaseGpu(): void {
   // when it was doing the work itself and wrong the moment it delegated: a
   // graceful stop during a four-hour judging pass would drop the lock, leave
   // the child holding the model, and let the next process take a card that is
-  // already full. The child clears itself out of the lock when it exits, so
-  // this refusal cannot outlive the work it is protecting.
+  // already full. The child gives its claim back on the way out
+  // (`releaseGpuChild`), so this refusal cannot outlive the work it protects —
+  // and if the child dies without getting that far, `gpuHolder` sees two dead
+  // pids and the lock is takeable anyway.
   if (info?.child && info.child !== process.pid && alive(info.child)) return;
   const path = lockPath();
   try { if (existsSync(path)) unlinkSync(path); } catch { /* already gone */ }
@@ -173,12 +228,18 @@ export function gpuBusyMessage(): string | null {
   const h = gpuHolder();
   if (!h || h.pid === process.pid) return null;
   const mins = Math.round((Date.now() - Date.parse(h.since)) / 60000);
-  // Name the pid the reader can actually act on. Telling someone to wait for
-  // or stop a process that no longer exists is the exact confusion that
-  // started all of this — "GPU busy: worker/lane (pid 12940, 43 min)" for a
-  // pid that had already been killed. When the holder is gone and its child is
-  // still judging, the child is the one to wait for.
-  const orphan = !alive(h.pid) && h.child && alive(h.child);
-  const who = orphan ? `pid ${h.child}, terk edilmiş alt süreç` : `pid ${h.pid}`;
+  // Name the pid the reader can actually act on, which is the CHILD whenever
+  // there is one — not only when the parent is dead.
+  //
+  // Telling someone to wait for or stop a process that no longer exists is the
+  // confusion that started all of this: "GPU busy: worker/lane (pid 12940, 43
+  // min)" for a pid that had already been killed. But naming a LIVE parent is
+  // just as misleading now, because `releaseGpu` refuses while its child is
+  // working: stop the worker as instructed and the GPU stays locked for the
+  // rest of the judging pass, by a process the message never mentioned.
+  const working = h.child && alive(h.child) ? h.child : null;
+  const who = working
+    ? `pid ${working}${alive(h.pid) ? "" : ", terk edilmiş"} alt süreç`
+    : `pid ${h.pid}`;
   return `GPU meşgul: "${h.holder}" (${who}, ${mins} dk). Ya onun bitmesini bekleyin ya da durdurun.`;
 }

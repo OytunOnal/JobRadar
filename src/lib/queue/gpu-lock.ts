@@ -86,11 +86,29 @@ function writeLock(info: LockInfo): boolean {
   }
 }
 
+// WHO delegated, not merely that someone did.
+//
 // The worker sets this on the environment of the script it spawns, and every
-// descendant inherits it. It means: the lock belongs to a process above me,
-// and the work it covers is mine.
-function delegated(): boolean {
-  return process.env.JOBRADAR_GPU_DELEGATED === "1";
+// descendant inherits it. It used to say "1", which is an assertion without a
+// subject: any delegated process would attach itself to whatever lock happened
+// to be on disk. Measured — a process that had never been spawned by the
+// holder wrote its own pid onto a stranger's lock, and since the claim is
+// re-asserted on every beat, the rightful holder could not clear it and could
+// not release its own lock while it stood.
+//
+// Naming the parent turns the claim into something checkable: I may attach to
+// THIS lock, because the process that spawned me is the one holding it. A
+// stale "1" from an older build parses to a pid that matches no holder, so it
+// fails the check and the run takes its own lock — the safe direction.
+function delegatedTo(): number | null {
+  const n = Number(process.env.JOBRADAR_GPU_DELEGATED);
+  return Number.isInteger(n) && n > 1 ? n : null;
+}
+
+// Is this lock the one my parent took on my behalf?
+export function delegatedUnder(info: LockInfo | null): boolean {
+  const parent = delegatedTo();
+  return parent !== null && info !== null && info.pid === parent;
 }
 
 // Is the process that wrote this lock still running?
@@ -197,12 +215,21 @@ export function acquireGpu(holder: string): boolean {
 export function beatGpu(): void {
   const info = read();
   if (!info) return;
-  // A delegated process is the work; the lock above it is its parent's.
-  if (delegated()) info.child = process.pid;
+  // A delegated process is the work — but only on the lock its own parent
+  // holds. Anything else is someone else's claim to forge.
+  if (delegatedUnder(info)) info.child = process.pid;
   else if (info.pid !== process.pid) return;
   info.beat = Date.now();
-  writeLock(info);
+  if (!writeLock(info) && !warnedBeat) {
+    warnedBeat = true;
+    // A beat that cannot write is the failure this file is least able to
+    // survive quietly: the lock goes stale on schedule and another process
+    // takes a card with 17.7 GB resident on it. Say it once — repeating every
+    // 20 seconds for four hours would bury the run's real output.
+    console.error("GPU kilidi yazılamıyor — kilit bayatlayacak ve kart devralınabilir.");
+  }
 }
+let warnedBeat = false;
 
 export function releaseGpu(): void {
   const info = read();
@@ -224,12 +251,17 @@ export function releaseGpu(): void {
 // For scripts that should refuse to run rather than compete. Returns a
 // message to print, or null when the GPU is free.
 export function gpuBusyMessage(): string | null {
+  const h = gpuHolder();
+  if (!h || h.pid === process.pid) return null;
   // The worker holds the lock and then runs the real script as a child. The
   // child is a different pid but the same claim, so the parent DELEGATES:
   // without this the worker would lock itself out of its own work.
-  if (process.env.JOBRADAR_GPU_DELEGATED === "1") return null;
-  const h = gpuHolder();
-  if (!h || h.pid === process.pid) return null;
+  //
+  // Only for MY parent's lock, though. This used to wave through any process
+  // carrying the delegation flag, whatever lock it found — so an orphan whose
+  // own parent had died would sail past a lock a completely different worker
+  // had since taken, and load the model on a busy card.
+  if (delegatedUnder(h)) return null;
   const mins = Math.round((Date.now() - Date.parse(h.since)) / 60000);
   // Name the pid the reader can actually act on, which is the CHILD whenever
   // there is one — not only when the parent is dead.

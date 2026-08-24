@@ -36,7 +36,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { prisma } from "../db";
-import { acquireGpu, beatGpu, gpuBusyMessage, gpuHolder, releaseGpu, releaseGpuChild } from "./gpu-lock";
+import { acquireGpu, beatGpu, delegatedUnder, gpuBusyMessage, gpuHolder, releaseGpu, releaseGpuChild } from "./gpu-lock";
 
 export type StopReason = "drained" | "budget" | "stalled" | "failstreak" | "gpu-busy" | "error";
 
@@ -193,18 +193,21 @@ export async function backfill(
   // Refuse rather than compete: two processes alternating between the 27B and
   // the embedder spend their time reloading 17.7 GB of weights, not working.
   //
-  // Under the worker, JOBRADAR_GPU_DELEGATED means the PARENT holds the lock —
-  // so we neither acquire it nor release it. We DO beat, and we say who we are
-  // first, which is the part that cannot be skipped.
+  // THREE WAYS THIS RUN CAN RELATE TO THE GPU, and the run has to know which.
   //
-  // The parent cannot name us. It spawns `node tsx/cli <script>` and tsx
-  // re-spawns, so the pid it records belongs to a wrapper and this code runs
-  // in the wrapper's child. A beat from here was therefore rejected as coming
-  // from a stranger — measured: the parent recorded 31116, this ran as 29748,
-  // and the beat never landed. That is the trap the old comment here warned
-  // about in a different form: a timer that does nothing while reading like
-  // protection. `claimGpuChild` closes it by having the one process that knows
-  // its own pid write it down.
+  // Under the worker, JOBRADAR_GPU_DELEGATED carries the parent's pid: the
+  // lock is already held on our behalf, so we neither acquire nor release it.
+  // We DO beat, and the beat is also how we say who we are — the parent cannot
+  // name us, because it spawns `node tsx/cli <script>` and tsx re-spawns, so
+  // the only pid it can see belongs to a wrapper that loads no model.
+  //
+  // But delegation is a claim to be checked, not taken. If the lock is gone or
+  // stale, or belongs to some other worker entirely, then we are not under it
+  // and must take our own — otherwise a four-hour judging pass runs with no
+  // protection while every comment here says otherwise.
+  //
+  // And if we cannot take one, we do not run. Believing you hold the card is
+  // worse than knowing you do not.
   let heartbeat: NodeJS.Timeout | undefined;
   if (opts.gpu) {
     const busy = gpuBusyMessage();
@@ -213,14 +216,9 @@ export async function backfill(
       stopped = "gpu-busy";
       return finish();
     }
-    // Delegated only counts if the parent's lock is really there. It might not
-    // be: the parent may have failed to write it, or it may have gone stale.
-    // Taking "delegated" on faith would then run a four-hour judging pass with
-    // no lock at all and nothing said about it — the same shape as the bug
-    // above, a protection that is not there while reading as though it is.
-    const under = process.env.JOBRADAR_GPU_DELEGATED === "1" && gpuHolder() !== null;
-    if (process.env.JOBRADAR_GPU_DELEGATED === "1" && !under) {
-      log("Üst süreçten devralınacak GPU kilidi yok — kilidi bu koşu alıyor.");
+    const under = delegatedUnder(gpuHolder());
+    if (process.env.JOBRADAR_GPU_DELEGATED && !under) {
+      log("Üst sürecin GPU kilidi yok ya da başkasına ait — kilidi bu koşu alıyor.");
     }
     if (under) {
       // The beat is also the claim, so the first one says who we are.
@@ -228,6 +226,14 @@ export async function backfill(
       process.on("exit", releaseGpuChild);
     } else if (acquireGpu(opts.gpu)) {
       process.on("exit", releaseGpu);
+    } else if (gpuHolder()) {
+      // Lost a race that gpuBusyMessage() won a moment ago. Ordinary
+      // contention, and it must not be filed as a crash: `error` is the
+      // receipt reason that means something is genuinely broken, and the
+      // worker's ladder reads the two differently.
+      log(gpuBusyMessage() ?? "GPU başkasında.");
+      stopped = "gpu-busy";
+      return finish();
     } else {
       log("GPU kilidi yazılamadı — koşulmuyor, çünkü tuttuğunu sanmak tutmamaktan kötü.");
       stopped = "error";

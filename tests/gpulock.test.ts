@@ -54,9 +54,9 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
 // Beating as the delegated process is how a child claims the lock, so a case
 // that plays the child has to say so the way the real one does — through the
 // environment the worker sets on the spawn.
-function asDelegated<T>(fn: () => T): T {
+function asDelegated<T>(parent: number, fn: () => T): T {
   const prev = process.env.JOBRADAR_GPU_DELEGATED;
-  process.env.JOBRADAR_GPU_DELEGATED = "1";
+  process.env.JOBRADAR_GPU_DELEGATED = String(parent);
   try { return fn(); } finally {
     if (prev === undefined) delete process.env.JOBRADAR_GPU_DELEGATED;
     else process.env.JOBRADAR_GPU_DELEGATED = prev;
@@ -203,7 +203,7 @@ test("the process doing the work claims the lock by beating, and is the only one
     assert.equal(gpuHolder(), null, "a beat from an unrelated process must not count");
 
     write();
-    asDelegated(() => {
+    asDelegated(GONE, () => {
       beatGpu();
       assert.equal(gpuHolder()?.child, process.pid, "the beat says who is working");
       assert.equal(acquireGpu("worker/lane-2"), false, "so the card is protected");
@@ -222,6 +222,34 @@ test("the process doing the work claims the lock by beating, and is the only one
       assert.equal(gpuHolder(), null, "handing it back frees it, parent dead or not");
     });
   });
+});
+
+// The check that came back.
+//
+// Removing setGpuChild removed the guard it carried — "never edit someone
+// else's claim" — and nothing replaced it, so a delegated process attached
+// itself to whatever lock was on disk. Measured: a process that had never been
+// spawned by the holder wrote its own pid onto a stranger's lock. And because
+// the claim is re-asserted every beat, forging it once meant forging it for
+// good: the holder cannot clear it, and cannot release its own lock past the
+// live "child" it never spawned.
+//
+// The real path there is not exotic. Kill a worker while tsx is still booting
+// and no exit handler runs; a second worker legitimately takes the freed card;
+// the first orphan then finishes booting and finds a lock that is not its own.
+test("a delegated process attaches only to the lock its own parent holds", () => {
+  withLock((path) => withLiveProcess((worker2) => {
+    writeFileSync(path, JSON.stringify({
+      holder: "worker2/lane", pid: worker2, // a different worker, still running
+      since: new Date().toISOString(), beat: Date.now(),
+    }), "utf8");
+
+    asDelegated(GONE, () => { // our parent was GONE, and it is not worker2
+      assert.notEqual(gpuBusyMessage(), null, "a stranger's lock is not ours to pass");
+      beatGpu();
+      assert.equal(gpuHolder()?.child, undefined, "and not ours to sign");
+    });
+  }));
 });
 
 test("a graceful stop does not release the lock out from under a live child", () => {

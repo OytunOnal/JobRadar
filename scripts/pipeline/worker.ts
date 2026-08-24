@@ -96,8 +96,11 @@ function spawnChild(script: string, extra: string[] = []): Promise<number> {
       {
         stdio: ["ignore", "inherit", "inherit"],
         // The child runs under OUR lock; it must not refuse itself, and it
-        // must not release a lock it does not own when it exits.
-        env: { ...process.env, JOBRADAR_GPU_DELEGATED: "1" },
+        // must not release a lock it does not own when it exits. It carries
+        // our PID, not a bare flag, so it can check that the lock it attaches
+        // to is the one we took — an orphan whose parent died must not latch
+        // onto whatever lock a later worker has since acquired.
+        env: { ...process.env, JOBRADAR_GPU_DELEGATED: String(process.pid) },
       },
     );
     // We keep beating while the child boots. Once it is up it puts ITSELF on
@@ -245,7 +248,13 @@ async function pass(): Promise<boolean> {
     // ONE acquire for the whole lane. Releasing between embedding and judging
     // let a manual script slip into the gap and start swapping models against
     // us — the exact thrash the lock exists to prevent.
-    if (!acquireGpu("worker/lane")) return false;
+    if (!acquireGpu("worker/lane")) {
+      // Two reasons, and the silent one is the dangerous one: either
+      // somebody else holds the card, or the lock could not be written at
+      // all. Unlogged, the second reads as an endless run of empty passes.
+      log(`  GPU alınamadı: ${gpuBusyMessage() ?? "kilit yazılamadı"}`);
+      return false;
+    }
     try {
       const stale = await prisma.job.count({
         where: andWhere(laneWhere(lane, now), staleVectorWhere()),
@@ -285,7 +294,13 @@ async function pass(): Promise<boolean> {
     where: andWhere(archiveWhere(), staleVectorWhere()),
   });
   if (archive > 0) {
-    if (!acquireGpu("worker/archive")) return false;
+    if (!acquireGpu("worker/archive")) {
+      // Two reasons, and the silent one is the dangerous one: either
+      // somebody else holds the card, or the lock could not be written at
+      // all. Unlogged, the second reads as an endless run of empty passes.
+      log(`  GPU alınamadı: ${gpuBusyMessage() ?? "kilit yazılamadı"}`);
+      return false;
+    }
     log(`boşta: arşivde ${archive.toLocaleString("tr")} vektör eksik — sırayı tıkamadan dolduruluyor`);
     try {
       // --archive, or embed-fill walks the live pool first and this message

@@ -1,0 +1,21 @@
+[
+ {
+  "uid": "77:ab",
+  "name": "  Site Reliability Engineer  ",
+  "url_comeet_hosted_page": "https://www.comeet.co/jobs/acme/77/site-reliability-engineer/ab",
+  "location": {
+   "name": "Tel Aviv",
+   "is_remote": false
+  },
+  "workplace_type": "Hybrid",
+  "details": {
+   "description": "<p>Keep it up.</p>",
+   "requirements": "<ul><li>5y Linux</li></ul>"
+  },
+  "time_updated": "2026-08-09T00:00:00Z"
+ },
+ {
+  "uid": null,
+  "name": "dropped"
+ }
+]

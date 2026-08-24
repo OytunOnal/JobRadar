@@ -1,0 +1,31 @@
+{
+ "items": [
+  {
+   "TotalJobsCount": 2,
+   "requisitionList": [
+    {
+     "Id": "REQ_12345",
+     "Title": "  Senior Platform Engineer  ",
+     "PrimaryLocation": "Berlin, Germany",
+     "WorkplaceType": "Hybrid",
+     "secondaryLocations": [
+      {
+       "Name": "Munich, Germany"
+      },
+      {
+       "Name": null
+      }
+     ],
+     "ShortDescriptionStr": "<p>Join the platform group.</p>",
+     "ExternalResponsibilitiesStr": "<ul><li>Own the deploy pipeline</li></ul>",
+     "ExternalQualificationsStr": "<ul><li>5 years Kubernetes</li></ul>",
+     "PostedDate": "2026-08-01T00:00:00Z"
+    },
+    {
+     "Id": null,
+     "Title": "dropped: no id"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+[
+ {
+  "uuid": "u-1",
+  "name": "  Backend Engineer  ",
+  "url": "https://ats.rippling.com/acme/jobs/u-1",
+  "workLocation": {
+   "label": "Berlin"
+  }
+ },
+ {
+  "uuid": "u-1",
+  "name": "Backend Engineer",
+  "workLocation": {
+   "label": "Remote"
+  }
+ },
+ {
+  "uuid": null,
+  "name": "dropped: no uuid"
+ }
+]

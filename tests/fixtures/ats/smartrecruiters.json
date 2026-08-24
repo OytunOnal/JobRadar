@@ -1,0 +1,70 @@
+{
+ "offset": 0,
+ "limit": 100,
+ "totalFound": 1,
+ "content": [
+  {
+   "id": "744000133609317",
+   "name": "Project Manager (m/f)",
+   "uuid": "27508adc-1760-4f13-a332-31abbd11c2d8",
+   "jobAdId": "5889b1c0-ca43-42ba-9a8f-8f963a764bba",
+   "defaultJobAd": true,
+   "refNumber": "REF66A",
+   "company": {
+    "identifier": "IUNGOSpA",
+    "name": "IUNGO SpA"
+   },
+   "releasedDate": "2026-06-23T13:54:27.595Z",
+   "location": {
+    "city": "Cittanova",
+    "region": "Emilia-Romagna",
+    "country": "it",
+    "address": "Via Tacito 7",
+    "postalCode": "41123",
+    "remote": false,
+    "hybrid": true,
+    "latitude": "44.6476003",
+    "longitude": "10.8578387",
+    "fullLocation": "Cittanova, Emilia-Romagna, Italy"
+   },
+   "industry": {
+    "id": "it_and_services",
+    "label": "Information Technology And Services"
+   },
+   "department": {},
+   "function": {
+    "id": "information_technology",
+    "label": "Information Technology"
+   },
+   "typeOfEmployment": {
+    "id": "permanent",
+    "label": "Full-time"
+   },
+   "experienceLevel": {
+    "id": "executive",
+    "label": "Executive"
+   },
+   "customField": [
+    {
+     "fieldId": "COUNTRY",
+     "fieldLabel": "Country/Region",
+     "valueId": "it",
+     "valueLabel": "Italy"
+    },
+    {
+     "fieldId": "5ee7684b1232ab08f38d8b52",
+     "fieldLabel": "Brands",
+     "valueId": "default",
+     "valueLabel": "IUNGO SpA"
+    }
+   ],
+   "visibility": "PUBLIC",
+   "ref": "https://api.smartrecruiters.com/v1/companies/iungospa/postings/744000133609317",
+   "language": {
+    "code": "it",
+    "label": "Italian",
+    "labelNative": "italiano"
+   }
+  }
+ ]
+}

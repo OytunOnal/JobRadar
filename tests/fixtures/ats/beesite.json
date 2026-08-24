@@ -1,0 +1,30 @@
+{
+ "SearchResult": {
+  "SearchResultCountAll": 1,
+  "SearchResultItems": [
+   {
+    "MatchedObjectDescriptor": {
+     "PositionID": "MB-778",
+     "PositionTitle": "  Softwareentwickler Remote  ",
+     "PositionURI": "https://careers.example.de/job/MB-778",
+     "PositionLocation": [
+      {
+       "CityName": "Stuttgart",
+       "CountryName": "Germany"
+      },
+      {
+       "CityName": "Berlin",
+       "CountryName": "Germany"
+      }
+     ],
+     "PublicationStartDate": "2026-07-15T00:00:00Z"
+    }
+   },
+   {
+    "MatchedObjectDescriptor": {
+     "PositionTitle": "dropped: no id"
+    }
+   }
+  ]
+ }
+}

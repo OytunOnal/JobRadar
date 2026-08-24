@@ -1,0 +1,107 @@
+{
+ "total": 2,
+ "jobPostings": [
+  {
+   "title": "Senior Technical Program Manager - Central Technology (Temporary)",
+   "externalPath": "/job/Santa-Monica/Senior-Technical-Program-Manager_R027709",
+   "locationsText": "Santa Monica",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "R027709"
+   ]
+  },
+  {
+   "title": "Senior Technical Product Manager - Tech Strategy, Central Technology",
+   "externalPath": "/job/Santa-Monica/Senior-Technical-Product-Manager---Tech-Strategy--Central-Technology_R027470",
+   "locationsText": "2 Locations",
+   "postedOn": "Posted 30+ Days Ago",
+   "bulletFields": [
+    "R027470"
+   ]
+  }
+ ],
+ "facets": [
+  {
+   "facetParameter": "jobFamilyGroup",
+   "descriptor": "Job Category",
+   "values": [
+    {
+     "descriptor": "Production",
+     "id": "d5b22c2cbd4801490bc01e5c009aa819",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "facetParameter": "workerSubType",
+   "descriptor": "Job Type",
+   "values": [
+    {
+     "descriptor": "TEA/Fixed Term Contract (Fixed Term)",
+     "id": "d5b22c2cbd4801b5d0f996e8ee99650d",
+     "count": 1
+    },
+    {
+     "descriptor": "Regular",
+     "id": "d5b22c2cbd4801352f7b9ae8ee99660d",
+     "count": 1
+    }
+   ]
+  },
+  {
+   "facetParameter": "timeType",
+   "descriptor": "Time Type",
+   "values": [
+    {
+     "descriptor": "Full time",
+     "id": "d2b411056e47011ca5e565e19a996800",
+     "count": 2
+    }
+   ]
+  },
+  {
+   "facetParameter": "locationMainGroup",
+   "values": [
+    {
+     "facetParameter": "locations",
+     "descriptor": "Locations",
+     "values": [
+      {
+       "descriptor": "Santa Monica",
+       "id": "15b06df4e602015ded8da300c2037185",
+       "count": 2
+      },
+      {
+       "descriptor": "Sherman Oaks",
+       "id": "15b06df4e602010ac2e28a00c2035885",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "facetParameter": "locationRegionStateProvince",
+     "descriptor": "Location Region/State/Province",
+     "values": [
+      {
+       "descriptor": "California",
+       "id": "ec3d210e4240442e99a28fa70419aec5",
+       "count": 2
+      }
+     ]
+    },
+    {
+     "facetParameter": "locationCountry",
+     "descriptor": "Location Country",
+     "values": [
+      {
+       "descriptor": "United States of America",
+       "id": "bc33aa3152ec42d4995f4791a106ed09",
+       "count": 2
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "userAuthenticated": false
+}

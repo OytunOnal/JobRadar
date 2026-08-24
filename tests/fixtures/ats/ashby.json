@@ -1,0 +1,53 @@
+{
+ "jobs": [
+  {
+   "id": "7e32058d-9c06-4394-ba2f-aa8628eeb838",
+   "title": "AI Engineer",
+   "department": "Engineering",
+   "team": "Engineering",
+   "employmentType": "FullTime",
+   "location": "Bay Area (Palo Alto)",
+   "secondaryLocations": [],
+   "publishedAt": "2026-02-25T16:38:23.270+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressRegion": "California",
+     "addressCountry": "United States",
+     "addressLocality": "Palo Alto"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/aida/7e32058d-9c06-4394-ba2f-aa8628eeb838",
+   "applyUrl": "https://jobs.ashbyhq.com/aida/7e32058d-9c06-4394-ba2f-aa8628eeb838/application",
+   "descriptionHtml": "<p style=\"min-height:1.5em\">Aida is a B2B enterprise AI company founded by Piyush Prahladka, former co-founder of Glean (a unicorn valued at $7.2B), and Atish Das Sarma, former head of growth engineering at Patreon and head of AI at Apple Cloud. Currently operating in stealth mode, Aida is developing deep AI assistants tailored for every role. The company is well-funded, having secured a significant seed round.</p><p style=\"min-height:1.5em\">Aida’s team consists of 20 members based in Palo Alto and India. We are seeking a strong AI Engineer who is comfortable working in a fast-paced environment.</p><p style=\"min-height:1.5em\"><strong>Preferred Qualifications:</strong></p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\">Demonstrate a history of taking services from the ideation stage to a fully functional implementation.</p></li><li><p style=\"min-height:1.5em\">Strong problem-solving skills and the ability to work in a collaborative, cross-functional team environment.</p></li><li><p style=\"min-height:1.5em\">Experience or research on building LLMs ground up highly desired</p></li><li><p style=\"min-height:1.5em\">Experience with using LLM platforms like (OpenAI, Anthropic, etc.)</p></li><li><p style=\"min-height:1.5em\">An eye for new models in town and the ability to understand and use them quickly.</p></li><li><p style=\"min-height:1.5em\">Experience with cloud platforms such as AWS, Azure, or Google Cloud.</p></li><li><p style=\"min-height:1.5em\">Quick at prototyping and comparing SOTA (State of the Art) language models.</p></li><li><p style=\"min-height:1.5em\">Experience in using and fine-tuning open-source models or multiple LLMs.</p></li><li><p style=\"min-height:1.5em\">Analyze statistics, data, and algorithms for projection accuracy.</p></li><li><p style=\"min-height:1.5em\">Exceptional academic credentials highly desired</p></li></ul><p style=\"min-height:1.5em\"><strong>More About the Role:</strong></p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><strong>Work setting: </strong>Hybrid in the San Francisco Bay Area (3 days in the Palo Alto office)</p></li><li><p style=\"min-height:1.5em\"><strong>Competitive Salary, Equity, and Benefits</strong></p></li></ul><p style=\"min-height:1.5em\"></p>",
+   "descriptionPlain": "Aida is a B2B enterprise AI company founded by Piyush Prahladka, former co-founder of Glean (a unicorn valued at $7.2B), and Atish Das Sarma, former head of growth engineering at Patreon and head of AI at Apple Cloud. Currently operating in stealth mode, Aida is developing deep AI assistants tailored for every role. The company is well-funded, having secured a significant seed round.\n\nAida’s team consists of 20 members based in Palo Alto and India. We are seeking a strong AI Engineer who is comfortable working in a fast-paced environment.\n\nPreferred Qualifications:\n\n - Demonstrate a history of taking services from the ideation stage to a fully functional implementation.\n\n - Strong problem-solving skills and the ability to work in a collaborative, cross-functional team environment.\n\n - Experience or research on building LLMs ground up highly desired\n\n - Experience with using LLM platforms like (OpenAI, Anthropic, etc.)\n\n - An eye for new models in town and the ability to understand and use them quickly.\n\n - Experience with cloud platforms such as AWS, Azure, or Google Cloud.\n\n - Quick at prototyping and comparing SOTA (State of the Art) language models.\n\n - Experience in using and fine-tuning open-source models or multiple LLMs.\n\n - Analyze statistics, data, and algorithms for projection accuracy.\n\n - Exceptional academic credentials highly desired\n\nMore About the Role:\n\n - Work setting: Hybrid in the San Francisco Bay Area (3 days in the Palo Alto office)\n\n - Competitive Salary, Equity, and Benefits\n\n"
+  },
+  {
+   "id": "3f88d338-0466-4c85-a741-f3f1550725e3",
+   "title": "Frontend/Fullstack Engineer",
+   "department": "Engineering",
+   "team": "Engineering",
+   "employmentType": "FullTime",
+   "location": "Bay Area (Palo Alto)",
+   "secondaryLocations": [],
+   "publishedAt": "2026-02-24T23:00:53.092+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressRegion": "California",
+     "addressCountry": "United States",
+     "addressLocality": "Palo Alto"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/aida/3f88d338-0466-4c85-a741-f3f1550725e3",
+   "applyUrl": "https://jobs.ashbyhq.com/aida/3f88d338-0466-4c85-a741-f3f1550725e3/application",
+   "descriptionHtml": "<p style=\"min-height:1.5em\">Aida is a B2B enterprise AI company founded by Piyush Prahladka, former co-founder of Glean (a unicorn valued at $7.2B), and Atish Das Sarma, former head of growth engineering at Patreon and AI at Apple Cloud. Operating in the Sales tech sector, Aida builds conversational AI agents that form the core of the AI orchestration layer. Backed by top-tier VCs, Aida boasts several marquee unicorn customers and is experiencing rapid growth.</p><p style=\"min-height:1.5em\">Currently, Aida has a team of 20 and is seeking an exceptional frontend or frontend-leaning full stack engineer to become a key member of our early extended founding team.</p><p style=\"min-height:1.5em\"><strong>Preferred Qualifications:</strong></p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\">Minimum 2 years, ideally 4+ years, of experience developing user-facing products using React</p></li><li><p style=\"min-height:1.5em\">Deep expertise in React, Typescript, and NextJS</p></li><li><p style=\"min-height:1.5em\">Familiarity with TailwindCSS and Tanstack/React Query is a plus</p></li><li><p style=\"min-height:1.5em\">Ability to design and architect frontend features from scratch</p></li><li><p style=\"min-height:1.5em\">Extensive experience creating standalone UI component libraries</p></li><li><p style=\"min-height:1.5em\">Strong knowledge of data structures and algorithms</p></li><li><p style=\"min-height:1.5em\">Excellent system design skills</p></li><li><p style=\"min-height:1.5em\">Enthusiasm for solving challenging technical problems with innovative solutions</p></li><li><p style=\"min-height:1.5em\">Experience at early-stage growth startups is a plus</p></li><li><p style=\"min-height:1.5em\">Comfortable taking on full stack responsibilities</p></li><li><p style=\"min-height:1.5em\">Bachelor’s or Master’s degree in computer science or a related field from a top university</p></li></ul><p style=\"min-height:1.5em\"><strong>More about the role:</strong></p><ul style=\"min-height:1.5em\"><li><p style=\"min-height:1.5em\"><strong>Work setting:</strong> Hybrid, based in the San Francisco Bay Area (3 days per week in the Palo Alto office)</p></li><li><p style=\"min-height:1.5em\"><strong>Competitive Salary, Equity, and Benefits</strong></p></li></ul>",
+   "descriptionPlain": "Aida is a B2B enterprise AI company founded by Piyush Prahladka, former co-founder of Glean (a unicorn valued at $7.2B), and Atish Das Sarma, former head of growth engineering at Patreon and AI at Apple Cloud. Operating in the Sales tech sector, Aida builds conversational AI agents that form the core of the AI orchestration layer. Backed by top-tier VCs, Aida boasts several marquee unicorn customers and is experiencing rapid growth.\n\nCurrently, Aida has a team of 20 and is seeking an exceptional frontend or frontend-leaning full stack engineer to become a key member of our early extended founding team.\n\nPreferred Qualifications:\n\n - Minimum 2 years, ideally 4+ years, of experience developing user-facing products using React\n\n - Deep expertise in React, Typescript, and NextJS\n\n - Familiarity with TailwindCSS and Tanstack/React Query is a plus\n\n - Ability to design and architect frontend features from scratch\n\n - Extensive experience creating standalone UI component libraries\n\n - Strong knowledge of data structures and algorithms\n\n - Excellent system design skills\n\n - Enthusiasm for solving challenging technical problems with innovative solutions\n\n - Experience at early-stage growth startups is a plus\n\n - Comfortable taking on full stack responsibilities\n\n - Bachelor’s or Master’s degree in computer science or a related field from a top university\n\nMore about the role:\n\n - Work setting: Hybrid, based in the San Francisco Bay Area (3 days per week in the Palo Alto office)\n\n - Competitive Salary, Equity, and Benefits"
+  }
+ ],
+ "apiVersion": "1"
+}

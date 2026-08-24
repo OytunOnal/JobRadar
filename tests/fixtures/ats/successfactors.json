@@ -1,0 +1,23 @@
+{
+ "totalJobs": 1,
+ "jobSearchResult": [
+  {
+   "response": {
+    "id": "88213",
+    "unifiedStandardTitle": " Embedded Software Engineer ",
+    "unifiedUrlTitle": "embedded-software-engineer",
+    "jobLocationShort": [
+     "Munich",
+     null,
+     "Home Office"
+    ],
+    "unifiedStandardStart": "2026-08-10T00:00:00Z"
+   }
+  },
+  {
+   "response": {
+    "id": null
+   }
+  }
+ ]
+}

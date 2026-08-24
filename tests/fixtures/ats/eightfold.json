@@ -1,0 +1,21 @@
+{
+ "count": 1,
+ "positions": [
+  {
+   "id": 9001,
+   "name": "  Machine Learning Engineer  ",
+   "location": "Remote - Germany",
+   "locations": [
+    "Remote - Germany",
+    "Leverkusen"
+   ],
+   "canonicalPositionUrl": "https://acme.eightfold.ai/careers/job/9001",
+   "job_description": "<p>Build models.</p><ul><li>PyTorch</li></ul>",
+   "t_create": 1754006400
+  },
+  {
+   "id": 9002,
+   "name": null
+  }
+ ]
+}

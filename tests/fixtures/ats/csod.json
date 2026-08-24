@@ -1,0 +1,22 @@
+{
+ "data": {
+  "totalCount": 1,
+  "requisitions": [
+   {
+    "requisitionId": 30211,
+    "displayJobTitle": "  Systems Engineer Remote  ",
+    "locations": [
+     {
+      "city": "Bremen",
+      "state": null,
+      "country": "Germany"
+     }
+    ],
+    "postingEffectiveDate": "2026-08-03T00:00:00Z"
+   },
+   {
+    "displayJobTitle": "dropped: no id"
+   }
+  ]
+ }
+}

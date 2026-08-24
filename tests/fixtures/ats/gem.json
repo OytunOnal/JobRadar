@@ -1,0 +1,34 @@
+[
+ {
+  "data": {
+   "oatsExternalJobPostings": {
+    "jobPostings": [
+     {
+      "id": "int-1",
+      "extId": "ext-777",
+      "title": "  Founding Engineer  ",
+      "locations": [
+       {
+        "name": "San Francisco",
+        "isRemote": false
+       },
+       {
+        "city": "Berlin",
+        "isoCountry": "DE",
+        "isRemote": true
+       }
+      ],
+      "job": {
+       "locationType": "REMOTE",
+       "employmentType": "FULL_TIME"
+      }
+     },
+     {
+      "extId": null,
+      "title": "dropped"
+     }
+    ]
+   }
+  }
+ }
+]

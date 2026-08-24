@@ -1,0 +1,25 @@
+{
+ "refineSearch": {
+  "totalHits": 1,
+  "data": {
+   "jobs": [
+    {
+     "reqId": "ALZ-5512",
+     "title": "  Data Engineer  ",
+     "applyUrl": "https://careers.example.com/job/ALZ-5512",
+     "city": "Munich",
+     "multi_location": [
+      "Munich",
+      "Remote"
+     ],
+     "type": "Remote",
+     "descriptionTeaser": "<p>Build the data platform &amp; own it.</p>",
+     "postedDate": "2026-08-12T00:00:00Z"
+    },
+    {
+     "title": "dropped: no id"
+    }
+   ]
+  }
+ }
+}

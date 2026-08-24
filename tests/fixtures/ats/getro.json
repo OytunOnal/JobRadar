@@ -1,0 +1,26 @@
+{
+ "results": {
+  "count": 1,
+  "jobs": [
+   {
+    "id": 55001,
+    "title": "  Product Engineer  ",
+    "url": "https://jobs.example.vc/companies/acme/jobs/55001",
+    "organization": {
+     "name": "Acme Robotics"
+    },
+    "locations": [
+     "Zurich",
+     null,
+     "Remote"
+    ],
+    "work_mode": "Remote",
+    "created_at": 1753920000
+   },
+   {
+    "id": null,
+    "title": "dropped"
+   }
+  ]
+ }
+}

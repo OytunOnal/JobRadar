@@ -1,0 +1,14 @@
+<jobs>
+<job>
+  <id>oXY1afwT</id>
+  <title><![CDATA[ Senior Backend Engineer ]]></title>
+  <location>Austin</location>
+  <region>TX</region>
+  <date>2026-08-06</date>
+  <detail-url>https://jobs.jobvite.com/acme/job/oXY1afwT</detail-url>
+  <description><![CDATA[<p>Own the API.</p>]]></description>
+</job>
+<job>
+  <title>dropped: no id</title>
+</job>
+</jobs>

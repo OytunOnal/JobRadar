@@ -1,0 +1,21 @@
+{
+ "data": [
+  {
+   "id": 4242,
+   "title": "  Senior Designer  ",
+   "url": "https://acme.pinpointhq.com/postings/4242",
+   "location": {
+    "name": "London, UK",
+    "city": "London",
+    "province": "England"
+   },
+   "workplace_type": "Remote",
+   "compensation": "\u00a370,000 - \u00a385,000",
+   "description": "<p>Design the product.</p>"
+  },
+  {
+   "title": "dropped: no url",
+   "url": "ftp://nope"
+  }
+ ]
+}

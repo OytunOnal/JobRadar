@@ -317,6 +317,43 @@ A run that fills in what is missing or behind for postings that already exist,
 as opposed to fetching new ones.
 _Avoid_: migration, sync, catch-up
 
+**Backoff ladder**:
+The worker's answer to a pass that could not work: each consecutive failed or
+empty pass waits longer before the next try, and any progress resets the
+climb. Operates in minutes. Protects the machine while a condition clears —
+memory pressure, a busy card — rather than hammering into it.
+_Avoid_: retry loop, sleep
+
+**Fail streak**:
+A backfill's tolerance for bad rows: consecutive row failures end the run,
+one success in between resets the count. Half of a matched pair with the
+stall check — tolerating bad rows without watching progress would let a
+poisoned page spin at full speed forever.
+_Avoid_: error budget, retry count
+
+**Stall check**:
+The other half of that pair: rounds that make no progress end the run,
+because a pager re-fetching the same rows looks exactly like slow progress
+from the inside.
+_Avoid_: timeout, watchdog
+
+**Cooldown**:
+A per-source floor on how often it is fetched, whatever the ingest cadence.
+Rate-sensitive sources keep their own calendar, in days.
+_Avoid_: throttle, rate limit (a rate limit is what the provider chain hits)
+
+**Retry pass**:
+One second chance within a single ingest for sources that failed, because a
+transient network failure is common and waiting for the next ingest is
+expensive. Once — a second failure waits like everyone else.
+_Avoid_: retry loop
+
+**Circuit breaker**:
+A description run's per-platform give-up: a platform answering nothing this
+run — rate-limited, moved, gone — is skipped for the rest of it rather than
+spending the budget finding out one posting at a time.
+_Avoid_: ban, blacklist
+
 ## Derived values
 
 **Derivation**:

@@ -23,7 +23,11 @@ import { dirname } from "node:path";
 // different coat: the worker recording the pid of a tsx wrapper that loads no
 // model; two writers disagreeing over one field; an orphan signing a lock a
 // different worker had taken; a recycled pid impersonating the process that
-// died. None of those is expressible once the holder is a run.
+// died. None of those is expressible once the holder is a run — with one
+// qualification kept honest: membership is still a pid comparison, so a
+// recycled number could walk into a LIVE run. That is why dead participants are
+// pruned on every beat rather than carried, and why the run's identity, which
+// is what a joiner must present, is not a pid at all.
 
 function lockPath(): string {
   // Read per call, not at module load: a packaged build puts state outside the
@@ -58,6 +62,17 @@ export interface Run {
   beat: number;
   /** Pids taking part. Liveness only. */
   participants: number[];
+  /**
+   * The pid that began the run, kept for the busy MESSAGE alone: whether it is
+   * gone is the difference between "still working" and "abandoned but still
+   * holding". No rule in this module treats it as special, and it is never
+   * removed — which is the point. It used to be read off participants[0], and
+   * that is wrong the moment the process leaves gracefully: the list shifts,
+   * the next participant becomes first, and a run whose worker had exited
+   * cleanly reported itself as healthy while naming a holder that no longer
+   * existed.
+   */
+  startedBy?: number;
 }
 
 /** What a caller got when it asked for the card. */
@@ -81,6 +96,7 @@ function read(): Run | null {
       since: raw.since ?? new Date(raw.beat ?? Date.now()).toISOString(),
       beat: raw.beat ?? Date.now(),
       participants: [raw.pid, raw.child].filter((n): n is number => typeof n === "number"),
+      startedBy: raw.pid,
     };
   } catch {
     return null; // an unreadable lock is no lock
@@ -151,9 +167,21 @@ export function gpuRun(): Run | null {
   return run;
 }
 
-/** The id to hand to a process being spawned into this run. */
+/**
+ * The id to hand to a process being spawned into this run — and only when the
+ * run is ours to hand out.
+ *
+ * Taking the card is a read then a write, not one atomic step, so two processes
+ * can both see it free and both write, the later rename winning silently. A
+ * token taken from whatever happens to be on disk would then be a STRANGER's
+ * run id, handed to our child as a credential: it would join that run and load
+ * the judge onto a card someone else is already using. Exactly the crash this
+ * file exists to prevent, arrived at by way of a helper that looked like a
+ * getter.
+ */
 export function gpuToken(): string | null {
-  return gpuRun()?.id ?? null;
+  const run = gpuRun();
+  return run && mine(run) ? run.id : null;
 }
 
 // Enter myself in the run and refresh its beat. Idempotent, and re-entrant on
@@ -161,9 +189,13 @@ export function gpuToken(): string | null {
 // write from another writer erased it permanently, after which that process's
 // beats were refused as a stranger's.
 function enter(run: Run): boolean {
-  const participants = run.participants.includes(process.pid)
-    ? run.participants
-    : [...run.participants, process.pid];
+  // Drop participants that have died, rather than carrying them for the life of
+  // the run. They are not merely untidy: membership is tested by raw pid
+  // equality, so every dead pid left in the list is another number an unrelated
+  // process could be issued and walk in on. Pruning keeps that surface at the
+  // processes actually working.
+  const kept = run.participants.filter((p) => p === process.pid || alive(p));
+  const participants = kept.includes(process.pid) ? kept : [...kept, process.pid];
   const ok = writeLock({ ...run, participants, beat: Date.now() });
   if (ok) myRun = run.id;
   return ok;
@@ -189,6 +221,7 @@ export function claimGpu(holder: string): GpuClaim {
     since: new Date().toISOString(),
     beat: Date.now(),
     participants: [process.pid],
+    startedBy: process.pid,
   };
   if (!writeLock(run)) return "unwritable";
   myRun = run.id;
@@ -245,10 +278,7 @@ export function gpuBusyMessage(): string | null {
   // out of — "GPU busy: worker/lane (pid 12940, 43 min)" for a process that had
   // already been killed.
   const live = run.participants.filter(alive);
-  // participants[0] created the run; it having gone is the difference between
-  // "still working" and "abandoned but still holding". A label for the reader
-  // only — no rule in this module treats the creator as special.
-  const abandoned = run.participants.length > 0 && !alive(run.participants[0]) ? ", terk edilmiş" : "";
+  const abandoned = run.startedBy !== undefined && !alive(run.startedBy) ? ", terk edilmiş" : "";
   return `GPU meşgul: "${run.holder}" (pid ${live.join(", ")}${abandoned}, ${mins} dk). `
     + "Ya onun bitmesini bekleyin ya da durdurun.";
 }

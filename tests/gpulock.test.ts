@@ -50,6 +50,13 @@ function withLiveProcess<T>(fn: (pid: number) => T): T {
 }
 
 // Play a process that was handed a run id, the way a spawned backfill is.
+//
+// Every case uses its OWN run id. The module remembers the run this process
+// joined, so that it can find its way back in after a stale write — which means
+// two cases sharing an id let the first one's membership carry into the second,
+// and the second then passes without the credential it claims to be testing.
+// That is the failure this suite has already produced three times in other
+// forms; here it would have hidden the token check entirely.
 function withToken<T>(id: string, fn: () => T): T {
   const prev = process.env.JOBRADAR_GPU_RUN;
   process.env.JOBRADAR_GPU_RUN = id;
@@ -80,7 +87,7 @@ test("taking a free card creates a run with the taker as its first participant",
 test("two runs never hold the card at once", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-1a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other],
     }), "utf8");
     assert.equal(claimGpu("manual/fit"), "busy");
@@ -91,10 +98,10 @@ test("two runs never hold the card at once", () => {
 test("a process handed the run id joins it", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-2a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other],
     }), "utf8");
-    withToken("run-a", () => {
+    withToken("run-2a", () => {
       assert.equal(claimGpu("manual/fit"), "joined");
       assert.deepEqual(read(path).participants, [other, process.pid]);
       assert.equal(read(path).holder, "worker/lane", "joining does not relabel the run");
@@ -109,10 +116,10 @@ test("a process handed the run id joins it", () => {
 test("a process cannot join a run it was not handed", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-b", holder: "worker2/lane", since: new Date().toISOString(),
+      id: "run-3b", holder: "worker2/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other],
     }), "utf8");
-    withToken("run-a", () => { // our parent's run, not this one
+    withToken("run-3a", () => { // our parent's run, not this one
       assert.equal(claimGpu("manual/fit"), "busy");
       assert.deepEqual(read(path).participants, [other], "not ours to sign");
       beatGpu();
@@ -125,7 +132,7 @@ test("any participant's beat keeps the run alive", () => {
   withLock((path) => withLiveProcess((other) => {
     const old = Date.now() - 60_000;
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date(old).toISOString(),
+      id: "run-4a", holder: "worker/lane", since: new Date(old).toISOString(),
       beat: old, participants: [other, process.pid],
     }), "utf8");
     beatGpu();
@@ -139,17 +146,17 @@ test("any participant's beat keeps the run alive", () => {
 test("a participant dropped from the record puts itself back on the next beat", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-5a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other, process.pid],
     }), "utf8");
     // Someone writes a record that has forgotten us. In life this is a spawned
     // backfill, so it still holds the run id it was handed — which is the
     // credential that lets it back in.
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-5a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other],
     }), "utf8");
-    withToken("run-a", () => {
+    withToken("run-5a", () => {
       beatGpu();
       assert.deepEqual(read(path).participants, [other, process.pid]);
     });
@@ -159,7 +166,7 @@ test("a participant dropped from the record puts itself back on the next beat", 
 test("a run outlives the participant that created it", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-6a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [process.pid, other],
     }), "utf8");
     leaveGpu(); // the creator goes; the other participant is still judging
@@ -172,7 +179,7 @@ test("a run outlives the participant that created it", () => {
 test("a run whose participants are all gone is taken at once, however fresh", () => {
   withLock((path) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-7a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), // beating as of this instant
       participants: [GONE],
     }), "utf8");
@@ -188,7 +195,7 @@ test("a run whose participants are all gone is taken at once, however fresh", ()
 test("a live run is never taken, however long it has been silent", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-8a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now() - BACKSTOP_MS + 60_000, // silent for hours, still short of the backstop
       participants: [other],
     }), "utf8");
@@ -203,7 +210,7 @@ test("a live run is never taken, however long it has been silent", () => {
 test("the backstop frees a run whose participant number has been recycled", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-9a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now() - BACKSTOP_MS - 1000,
       participants: [other],
     }), "utf8");
@@ -239,7 +246,7 @@ test("a lock from the previous build is read as a run with one participant", () 
 test("the busy message names a process the reader can actually stop", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-12a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [GONE, other],
     }), "utf8");
     const msg = gpuBusyMessage() ?? "";
@@ -252,7 +259,7 @@ test("the busy message names a process the reader can actually stop", () => {
 test("a participant of the live run is not blocked by it", () => {
   withLock((path) => withLiveProcess((other) => {
     writeFileSync(path, JSON.stringify({
-      id: "run-a", holder: "worker/lane", since: new Date().toISOString(),
+      id: "run-13a", holder: "worker/lane", since: new Date().toISOString(),
       beat: Date.now(), participants: [other, process.pid],
     }), "utf8");
     assert.equal(gpuBusyMessage(), null, "we are part of this run, not waiting on it");
@@ -264,9 +271,53 @@ test("acquireGpu reports whether the card was taken", () => {
     assert.equal(acquireGpu("worker/lane"), true);
     leaveGpu();
     writeFileSync(path, JSON.stringify({
-      id: "run-b", holder: "other", since: new Date().toISOString(),
+      id: "run-14b", holder: "other", since: new Date().toISOString(),
       beat: Date.now(), participants: [other],
     }), "utf8");
     assert.equal(acquireGpu("worker/lane"), false);
+  }));
+});
+
+// Taking the card is a read then a write, not one step, so two processes can
+// both see it free and both write. A token read off whatever is on disk would
+// then be a STRANGER's run id — handed to our own child as a credential to join
+// a card someone else is already using.
+test("the token is only ever handed out for a run of ours", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "someone-elses-run", holder: "worker2/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [other],
+    }), "utf8");
+    assert.equal(gpuToken(), null, "there is nothing here for us to delegate");
+  }));
+});
+
+// Membership is a raw pid comparison, so every dead pid left in the list is
+// another number an unrelated process could be issued and walk in on. The
+// surface must stay at the processes actually working.
+test("dead participants are pruned rather than carried for the life of the run", () => {
+  withLock((path) => withLiveProcess((other) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-prune", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [GONE, other, GONE - 1, process.pid],
+    }), "utf8");
+    beatGpu();
+    assert.deepEqual(read(path).participants, [other, process.pid]);
+  }));
+});
+
+// The marker used to be read off participants[0], which is wrong the moment a
+// process leaves gracefully: the list shifts, the next participant becomes
+// first, and a run whose worker had exited cleanly reported itself healthy
+// while naming a holder that no longer existed.
+test("a run abandoned by a graceful exit still says so", () => {
+  withLock((path) => withLiveProcess((child) => {
+    writeFileSync(path, JSON.stringify({
+      id: "run-abandon", holder: "worker/lane", since: new Date().toISOString(),
+      beat: Date.now(), participants: [process.pid, child], startedBy: process.pid,
+    }), "utf8");
+    leaveGpu(); // the worker stops politely; the child judges on
+    assert.deepEqual(read(path).participants, [child], "we are out of the list");
+    assert.equal(read(path).startedBy, process.pid, "but who began it is not forgotten");
   }));
 });

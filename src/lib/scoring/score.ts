@@ -18,12 +18,24 @@ import type { RawJob } from "../sources/types";
 // invisible to a version-gated queue.
 export const SCORER_VERSION = "v7-cleantext";
 
+// Why the scorer turned a posting away. The reason string is prose meant for
+// a human reading one row; this is the machine-readable half, and it exists
+// because ingest used to recover it by sniffing that prose:
+//   s.reason.startsWith("Excluded") ? "negative" : startsWith("Non-eng") ? ...
+// Rewording a message would have silently rebucketed the false-negative audit
+// that reads these counts.
+export type ScoreGate = "negative" | "roleNegative" | "noSignal" | "region" | "noMatch";
+
 export interface Scored {
   score: number; // 0-100
   track: Track;
   reason: string;
   scoredBy: "keyword";
   disqualified: boolean;
+  // Which gate turned it away, or null if the scorer let it through. Not the
+  // whole answer to "is this stored disqualified" — the store threshold is a
+  // separate half, and it lives with the other derived fields.
+  gate: ScoreGate | null;
   // Cheap deterministic extractions, bundled here so every caller (ingest,
   // desc-fill, rescore) gets them from ONE pass over the text.
   seniorityLevel: SeniorityLevel;
@@ -104,6 +116,7 @@ export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}
       reason: `Excluded (${negHit[0]})`,
       scoredBy: "keyword",
       disqualified: true,
+      gate: "negative",
       ...extras,
     };
   }
@@ -126,6 +139,7 @@ export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}
       reason: `Non-eng role (${roleNeg[0]})`,
       scoredBy: "keyword",
       disqualified: true,
+      gate: "roleNegative",
       ...extras,
     };
   }
@@ -138,6 +152,7 @@ export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}
       reason: "No engineering role signal in title",
       scoredBy: "keyword",
       disqualified: true,
+      gate: "noSignal",
       ...extras,
     };
   }
@@ -148,6 +163,7 @@ export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}
       reason: `Region mismatch (${job.location})`,
       scoredBy: "keyword",
       disqualified: true,
+      gate: "region",
       ...extras,
     };
   }
@@ -208,6 +224,7 @@ export function scoreJob(job: RawJob, opts: { knownLevel?: SeniorityLevel } = {}
     reason: best.reason,
     scoredBy: "keyword",
     disqualified: best.score === 0,
+    gate: best.score === 0 ? "noMatch" : null,
     ...extras,
   };
 }

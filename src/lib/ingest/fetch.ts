@@ -35,6 +35,29 @@ export function hostOf(sourceName: string): string {
   return rest.split(":")[0];
 }
 
+/**
+ * The sources a `--only` selection asks for.
+ *
+ * Two differently-named things have to answer to one word: an aggregator is
+ * "eures", a discovered board is "board:recruitee:acme", and a user asking for
+ * "recruitee" means every board on that platform. That is the same question
+ * `hostOf` already answers — and asking it here fixes a selection that never
+ * worked: the rule used to take the segment before the first colon, which for
+ * every discovered board is "board", so `--only recruitee` matched nothing at
+ * all while its own comment said it matched every recruitee board.
+ *
+ * An empty or blank-only selection means "everything", which is what a caller
+ * passing no --only gets.
+ */
+export function selectSources(sources: readonly Source[], only?: readonly string[]): Source[] {
+  const wanted = new Set((only ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean));
+  if (wanted.size === 0) return [...sources];
+  return sources.filter((s) => {
+    const name = s.name.toLowerCase();
+    return wanted.has(name) || wanted.has(hostOf(name));
+  });
+}
+
 // Platforms that serve every one of their boards from ONE host, so N boards
 // means N simultaneous requests to the same machine. Measured, not guessed:
 // apply.workable.com started answering 429 at eight in flight.

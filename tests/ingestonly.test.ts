@@ -1,29 +1,59 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { aggregators } from "../src/lib/ingest";
+import { selectSources } from "../src/lib/ingest/fetch";
+import type { Source } from "../src/lib/sources/types";
 
-// The --only filter has to match two differently-named things: an aggregator
-// is "eures", while a board is "recruitee:acme". A user asking for
-// "recruitee" means every board on that platform.
-function selects(names: string[], sourceName: string): boolean {
-  const wanted = new Set(names.map((s) => s.trim().toLowerCase()).filter(Boolean));
-  const name = sourceName.toLowerCase();
-  return wanted.has(name) || wanted.has(name.split(":")[0]);
-}
+// THE --only SELECTION.
+//
+// This file used to re-implement the matcher inside itself and test the copy:
+// delete the real filter from the ingest and every assertion below still
+// passed. Which is how the rule could be wrong for two years — `--only
+// recruitee` matched nothing, because every discovered board is named
+// `board:recruitee:token` and the rule took the segment before the FIRST
+// colon. The test's private copy agreed with the comment, not with the code
+// the comment was above.
 
-test("--only selects an aggregator by its exact name", () => {
-  assert.equal(selects(["eures"], "eures"), true);
-  assert.equal(selects(["eures"], "freehire"), false);
+const src = (name: string): Source => ({ name, fetch: async () => [] });
+const POOL = [
+  "eures", "freehire", "arbeitnow",
+  "lever:dreamgames", "greenhouse:wooga",
+  "board:recruitee:11bitstudios", "board:recruitee:acme", "board:lever:someco",
+  "board:workable:x|eu",
+].map(src);
+
+const picked = (only?: string[]): string[] => selectSources(POOL, only).map((s) => s.name);
+
+test("an aggregator is selected by its exact name", () => {
+  assert.deepEqual(picked(["eures"]), ["eures"]);
 });
 
-test("--only selects every board of a platform by its prefix", () => {
-  assert.equal(selects(["recruitee"], "recruitee:11bitstudios"), true);
-  assert.equal(selects(["recruitee"], "recruitee:acme"), true);
-  assert.equal(selects(["recruitee"], "lever:dreamgames"), false);
+test("a platform selects every discovered board on it", () => {
+  // The case that never worked.
+  assert.deepEqual(picked(["recruitee"]), ["board:recruitee:11bitstudios", "board:recruitee:acme"]);
 });
 
-test("--only is case- and whitespace-tolerant, and ignores blanks", () => {
-  assert.equal(selects([" Recruitee ", ""], "recruitee:acme"), true);
+test("a platform name reaches curated companies and discovered boards alike", () => {
+  // Both are "lever" to a user; only their names disagree.
+  assert.deepEqual(picked(["lever"]), ["lever:dreamgames", "board:lever:someco"]);
+});
+
+test("a region-suffixed board still answers to its platform", () => {
+  assert.deepEqual(picked(["workable"]), ["board:workable:x|eu"]);
+});
+
+test("selections are case- and whitespace-tolerant, and ignore blanks", () => {
+  assert.deepEqual(picked([" Recruitee ", "", "  "]), ["board:recruitee:11bitstudios", "board:recruitee:acme"]);
+});
+
+test("no selection means everything, and so does a selection of nothing", () => {
+  assert.equal(picked().length, POOL.length);
+  assert.equal(picked([]).length, POOL.length);
+  assert.equal(picked(["  "]).length, POOL.length, "a blank is not a filter that matches nothing");
+});
+
+test("an unknown name selects nothing rather than everything", () => {
+  assert.deepEqual(picked(["nothingcorp"]), []);
 });
 
 test("the named aggregators actually exist, so a typo cannot silently fetch nothing", () => {

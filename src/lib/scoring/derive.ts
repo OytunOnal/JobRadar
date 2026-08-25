@@ -29,7 +29,7 @@
 // failure mode was a caller who never called it — which is what the guard test
 // in tests/derive.test.ts now catches.
 
-import { scoreJob, SCORER_VERSION } from "./score";
+import { scoreJob, SCORER_VERSION, type Scored, type ScoreGate } from "./score";
 import { deriveWorkMode, type RawJob } from "../sources/types";
 import { detectVisa } from "../visa/visa";
 import { visaFields } from "../visa/visa-write";
@@ -41,6 +41,26 @@ import type { SeniorityLevel } from "./seniority";
 // derives it; it was in ingest.ts, which is why two other writers applied only
 // half the gate.
 export const STORE_THRESHOLD = 20;
+
+// Every way a posting can be turned away: the scorer's five gates, plus the
+// store threshold, which is not a scorer gate at all — it is this module's
+// own half of the rule.
+export type Gate = ScoreGate | "belowThreshold";
+
+// WHICH GATE TURNED THIS POSTING AWAY, or null if none did.
+//
+// The whole gate, in one answer. `disqualified` below is defined as this
+// being non-null, so the flag on the row and the name in the ingest report
+// cannot disagree — and they did: ingest re-derived the same boolean and then
+// recovered the gate's NAME by matching prefixes of the reason prose.
+//
+// Turned away is not dropped. A rejected posting is stored with
+// disqualified=true, so a scorer fix is a re-score rather than a re-crawl,
+// and "high embedding similarity but disqualified" doubles as a gate-mistake
+// detector.
+export function rejectedBy(s: Scored): Gate | null {
+  return s.gate ?? (s.score < STORE_THRESHOLD ? "belowThreshold" : null);
+}
 
 // What the row already says about itself. Needed because two rules are
 // provenance-aware — a weaker layer never overwrites a stronger one — and both
@@ -84,9 +104,9 @@ export function derivedFields(job: RawJob, ctx: DeriveContext) {
       : undefined;
   const s = scoreJob(job, knownLevel ? { knownLevel } : {});
 
-  // The whole gate, both halves. `score` and `disqualified` and the history
-  // row all read from these two locals, so they cannot disagree.
-  const rejected = s.disqualified || s.score < STORE_THRESHOLD;
+  // The whole gate, both halves. `score`, `disqualified` and the history row
+  // all read from this one local, so they cannot disagree.
+  const rejected = rejectedBy(s) !== null;
   const score = rejected ? 0 : s.score;
   const track = rejected ? "other" : s.track;
 

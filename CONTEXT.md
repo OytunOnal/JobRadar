@@ -141,6 +141,15 @@ An ingest across the whole discovered board pool rather than the curated set.
 Long, resumable, and run deliberately.
 _Avoid_: full run, batch
 
+**Intake**:
+What an ingest makes of one sighting before anything is written: the text to
+read it as, whether it becomes a posting at all, and which gate — if any —
+turned it away. Turned away is not the same as not stored: a gated posting is
+stored and flagged. Only three things stop a sighting becoming a posting — an
+SEO farm's copy, an aggregator's repost of something long dead, and a role the
+same run already took from a source it trusts more.
+_Avoid_: filtering, screening, validation, preprocessing
+
 **Stage**:
 One step of an ingest hung off its fetch-and-store core — the harvest, the
 probes, the liveness sweep, the auto-fit, the dashboard snapshot. What makes a

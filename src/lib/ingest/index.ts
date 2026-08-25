@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { prisma } from "../db";
 import { scoreJob } from "../scoring/score";
 import { arbeitnow } from "../sources/arbeitnow";
@@ -39,23 +38,21 @@ import { analyzeFit, verdictFields } from "../llm/fit";
 import { llmEnabled } from "../llm/llm";
 import { harvest, type HarvestReport } from "../discovery/harvest";
 import { boardSources, parseBoardSourceName, recordBoardOutcome } from "../discovery/boardSources";
-import { tooOldToStore } from "../scoring/freshness";
-import { isJunkJobUrl } from "../domains";
 import { findDuplicate } from "../scoring/dedup";
 import { runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "../discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "../liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "../visa/sponsors";
 import { safeSlice, type RawJob, type Source } from "../sources/types";
-import { htmlToText, looksLikeHtml, TEXT_VERSION } from "../text/html-text";
-import { labelledSections } from "../text/sections";
+import { TEXT_VERSION } from "../text/html-text";
 import { invalidateVector } from "../llm/embed";
 import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields, STORE_THRESHOLD } from "../scoring/derive";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
-import { pump, PER_HOST } from "./fetch";
+import { pump, selectSources, PER_HOST } from "./fetch";
 import { pass, stage } from "./stage";
+import { intake, isAggregatorJob } from "./intake";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -129,23 +126,6 @@ export const aggregators: Source[] = [
   indeed,   // needs APIFY_API_TOKEN; kaix actor, DACH countries by default
 ];
 
-
-function dedupeKey(job: RawJob): string {
-  return createHash("sha1")
-    .update(`${job.source}:${job.externalId}`)
-    .digest("hex");
-}
-
-// Normalize a title/company so the same role from different sources collapses:
-// drop parentheticals ("(Remote)", "(m/f/d)"), punctuation, and extra spaces.
-function norm(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\(.*?\)/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 // Should a re-sighting overwrite the description we already stored?
 //
@@ -266,12 +246,6 @@ export function betterText(incoming: string, current: string | null | undefined)
   return incoming.length > current.length * 1.1; // meaningfully richer
 }
 
-function contentKey(job: RawJob): string {
-  return createHash("sha1")
-    .update(`${norm(job.title)}|${norm(job.company)}`)
-    .digest("hex");
-}
-
 export interface IngestReport {
   fetched: number;
   scored: number;
@@ -303,12 +277,6 @@ export interface IngestReport {
   harvest?: HarvestReport;
 }
 
-// Aggregator jobs carry foreign URLs worth harvesting for ATS identities;
-// ATS-sourced jobs (source "gh:x", "lever:x", ...) already reveal theirs.
-function isAggregatorJob(job: RawJob): boolean {
-  return !job.source.includes(":");
-}
-
 export interface IngestOptions {
   // Full-pool board sweep mode: ONLY discovered boards (no curated feeds, no
   // aggregators, no sponsor refresh, no harvest/probes/liveness, no LLM
@@ -316,10 +284,7 @@ export interface IngestOptions {
   // stalest-first rotation advances the pool one slice per call.
   boardsOnly?: boolean;
   boardLimit?: number;
-  // Run only these sources. Names are matched against the source's own name
-  // ("eures", "freehire") and against a board's platform prefix
-  // ("recruitee" matches every recruitee:token board), because the two kinds
-  // of source are named differently but a user thinks of both as "recruitee".
+  // Run only these sources — see selectSources, which owns what a name means.
   //
   // The reason this exists: repairing text. 5,667 postings still hold what
   // the old stripHtml wrote, and their connectors have since been fixed — so
@@ -360,19 +325,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   const discovered =
     (await stage("boardSources", report.errors, () => boardSources(opts.boardLimit))) ?? [];
-  let sources: Source[] = opts.boardsOnly
-    ? discovered
-    : [...companySources(), ...discovered, ...aggregators];
-
-  if (opts.only?.length) {
-    const wanted = new Set(opts.only.map((s) => s.trim().toLowerCase()).filter(Boolean));
-    sources = sources.filter((s) => {
-      const name = s.name.toLowerCase();
-      // "recruitee" must select recruitee:acme, recruitee:foo, ... while
-      // "eures" selects the aggregator of that exact name.
-      return wanted.has(name) || wanted.has(name.split(":")[0]);
-    });
-  }
+  const sources = selectSources(
+    opts.boardsOnly ? discovered : [...companySources(), ...discovered, ...aggregators],
+    opts.only,
+  );
 
   // Visa-sponsor registers: refresh when older than two weeks.
   if (!lean) {
@@ -501,81 +457,22 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   await pass("store", report.errors, async (storing) => {
     for (const job of all) {
-      // A source that splits its body into named blocks told us so; assembling
-      // those blocks into one text is OUR decision, and it moves whenever the
-      // section parser does. Eight adapters used to make it themselves.
-      //
-      // The adapter's own `description` stays as the fallback for when every
-      // block came back empty — Lever's structure-destroyed descriptionPlain,
-      // Personio's unpaired <value> blocks, a bare title.
-      if (job.sections?.length) {
-        const assembled = labelledSections(job.sections);
-        if (assembled) job.description = assembled;
-      }
-      // A LAST LINE, NOT A CONVERSION STEP.
-      //
-      // Converting here unconditionally would be wrong: several connectors
-      // SYNTHESIZE a plain-text description (SwissDevJobs' "Technologies: ..."
-      // line, a16z's "title · function · seniority"), and htmlToText treats
-      // `<` followed by a letter as a tag — so a stack listing `<T>` or
-      // `<canvas>` would lose those tokens. (Measured while writing the test
-      // for this: the surrounding words survive, because the match stops at the
-      // first `>`. Prose like "latency < 100ms" is safe either way — the regex
-      // requires a letter after the bracket.)
-      //
-      // looksLikeHtml is narrow enough to tell the two apart: it fires only on
-      // real tag names and a handful of entities. So this converts what is
-      // genuinely markup, leaves synthesized prose alone, and COUNTS it —
-      // because a connector reaching here is a connector bug, and a silent
-      // repair would hide it. Measured when this landed: 1 posting in 3,577.
-      //
-      // It matters more than the count suggests. betterText judges quality by
-      // the presence of newlines, and raw markup has plenty, so unconverted
-      // markup can WIN against clean text on a re-sighting — and TEXT_VERSION
-      // is stamped either way, so the repair queue sees it as current.
-      if (looksLikeHtml(job.description)) {
-        report.unconverted++;
-        job.description = htmlToText(job.description);
-      }
-      // SEO-farm copies: the original arrives via a better source.
-      if (isJunkJobUrl(job.url)) {
-        report.junkDomain++;
-        continue;
-      }
-      // Freshness guard: aggregator reposts of old listings are noise — skip
-      // before spending anything on them. (Their URL was still harvested above.)
-      if (tooOldToStore(job.postedAt, isAggregatorJob(job))) {
-        report.tooOld++;
-        continue;
-      }
-      const s = scoreJob(job);
-      // Store-all: gate-rejected jobs are STORED with disqualified=true instead
-      // of dropped — a scorer fix becomes a local re-score, and "high embedding
-      // similarity but disqualified" doubles as a gate-mistake detector. The
-      // report still counts them under their gate so sweep summaries read the
-      // same as before.
-      const rejected = s.disqualified || s.score < STORE_THRESHOLD;
-      if (rejected) {
-        const gate = s.disqualified
-          ? (s.reason.startsWith("Excluded") ? "negative"
-            : s.reason.startsWith("Non-eng") ? "roleNegative"
-            : s.reason.startsWith("No engineering") ? "noSignal"
-            : s.reason.startsWith("Region") ? "region" : "noMatch")
-          : "belowThreshold";
-        report.eliminated[gate] = (report.eliminated[gate] ?? 0) + 1;
-      } else {
-        report.scored++;
-      }
-
-      const key = dedupeKey(job);
-      const ck = contentKey(job);
-
-      // Same role already handled this run (from an earlier, higher-priority source).
-      if (seenContent.has(ck)) {
-        report.duplicates++;
-        continue;
-      }
-      seenContent.add(ck);
+      // What this run makes of the sighting: the text to read it as, the
+      // guards, the gate. Pure — the caller below owns everything that talks
+      // to the world.
+      const r = intake(job, seenContent);
+      job.description = r.description;
+      if (r.unconverted) report.unconverted++;
+      if (r.why === "junk") { report.junkDomain++; continue; }
+      if (r.why === "tooOld") { report.tooOld++; continue; }
+      // Store-all: a gated posting is STORED with disqualified=true, counted
+      // under the gate that turned it away so the false-negative audit has a
+      // census to read.
+      if (r.gate) report.eliminated[r.gate] = (report.eliminated[r.gate] ?? 0) + 1;
+      else report.scored++;
+      // The same role, already taken this run from a higher-priority source.
+      if (r.why === "duplicate") { report.duplicates++; continue; }
+      seenContent.add(r.ck);
 
       const country = resolveWithCache(job.location, locationCache);
       // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
@@ -585,16 +482,14 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         // Identity, and our own observation of it. Everything else on the row is
         // either what the source states (statedFields) or what its text makes
         // true (derivedFields), and neither of those belongs in a literal here.
-        dedupeKey: key,
-        contentKey: ck,
+        dedupeKey: r.key,
+        contentKey: r.ck,
         source: job.source,
         externalId: job.externalId,
         country,
         ...statedFields(job),
         ...derivedFields(job, { country, sponsorReg }),
-        // Sources parse dates from wild formats; one NaN Date must degrade to
-        // "date unknown", never kill the whole run (it took down a sweep slice).
-        postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
+        postedAt: r.postedAt,
       };
 
       if (job.location && country === null && resolveCountry(job.location) === null) {
@@ -605,20 +500,18 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         }
       }
 
-      // Per-job isolation: a single poison row (invalid date, lone surrogate,
-      // whatever tomorrow brings) must cost ONE job, never a 53k-board run —
-      // this is the third crash class caught here, so guard the class.
+      // Per-job isolation: a single poison row (lone surrogate, whatever
+      // tomorrow brings) must cost ONE job, never a 53k-board run — this is
+      // the third crash class caught here, so guard the class.
       try {
-
-      const outcome = await storeSighting(job, { key, ck, country, sponsorReg, identity: data });
-      if (outcome.kind === "updated") {
-        report.updated++;
-      } else {
-        report.stored++;
-        newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
-        if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
-      }
-
+        const outcome = await storeSighting(job, { key: r.key, ck: r.ck, country, sponsorReg, identity: data });
+        if (outcome.kind === "updated") {
+          report.updated++;
+        } else {
+          report.stored++;
+          newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
+          if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
+        }
       } catch (e) {
         storing.failed(e, `${job.source}/${job.externalId}`);
       }

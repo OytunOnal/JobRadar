@@ -276,6 +276,16 @@ append-only history split off it. The main list query measures **4 ms** over
 
 ## Roadmap
 
+- **Download it and run it.** The same engine as a free, open-source app from
+  GitHub Releases, instead of a clone and six npm scripts. A tray process owns
+  the server and the workers; the browser tab is only a view, so closing it
+  stops nothing. Setup collapses into one flow — drop in your CV, confirm the
+  tracks it generates, scan. The judge follows your hardware: a local model
+  where there is a GPU for it, your own cloud key where there is not, and
+  keyword-plus-embedding alone where there is neither, which the bake-off says
+  is worth having on its own. Every worker is already resumable, which is what
+  makes this a supervisor rather than a rewrite. It stays free — the seed data
+  is non-commercial-licensed, and that is a constraint worth keeping.
 - Rescue lane: mine the disqualified pool by embedding similarity, to catch gate
   mistakes automatically.
 - Scheduled ingest and an email digest.

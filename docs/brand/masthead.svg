@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="132" viewBox="0 0 880 132" role="img" aria-label="JobRadar">
+  <defs>
+    <clipPath id="panel">
+      <rect x="0.5" y="0.5" width="879" height="131" rx="14"/>
+    </clipPath>
+    <!-- The rings fade out to the right, so the field reads as depth and never
+         competes with the wordmark sitting on top of it. -->
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0.18" stop-color="#3ec5b7" stop-opacity="0"/>
+      <stop offset="0.42" stop-color="#3ec5b7" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#3ec5b7" stop-opacity="0.05"/>
+    </linearGradient>
+    <linearGradient id="sweepfade" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#3ec5b7" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#3ec5b7" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="879" height="131" rx="14" fill="#0b0e14" stroke="#222a36"/>
+
+  <g clip-path="url(#panel)">
+    <!-- Range rings carried out of the mark and across the panel: the empty
+         half of a masthead is where a radar would be looking. -->
+    <g fill="none" stroke="url(#fade)" stroke-width="1">
+      <circle cx="66" cy="66" r="120"/>
+      <circle cx="66" cy="66" r="210"/>
+      <circle cx="66" cy="66" r="310"/>
+      <circle cx="66" cy="66" r="420"/>
+      <circle cx="66" cy="66" r="540"/>
+      <circle cx="66" cy="66" r="670"/>
+      <circle cx="66" cy="66" r="810"/>
+    </g>
+    <!-- The wedge the sweep has just passed over. -->
+    <path d="M66 66 L 880 -190 L 880 66 Z" fill="url(#sweepfade)"/>
+
+    <!-- Contacts. Fainter the further out, the way a return weakens. -->
+    <g fill="#3dd68c">
+      <circle cx="386" cy="35" r="2.6" opacity="0.85"/>
+      <circle cx="527" cy="93" r="2.2" opacity="0.55"/>
+      <circle cx="676" cy="46" r="2.4" opacity="0.4"/>
+      <circle cx="806" cy="82" r="2" opacity="0.24"/>
+      <circle cx="611" cy="21" r="1.8" opacity="0.3"/>
+    </g>
+  </g>
+
+  <!-- The mark the app draws in its own header: two rings, a sweep, one contact. -->
+  <g transform="translate(66 66)">
+    <circle r="30" fill="none" stroke="#2e3846" stroke-width="1.4"/>
+    <circle r="16.5" fill="none" stroke="#2e3846" stroke-width="1.4"/>
+    <line x1="0" y1="0" x2="0" y2="-28.5" stroke="#3ec5b7" stroke-width="2.2" stroke-linecap="round"
+          transform="rotate(38)"/>
+    <circle cx="12" cy="-10.5" r="3.8" fill="#3dd68c"/>
+  </g>
+
+  <text x="126" y="78"
+        font-family="ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace"
+        font-size="33" font-weight="600" letter-spacing="2.6" fill="#e8ecf1">JOBRADAR</text>
+</svg>

@@ -154,6 +154,20 @@ test("a rejecting body costs one source, not the run", async () => {
   assert.equal(worked, 2, "the two good sources finished");
 });
 
+test("a body that throws SYNCHRONOUSLY also costs one source, not the run", async () => {
+  // The old inline copies called `void fetchOne(...)`, so a synchronous throw
+  // escaped the while-loop and took the whole pump with it. Deferring the body
+  // by a microtask is what makes this catchable — the one behavioural
+  // difference that deferral buys, and it is worth pinning.
+  const started: string[] = [];
+  await pump(
+    [{ name: "a", fetch: async () => [] }, { name: "b", fetch: async () => [] }],
+    (s) => { started.push(s.name); if (s.name === "a") throw new Error("sync boom"); return Promise.resolve(); },
+    { concurrency: 2, heapMB: () => 0 },
+  );
+  assert.deepEqual(started, ["a", "b"], "the pump kept scheduling");
+});
+
 test("an empty source list resolves instead of hanging", async () => {
   await pump([], async () => {}, { concurrency: 4 });
 });

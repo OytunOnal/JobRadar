@@ -112,6 +112,22 @@ test("a pass still summarizes its rows before it rethrows", async () => {
   assert.equal(errors.at(-1), "store: 3 more row failures suppressed");
 });
 
+test("a role is marked taken only after it is actually held", () => {
+  // seenContent.add ran BEFORE storeSighting, so a row that threw from a
+  // high-priority source also refused the same role from every lower-priority
+  // one — the run lost the posting instead of costing one attempt.
+  //
+  // A source scan, because the store loop lives inside runIngest and reaching
+  // it needs ~140 network sources. Crude, and it is the only thing that fails
+  // when the two lines swap back.
+  const src = readFileSync("src/lib/ingest/index.ts", "utf8");
+  const stored = src.indexOf("await storeSighting(");
+  const marked = src.indexOf("seenContent.add(");
+  assert.ok(stored > 0 && marked > 0, "both lines still exist");
+  assert.ok(marked > stored, "the key is taken after the write, not before it");
+  assert.equal(src.split("seenContent.add(").length - 1, 1, "and in exactly one place");
+});
+
 test("no tenth copy: every ingest failure goes through the envelope", () => {
   // This module exists because nine hand-written copies drifted. A source scan
   // is the only thing that fails when a tenth appears — a behavioural test

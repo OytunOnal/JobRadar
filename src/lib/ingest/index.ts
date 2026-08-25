@@ -474,11 +474,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   await pass("store", report.errors, async (storing) => {
     for (const job of all) {
-      // What this run makes of the sighting: the text to read it as, the
-      // guards, the gate. Pure — the caller below owns everything that talks
-      // to the world.
+      // What this run makes of the sighting: the posting as it should be read,
+      // the guards, the gate. Pure — everything below owns the I/O, and works
+      // from `r.posting` rather than from the payload as it arrived.
       const r = intake(job, seenContent);
-      job.description = r.description;
+      const posting = r.posting;
       if (r.unconverted) report.unconverted++;
       if (r.why === "junk") { report.junkDomain++; continue; }
       if (r.why === "tooOld") { report.tooOld++; continue; }
@@ -490,9 +490,9 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       // The same role, already taken this run from a higher-priority source.
       if (r.why === "duplicate") { report.duplicates++; continue; }
 
-      const country = resolveWithCache(job.location, locationCache);
+      const country = resolveWithCache(posting.location, locationCache);
       // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
-      const sponsorReg = await isRegisteredSponsor(job.company, country);
+      const sponsorReg = await isRegisteredSponsor(posting.company, country);
 
       const data = {
         // Identity, and our own observation of it. Everything else on the row is
@@ -500,19 +500,19 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         // true (derivedFields), and neither of those belongs in a literal here.
         dedupeKey: r.key,
         contentKey: r.ck,
-        source: job.source,
-        externalId: job.externalId,
+        source: posting.source,
+        externalId: posting.externalId,
         country,
-        ...statedFields(job),
-        ...derivedFields(job, { country, sponsorReg }),
-        postedAt: r.postedAt,
+        ...statedFields(posting),
+        ...derivedFields(posting, { country, sponsorReg }),
+        postedAt: posting.postedAt ?? null,
       };
 
-      if (job.location && country === null && resolveCountry(job.location) === null) {
-        const key = normalizeLocation(job.location);
+      if (posting.location && country === null && resolveCountry(posting.location) === null) {
+        const key = normalizeLocation(posting.location);
         if (!locationCache.has(key)) {
           if (!unknownLocations.has(key)) unknownLocations.set(key, new Set());
-          unknownLocations.get(key)!.add(job.location);
+          unknownLocations.get(key)!.add(posting.location);
         }
       }
 
@@ -520,7 +520,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       // tomorrow brings) must cost ONE job, never a 53k-board run — this is
       // the third crash class caught here, so guard the class.
       try {
-        const outcome = await storeSighting(job, { key: r.key, ck: r.ck, country, sponsorReg, identity: data });
+        const outcome = await storeSighting(posting, { key: r.key, ck: r.ck, country, sponsorReg, identity: data });
         // The role is taken only once it is actually held. Burning the key
         // before the write meant a poison row from a high-priority source
         // ALSO refused the same role from every later one, and the run lost
@@ -530,11 +530,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
           report.updated++;
         } else {
           report.stored++;
-          newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
-          if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
+          newlyCreated.push({ id: outcome.id, title: posting.title, company: posting.company, description: posting.description, source: posting.source });
+          if (isAggregatorJob(posting) && posting.url) newlyStoredUrls.push(posting.url);
         }
       } catch (e) {
-        storing.failed(e, `${job.source}/${job.externalId}`);
+        storing.failed(e, `${posting.source}/${posting.externalId}`);
       }
     }
   });

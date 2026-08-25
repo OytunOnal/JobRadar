@@ -77,22 +77,22 @@ test("named blocks are assembled into the text everything else derives from", ()
     description: "flat fallback",
     sections: [["Requirements", "- 5 years of Unity"], ["Benefits", "- Visa sponsorship"]],
   }), NONE);
-  assert.ok(r.description.includes("5 years of Unity"));
-  assert.ok(r.description.includes("Visa sponsorship"));
-  assert.ok(r.description.includes("\n"), "structure is what the section parser reads");
+  assert.ok(r.posting.description.includes("5 years of Unity"));
+  assert.ok(r.posting.description.includes("Visa sponsorship"));
+  assert.ok(r.posting.description.includes("\n"), "structure is what the section parser reads");
 });
 
 test("an adapter's own text survives when every block came back empty", () => {
   // Lever's structure-destroyed descriptionPlain, Personio's unpaired <value>
   // blocks, a bare title.
   const r = intake(raw({ description: "flat fallback", sections: [["Requirements", ""]] }), NONE);
-  assert.equal(r.description, "flat fallback");
+  assert.equal(r.posting.description, "flat fallback");
 });
 
 test("markup is converted AND counted — a connector bug is not silently repaired", () => {
   const r = intake(raw({ description: "<p>Unity dev</p><ul><li>C#</li></ul>" }), NONE);
   assert.equal(r.unconverted, true);
-  assert.equal(r.description.includes("<p>"), false);
+  assert.equal(r.posting.description.includes("<p>"), false);
 });
 
 test("synthesized prose that merely looks pointy is left alone", () => {
@@ -100,13 +100,13 @@ test("synthesized prose that merely looks pointy is left alone", () => {
   // would eat a stack listing `<T>` or `<canvas>`.
   const r = intake(raw({ description: "Technologies: C#, Unity, <canvas>, generics <T>" }), NONE);
   assert.equal(r.unconverted, false);
-  assert.ok(r.description.includes("<canvas>"));
+  assert.ok(r.posting.description.includes("<canvas>"));
 });
 
 test("a date that parsed to nonsense degrades to unknown, it does not kill the run", () => {
   // One NaN Date took down a sweep slice.
   const r = intake(raw({ postedAt: new Date("not a date") }), NONE);
-  assert.equal(r.postedAt, null);
+  assert.equal(r.posting.postedAt, undefined, "an unparseable date is simply absent");
   assert.equal(r.store, true, "date unknown is a posting, not a refusal");
 });
 
@@ -124,8 +124,31 @@ test("the description scored is the description kept", () => {
     sections: [["Requirements", "Unity, C#, shaders, rendering pipeline, gameplay"]],
   });
   const bare = scoreJob(flat).score;
-  const rich = scoreJob({ ...assembled, description: intake(assembled, NONE).description }).score;
+  const rich = scoreJob(intake(assembled, NONE).posting).score;
   assert.ok(rich > bare, `the assembled body is what scored (${bare} -> ${rich})`);
+});
+
+test("the reading is handed back whole, so it cannot be half-applied", () => {
+  // intake used to return the two repaired FIELDS, and the caller copied them
+  // onto the raw job before deriving anything from it. That made the repair a
+  // step someone could drop — and the loop that makes it is not callable, so
+  // no test could have noticed. Everything downstream now takes `posting`.
+  const job = raw({
+    description: "<p>flat</p>",
+    postedAt: new Date("not a date"),
+    sections: [["Requirements", "Unity, C#"]],
+  });
+  const r = intake(job, NONE);
+  assert.notEqual(r.posting, job, "a reading is not the payload");
+  assert.equal(job.description, "<p>flat</p>", "and the payload is left as it arrived");
+  assert.ok(r.posting.description.includes("Unity, C#"));
+  assert.equal(r.posting.description.includes("<p>"), false);
+  assert.equal(r.posting.postedAt, undefined);
+  // Everything else about the posting survives untouched — the reading repairs
+  // what it knows how to repair and copies the rest.
+  for (const k of ["source", "externalId", "url", "title", "company", "location"] as const) {
+    assert.equal(r.posting[k], job[k], k);
+  }
 });
 
 // ── The gate has one home ─────────────────────────────────────────────────

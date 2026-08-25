@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { aggregators } from "../src/lib/ingest";
+import { companySources } from "../src/lib/sources/companies";
 import { selectSources } from "../src/lib/ingest/fetch";
 import type { Source } from "../src/lib/sources/types";
 
@@ -54,6 +55,17 @@ test("no selection means everything, and so does a selection of nothing", () => 
 
 test("an unknown name selects nothing rather than everything", () => {
   assert.deepEqual(picked(["nothingcorp"]), []);
+});
+
+test("a source name is unique, because the whole run uses it as an identity", () => {
+  // `report.perSource[name]`, the cooldown lookup, the failed-source set and
+  // its retry pass all key on the name. Two sources sharing one would report
+  // over each other and retry the wrong one — and nothing else in the ingest
+  // would notice, because every one of those is a plain object or Set.
+  const names = [...companySources(), ...aggregators].map((s) => s.name.toLowerCase());
+  const seen = new Set<string>();
+  const dupes = names.filter((n) => (seen.has(n) ? true : (seen.add(n), false)));
+  assert.deepEqual(dupes, []);
 });
 
 test("the named aggregators actually exist, so a typo cannot silently fetch nothing", () => {

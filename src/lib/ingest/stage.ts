@@ -91,6 +91,15 @@ export async function pass<T>(
  * A stage: one pass whose failure is recorded and never sinks the ingest.
  * Returns undefined when it could not run, which is how the report says "this
  * stage has nothing to contribute" without a second flag.
+ *
+ * Which means a stage that stops PART WAY loses whatever it was going to
+ * return. Checked, not assumed: deep-probe and location resolution are the
+ * only assigning stages that touch a model, and each makes exactly one chat()
+ * call before it writes anything, so there is no partial answer to lose.
+ * Harvest and the name probes make none. The stages that DO accumulate — dedup
+ * and fit — write into the report as they go rather than returning, which is
+ * what makes their partial work survive, and is the shape any future
+ * accumulating stage should copy.
  */
 export async function stage<T>(
   name: string,

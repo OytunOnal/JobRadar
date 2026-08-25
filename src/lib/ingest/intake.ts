@@ -29,22 +29,25 @@ export type Refusal = "junk" | "tooOld" | "duplicate";
 
 interface Sighting {
   /**
-   * The text this posting should be read as, and the text every derived value
-   * must be derived from: named blocks assembled, markup converted.
+   * THE POSTING AS THIS RUN READS IT — the only version anything downstream
+   * should ever see. Named blocks assembled, markup converted, and a date that
+   * parsed to nonsense degraded to null (sources read dates out of wild
+   * formats, and one NaN Date took down a sweep slice).
+   *
+   * A whole posting rather than the two repaired fields, because the fields
+   * alone made the repair OPTIONAL: the caller held the raw job, copied the
+   * description onto it, and every derived value depended on that copy still
+   * being there. Nothing tested the assignment, and nothing could — the loop
+   * that made it is not callable. Handing back the posting removes the step
+   * that could be forgotten.
    */
-  description: string;
+  posting: RawJob;
   /**
    * The connector handed us markup. A connector reaching here is a connector
    * bug, so it is repaired AND counted — a silent repair would hide it.
    * Measured when the conversion landed: 1 posting in 3,577.
    */
   unconverted: boolean;
-  /**
-   * The date the source claims, or null when it parsed to nonsense. Sources
-   * read dates out of wild formats and one NaN Date took down a sweep slice;
-   * degrading to "date unknown" is always available and never fatal.
-   */
-  postedAt: Date | null;
 }
 
 // What is known once a sighting has been scored: which gate turned it away
@@ -136,23 +139,26 @@ function readable(job: RawJob): { description: string; unconverted: boolean } {
  */
 export function intake(job: RawJob, seen: ReadonlySet<string>): Intake {
   const { description, unconverted } = readable(job);
-  const postedAt =
-    job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null;
-  const sighting = { description, unconverted, postedAt };
+  const posting: RawJob = {
+    ...job,
+    description,
+    postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : undefined,
+  };
+  const sighting = { posting, unconverted };
 
   // SEO-farm copies: the original arrives via a better source.
-  if (isJunkJobUrl(job.url)) return { ...sighting, store: false, why: "junk" };
+  if (isJunkJobUrl(posting.url)) return { ...sighting, store: false, why: "junk" };
   // Aggregator reposts of long-dead listings are noise — refused before
   // anything is spent on them. Their URL was still harvested.
-  if (tooOldToStore(postedAt, isAggregatorJob(job))) {
+  if (tooOldToStore(posting.postedAt ?? null, isAggregatorJob(posting))) {
     return { ...sighting, store: false, why: "tooOld" };
   }
 
-  // Score the text we are going to KEEP, which is why this happens after the
-  // assembly above and not on the payload as it arrived.
-  const gate = rejectedBy(scoreJob({ ...job, description }));
-  const key = dedupeKey(job);
-  const ck = contentKey(job);
+  // Score the posting as read, which is why this happens after the assembly
+  // above and not on the payload as it arrived.
+  const gate = rejectedBy(scoreJob(posting));
+  const key = dedupeKey(posting);
+  const ck = contentKey(posting);
 
   return seen.has(ck)
     ? { ...sighting, store: false, why: "duplicate", gate, key, ck }

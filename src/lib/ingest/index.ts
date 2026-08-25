@@ -36,11 +36,11 @@ import { workingnomads } from "../sources/workingnomads";
 import { jobindexdk } from "../sources/jobindexdk";
 import { companySources } from "../sources/companies";
 import { analyzeFit, verdictFields } from "../llm/fit";
-import { llmEnabled, RateLimitError } from "../llm/llm";
+import { llmEnabled } from "../llm/llm";
 import { harvest, type HarvestReport } from "../discovery/harvest";
 import { boardSources, parseBoardSourceName, recordBoardOutcome } from "../discovery/boardSources";
 import { tooOldToStore } from "../scoring/freshness";
-import { canonicalJobUrl, isJunkJobUrl, sourceTrust } from "../domains";
+import { isJunkJobUrl } from "../domains";
 import { findDuplicate } from "../scoring/dedup";
 import { runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "../discovery/deepprobe";
@@ -52,11 +52,10 @@ import { labelledSections } from "../text/sections";
 import { invalidateVector } from "../llm/embed";
 import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields, STORE_THRESHOLD } from "../scoring/derive";
-import { visaFields } from "../visa/visa-write";
 import { normalizeLocation, resolveCountry } from "../location/geo";
-import { detectVisa } from "../visa/visa";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, PER_HOST } from "./fetch";
+import { pass, stage } from "./stage";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -281,6 +280,11 @@ export interface IngestReport {
   duplicates: number;
   fitAnalyzed: number;
   perSource: Record<string, number>;
+  // Sources that were still failing when the run gave up on them, retry
+  // included. The sweep reads this to tell "the network died mid-slice" from
+  // "a few boards are gone"; error LINES cannot answer that, because only the
+  // first handful of them are kept.
+  sourceFailures: number;
   tooOld: number;
   junkDomain: number;
   // Postings whose connector handed us markup. Non-zero is a connector bug.
@@ -334,6 +338,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     duplicates: 0,
     fitAnalyzed: 0,
     perSource: {},
+    sourceFailures: 0,
     tooOld: 0,
     unconverted: 0,
     junkDomain: 0,
@@ -353,12 +358,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // a handful of sources in minutes rather than hours.
   const lean = Boolean(opts.boardsOnly || opts.only?.length);
 
-  let discovered: Source[] = [];
-  try {
-    discovered = await boardSources(opts.boardLimit);
-  } catch (e: any) {
-    report.errors.push(`boardSources: ${e.message}`);
-  }
+  const discovered =
+    (await stage("boardSources", report.errors, () => boardSources(opts.boardLimit))) ?? [];
   let sources: Source[] = opts.boardsOnly
     ? discovered
     : [...companySources(), ...discovered, ...aggregators];
@@ -373,14 +374,10 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     });
   }
 
-  // Visa-sponsor registers: refresh when older than two weeks (isolated —
-  // a register outage never sinks the ingest).
+  // Visa-sponsor registers: refresh when older than two weeks.
   if (!lean) {
-    try {
-      if (await sponsorsStale()) report.sponsors = await refreshSponsors();
-    } catch (e: any) {
-      report.errors.push(`sponsors: ${String(e.message).slice(0, 160)}`);
-    }
+    report.sponsors = await stage("sponsors", report.errors, async () =>
+      (await sponsorsStale()) ? refreshSponsors() : undefined);
   }
 
   const all: RawJob[] = [];
@@ -388,93 +385,104 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     (await prisma.sourceState.findMany()).map((s) => [s.name, s.lastFetchedAt]),
   );
 
-  // sink: where this source's jobs land. The parallel normal-ingest path
-  // passes a per-source bucket so results can be reassembled in PRIORITY
-  // order after concurrent fetching — dedupe order is about assembly, not
-  // fetch timing.
-  const fetchOne = async (src: Source, sink: RawJob[] = all): Promise<void> => {
-    if (isOnCooldown(src.name, sourceStates.get(src.name) ?? null)) {
-      report.perSource[src.name] = -1; // sentinel: skipped on cooldown
-      return;
-    }
-    try {
-      const jobs = await src.fetch();
-      if (src.name in SOURCE_COOLDOWN_DAYS) {
-        await prisma.sourceState.upsert({
-          where: { name: src.name },
-          update: { lastFetchedAt: new Date() },
-          create: { name: src.name, lastFetchedAt: new Date() },
-        });
+  // Which sources threw. A set, not a re-reading of the error list: the retry
+  // pass used to ask `report.errors.some(e => e.startsWith(name + ":"))`,
+  // which made a prose list load-bearing and could not tell a source that
+  // failed from one that merely returned nothing. Both facts are now data.
+  const failedSources = new Set<string>();
+
+  await pass("fetch", report.errors, async (fetching) => {
+    // sink: where this source's jobs land. The parallel normal-ingest path
+    // passes a per-source bucket so results can be reassembled in PRIORITY
+    // order after concurrent fetching — dedupe order is about assembly, not
+    // fetch timing.
+    const fetchOne = async (src: Source, sink: RawJob[]): Promise<void> => {
+      if (isOnCooldown(src.name, sourceStates.get(src.name) ?? null)) {
+        report.perSource[src.name] = -1; // sentinel: skipped on cooldown
+        return;
       }
-      report.perSource[src.name] = jobs.length;
-      sink.push(...jobs);
-      // Adaptive frequency: tell the board how it did against the keyword
-      // threshold, so no-hit boards get fetched less often over time.
-      if (src.name.startsWith("board:")) {
-        const passed = jobs.filter((j) => {
-          const s = scoreJob(j);
-          return !s.disqualified && s.score >= STORE_THRESHOLD;
-        }).length;
-        await recordBoardOutcome(src.name, jobs.length, passed).catch(() => {});
-      }
-    } catch (e: any) {
-      report.errors.push(`${src.name}: ${e.message}`);
-      report.perSource[src.name] = 0;
-      // A failed board still counts as ATTEMPTED: stamp + back off, or the
-      // stalest-first rotation re-selects the same failing cluster forever.
-      if (src.name.startsWith("board:")) {
-        const key = parseBoardSourceName(src.name);
-        if (key) {
-          await prisma.atsBoard.updateMany({
-            where: { platform: key.platform, token: key.token, region: key.region },
-            data: { lastFetchedAt: new Date() },
-          }).catch(() => {});
-          await recordBoardOutcome(src.name, 0, 0).catch(() => {});
+      try {
+        const jobs = await src.fetch();
+        if (src.name in SOURCE_COOLDOWN_DAYS) {
+          await prisma.sourceState.upsert({
+            where: { name: src.name },
+            update: { lastFetchedAt: new Date() },
+            create: { name: src.name, lastFetchedAt: new Date() },
+          });
+        }
+        report.perSource[src.name] = jobs.length;
+        failedSources.delete(src.name);
+        sink.push(...jobs);
+        // Adaptive frequency: tell the board how it did against the keyword
+        // threshold, so no-hit boards get fetched less often over time.
+        if (src.name.startsWith("board:")) {
+          const passed = jobs.filter((j) => {
+            const s = scoreJob(j);
+            return !s.disqualified && s.score >= STORE_THRESHOLD;
+          }).length;
+          await recordBoardOutcome(src.name, jobs.length, passed).catch(() => {});
+        }
+      } catch (e) {
+        report.perSource[src.name] = 0;
+        failedSources.add(src.name);
+        fetching.failed(e, src.name);
+        // A failed board still counts as ATTEMPTED: stamp + back off, or the
+        // stalest-first rotation re-selects the same failing cluster forever.
+        if (src.name.startsWith("board:")) {
+          const key = parseBoardSourceName(src.name);
+          if (key) {
+            await prisma.atsBoard.updateMany({
+              where: { platform: key.platform, token: key.token, region: key.region },
+              data: { lastFetchedAt: new Date() },
+            }).catch(() => {});
+            await recordBoardOutcome(src.name, 0, 0).catch(() => {});
+          }
         }
       }
-    }
-  };
+    };
 
-  if (opts.boardsOnly) {
-    // Sweep mode: boards are independent companies, so ordering carries no
-    // dedupe priority. Nothing has to be reassembled, so every board fetches
-    // straight into the shared list — a sweep slice is the RAM-sensitive path
-    // and there is no reason to hold its jobs twice. Shuffled, because the
-    // discovered pool arrives in platform blocks.
-    await pump(sources, (src) => fetchOne(src, all), {
-      concurrency: Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16),
-      perHost: PER_HOST,
-      shuffle: true,
-    });
-  } else {
-    // Normal ingest: PARALLEL fetch, sequential priority. Source order only
-    // matters at dedupe time, so each source fetches into its own bucket and
-    // the buckets are concatenated in the original priority order afterwards —
-    // same dedupe outcome, wall time ~= slowest source instead of the sum.
-    const buckets: RawJob[][] = sources.map(() => []);
-    await pump(sources, (src, i) => fetchOne(src, buckets[i]), {
-      concurrency: Math.min(Number(process.env.INGEST_CONCURRENCY) || 6, 12),
-      perHost: PER_HOST,
-    });
-    // One retry pass for sources that failed (timeouts included): transient
-    // hiccups get a second chance in the same run; a second failure stays in
-    // report.errors for investigation.
-    for (let i = 0; i < sources.length; i++) {
-      const s = sources[i];
-      if (report.perSource[s.name] === 0 && report.errors.some((e) => e.startsWith(`${s.name}:`))) {
-        await fetchOne(s, buckets[i]);
+    if (opts.boardsOnly) {
+      // Sweep mode: boards are independent companies, so ordering carries no
+      // dedupe priority. Nothing has to be reassembled, so every board fetches
+      // straight into the shared list — a sweep slice is the RAM-sensitive path
+      // and there is no reason to hold its jobs twice. Shuffled, because the
+      // discovered pool arrives in platform blocks.
+      await pump(sources, (src) => fetchOne(src, all), {
+        concurrency: Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16),
+        perHost: PER_HOST,
+        shuffle: true,
+      });
+    } else {
+      // Normal ingest: PARALLEL fetch, sequential priority. Source order only
+      // matters at dedupe time, so each source fetches into its own bucket and
+      // the buckets are concatenated in the original priority order afterwards —
+      // same dedupe outcome, wall time ~= slowest source instead of the sum.
+      const buckets: RawJob[][] = sources.map(() => []);
+      await pump(sources, (src, i) => fetchOne(src, buckets[i]), {
+        concurrency: Math.min(Number(process.env.INGEST_CONCURRENCY) || 6, 12),
+        perHost: PER_HOST,
+      });
+      // One retry pass for sources that failed (timeouts included): transient
+      // hiccups get a second chance in the same run; a second failure stays in
+      // the report for investigation.
+      for (let i = 0; i < sources.length; i++) {
+        if (failedSources.has(sources[i].name)) await fetchOne(sources[i], buckets[i]);
       }
+      // Priority-ordered assembly — this is where "source order wins dedupe"
+      // actually happens.
+      for (const b of buckets) all.push(...b);
     }
-    // Priority-ordered assembly — this is where "source order wins dedupe"
-    // actually happens.
-    for (const b of buckets) all.push(...b);
-  }
+  });
   report.fetched = all.length;
+  // Sources still failed after their retry. Counted from the set rather than
+  // from how many lines the error list happens to hold: the sweep decides
+  // "the network died mid-slice" from this number, and error lines are capped
+  // once a handful have been shown.
+  report.sourceFailures = failedSources.size;
 
   // Track content keys seen within this run so the same role from two sources
   // doesn't get stored twice.
   const seenContent = new Set<string>();
-  let storeFailures = 0;
 
   // Harvest inputs: every aggregator URL gets a free tier-1 scan (junk and
   // disqualified jobs included — their URLs still reveal ATS identities);
@@ -491,133 +499,131 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     if (isAggregatorJob(job) && job.url) aggregatorUrls.push(job.url);
   }
 
-  for (const job of all) {
-    // A source that splits its body into named blocks told us so; assembling
-    // those blocks into one text is OUR decision, and it moves whenever the
-    // section parser does. Eight adapters used to make it themselves.
-    //
-    // The adapter's own `description` stays as the fallback for when every
-    // block came back empty — Lever's structure-destroyed descriptionPlain,
-    // Personio's unpaired <value> blocks, a bare title.
-    if (job.sections?.length) {
-      const assembled = labelledSections(job.sections);
-      if (assembled) job.description = assembled;
-    }
-    // A LAST LINE, NOT A CONVERSION STEP.
-    //
-    // Converting here unconditionally would be wrong: several connectors
-    // SYNTHESIZE a plain-text description (SwissDevJobs' "Technologies: ..."
-    // line, a16z's "title · function · seniority"), and htmlToText treats
-    // `<` followed by a letter as a tag — so a stack listing `<T>` or
-    // `<canvas>` would lose those tokens. (Measured while writing the test
-    // for this: the surrounding words survive, because the match stops at the
-    // first `>`. Prose like "latency < 100ms" is safe either way — the regex
-    // requires a letter after the bracket.)
-    //
-    // looksLikeHtml is narrow enough to tell the two apart: it fires only on
-    // real tag names and a handful of entities. So this converts what is
-    // genuinely markup, leaves synthesized prose alone, and COUNTS it —
-    // because a connector reaching here is a connector bug, and a silent
-    // repair would hide it. Measured when this landed: 1 posting in 3,577.
-    //
-    // It matters more than the count suggests. betterText judges quality by
-    // the presence of newlines, and raw markup has plenty, so unconverted
-    // markup can WIN against clean text on a re-sighting — and TEXT_VERSION
-    // is stamped either way, so the repair queue sees it as current.
-    if (looksLikeHtml(job.description)) {
-      report.unconverted++;
-      job.description = htmlToText(job.description);
-    }
-    // SEO-farm copies: the original arrives via a better source.
-    if (isJunkJobUrl(job.url)) {
-      report.junkDomain++;
-      continue;
-    }
-    // Freshness guard: aggregator reposts of old listings are noise — skip
-    // before spending anything on them. (Their URL was still harvested above.)
-    if (tooOldToStore(job.postedAt, isAggregatorJob(job))) {
-      report.tooOld++;
-      continue;
-    }
-    const s = scoreJob(job);
-    // Store-all: gate-rejected jobs are STORED with disqualified=true instead
-    // of dropped — a scorer fix becomes a local re-score, and "high embedding
-    // similarity but disqualified" doubles as a gate-mistake detector. The
-    // report still counts them under their gate so sweep summaries read the
-    // same as before.
-    const rejected = s.disqualified || s.score < STORE_THRESHOLD;
-    if (rejected) {
-      const gate = s.disqualified
-        ? (s.reason.startsWith("Excluded") ? "negative"
-          : s.reason.startsWith("Non-eng") ? "roleNegative"
-          : s.reason.startsWith("No engineering") ? "noSignal"
-          : s.reason.startsWith("Region") ? "region" : "noMatch")
-        : "belowThreshold";
-      report.eliminated[gate] = (report.eliminated[gate] ?? 0) + 1;
-    } else {
-      report.scored++;
-    }
+  await pass("store", report.errors, async (storing) => {
+    for (const job of all) {
+      // A source that splits its body into named blocks told us so; assembling
+      // those blocks into one text is OUR decision, and it moves whenever the
+      // section parser does. Eight adapters used to make it themselves.
+      //
+      // The adapter's own `description` stays as the fallback for when every
+      // block came back empty — Lever's structure-destroyed descriptionPlain,
+      // Personio's unpaired <value> blocks, a bare title.
+      if (job.sections?.length) {
+        const assembled = labelledSections(job.sections);
+        if (assembled) job.description = assembled;
+      }
+      // A LAST LINE, NOT A CONVERSION STEP.
+      //
+      // Converting here unconditionally would be wrong: several connectors
+      // SYNTHESIZE a plain-text description (SwissDevJobs' "Technologies: ..."
+      // line, a16z's "title · function · seniority"), and htmlToText treats
+      // `<` followed by a letter as a tag — so a stack listing `<T>` or
+      // `<canvas>` would lose those tokens. (Measured while writing the test
+      // for this: the surrounding words survive, because the match stops at the
+      // first `>`. Prose like "latency < 100ms" is safe either way — the regex
+      // requires a letter after the bracket.)
+      //
+      // looksLikeHtml is narrow enough to tell the two apart: it fires only on
+      // real tag names and a handful of entities. So this converts what is
+      // genuinely markup, leaves synthesized prose alone, and COUNTS it —
+      // because a connector reaching here is a connector bug, and a silent
+      // repair would hide it. Measured when this landed: 1 posting in 3,577.
+      //
+      // It matters more than the count suggests. betterText judges quality by
+      // the presence of newlines, and raw markup has plenty, so unconverted
+      // markup can WIN against clean text on a re-sighting — and TEXT_VERSION
+      // is stamped either way, so the repair queue sees it as current.
+      if (looksLikeHtml(job.description)) {
+        report.unconverted++;
+        job.description = htmlToText(job.description);
+      }
+      // SEO-farm copies: the original arrives via a better source.
+      if (isJunkJobUrl(job.url)) {
+        report.junkDomain++;
+        continue;
+      }
+      // Freshness guard: aggregator reposts of old listings are noise — skip
+      // before spending anything on them. (Their URL was still harvested above.)
+      if (tooOldToStore(job.postedAt, isAggregatorJob(job))) {
+        report.tooOld++;
+        continue;
+      }
+      const s = scoreJob(job);
+      // Store-all: gate-rejected jobs are STORED with disqualified=true instead
+      // of dropped — a scorer fix becomes a local re-score, and "high embedding
+      // similarity but disqualified" doubles as a gate-mistake detector. The
+      // report still counts them under their gate so sweep summaries read the
+      // same as before.
+      const rejected = s.disqualified || s.score < STORE_THRESHOLD;
+      if (rejected) {
+        const gate = s.disqualified
+          ? (s.reason.startsWith("Excluded") ? "negative"
+            : s.reason.startsWith("Non-eng") ? "roleNegative"
+            : s.reason.startsWith("No engineering") ? "noSignal"
+            : s.reason.startsWith("Region") ? "region" : "noMatch")
+          : "belowThreshold";
+        report.eliminated[gate] = (report.eliminated[gate] ?? 0) + 1;
+      } else {
+        report.scored++;
+      }
 
-    const key = dedupeKey(job);
-    const ck = contentKey(job);
+      const key = dedupeKey(job);
+      const ck = contentKey(job);
 
-    // Same role already handled this run (from an earlier, higher-priority source).
-    if (seenContent.has(ck)) {
-      report.duplicates++;
-      continue;
-    }
-    seenContent.add(ck);
+      // Same role already handled this run (from an earlier, higher-priority source).
+      if (seenContent.has(ck)) {
+        report.duplicates++;
+        continue;
+      }
+      seenContent.add(ck);
 
-    const country = resolveWithCache(job.location, locationCache);
-    // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
-    const sponsorReg = await isRegisteredSponsor(job.company, country);
+      const country = resolveWithCache(job.location, locationCache);
+      // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
+      const sponsorReg = await isRegisteredSponsor(job.company, country);
 
-    const data = {
-      // Identity, and our own observation of it. Everything else on the row is
-      // either what the source states (statedFields) or what its text makes
-      // true (derivedFields), and neither of those belongs in a literal here.
-      dedupeKey: key,
-      contentKey: ck,
-      source: job.source,
-      externalId: job.externalId,
-      country,
-      ...statedFields(job),
-      ...derivedFields(job, { country, sponsorReg }),
-      // Sources parse dates from wild formats; one NaN Date must degrade to
-      // "date unknown", never kill the whole run (it took down a sweep slice).
-      postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
-    };
+      const data = {
+        // Identity, and our own observation of it. Everything else on the row is
+        // either what the source states (statedFields) or what its text makes
+        // true (derivedFields), and neither of those belongs in a literal here.
+        dedupeKey: key,
+        contentKey: ck,
+        source: job.source,
+        externalId: job.externalId,
+        country,
+        ...statedFields(job),
+        ...derivedFields(job, { country, sponsorReg }),
+        // Sources parse dates from wild formats; one NaN Date must degrade to
+        // "date unknown", never kill the whole run (it took down a sweep slice).
+        postedAt: job.postedAt && !Number.isNaN(job.postedAt.getTime()) ? job.postedAt : null,
+      };
 
-    if (job.location && country === null && resolveCountry(job.location) === null) {
-      const key = normalizeLocation(job.location);
-      if (!locationCache.has(key)) {
-        if (!unknownLocations.has(key)) unknownLocations.set(key, new Set());
-        unknownLocations.get(key)!.add(job.location);
+      if (job.location && country === null && resolveCountry(job.location) === null) {
+        const key = normalizeLocation(job.location);
+        if (!locationCache.has(key)) {
+          if (!unknownLocations.has(key)) unknownLocations.set(key, new Set());
+          unknownLocations.get(key)!.add(job.location);
+        }
+      }
+
+      // Per-job isolation: a single poison row (invalid date, lone surrogate,
+      // whatever tomorrow brings) must cost ONE job, never a 53k-board run —
+      // this is the third crash class caught here, so guard the class.
+      try {
+
+      const outcome = await storeSighting(job, { key, ck, country, sponsorReg, identity: data });
+      if (outcome.kind === "updated") {
+        report.updated++;
+      } else {
+        report.stored++;
+        newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
+        if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
+      }
+
+      } catch (e) {
+        storing.failed(e, `${job.source}/${job.externalId}`);
       }
     }
-
-    // Per-job isolation: a single poison row (invalid date, lone surrogate,
-    // whatever tomorrow brings) must cost ONE job, never a 53k-board run —
-    // this is the third crash class caught here, so guard the class.
-    try {
-
-    const outcome = await storeSighting(job, { key, ck, country, sponsorReg, identity: data });
-    if (outcome.kind === "updated") {
-      report.updated++;
-    } else {
-      report.stored++;
-      newlyCreated.push({ id: outcome.id, title: job.title, company: job.company, description: job.description, source: job.source });
-      if (isAggregatorJob(job) && job.url) newlyStoredUrls.push(job.url);
-    }
-
-    } catch (e: any) {
-      storeFailures++;
-      if (storeFailures <= 5) {
-        report.errors.push(`store ${job.source}/${job.externalId}: ${String(e.message).slice(0, 140)}`);
-      }
-    }
-  }
-  if (storeFailures > 5) report.errors.push(`store: ${storeFailures - 5} more row failures suppressed`);
+  });
 
   // Sweep: a direct source was fetched and returned jobs, yet some stored
   // rows of that source were absent from the feed — those roles are closed.
@@ -647,154 +653,140 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   }
   report.delisted = swept;
 
-  // Discovery harvest: mine ATS board candidates from the aggregator URLs.
-  // Isolated so no harvest failure can sink the ingest.
-  if (lean) return report; // fetch + store + delist only
-  try {
-    report.harvest = await harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls });
-  } catch (e: any) {
-    report.errors.push(`harvest: ${e.message}`);
-  }
+  // EVERYTHING BELOW IS A STAGE, and a lean run has none of them: the board
+  // sweep and a targeted --only text repair both want the fetch/store/delist
+  // core and nothing else.
+  if (!lean) {
+    // Discovery harvest: mine ATS board candidates from the aggregator URLs.
+    report.harvest = await stage("harvest", report.errors, () =>
+      harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls }));
 
-  // Harvest tier 4: aggregator jobs carry no company URL, but the company
-  // NAME slugifies into probeable ATS tokens. Verified hits join the board
-  // pool as active — the whole company upgrades to first-party next ingest.
-  try {
-    const names = newlyCreated
-      .filter((j) => !j.source.includes(":"))
-      .map((j) => j.company)
-      .filter(Boolean);
-    if (names.length > 0) report.nameProbe = await runNameProbes(names, NAME_PROBE_MAX);
-  } catch (e: any) {
-    report.errors.push(`name-probe: ${String(e.message).slice(0, 160)}`);
-  }
-
-  // Harvest tier 5: rescue lane for name-probe misses — LLM resolves the
-  // company website, the careers page reveals the ATS, probe verifies.
-  if (llmEnabled()) {
-    try {
-      report.deepProbe = await runDeepProbes(DEEP_PROBE_MAX);
-    } catch (e: any) {
-      report.errors.push(`deep-probe: ${String(e.message).slice(0, 160)}`);
-    }
-  }
-
-  // Liveness probing: aggregator jobs have no diffable feed, so aging ones
-  // get their URLs probed for closure banners (isolated like the harvests).
-  try {
-    report.liveness = await runLivenessSweep();
-  } catch (e: any) {
-    report.errors.push(`liveness: ${String(e.message).slice(0, 160)}`);
-  }
-
-  // Batched LLM location resolution for strings the gazetteer+cache missed.
-  if (llmEnabled() && unknownLocations.size > 0) {
-    try {
-      report.locations = await resolveUnknownLocations(unknownLocations);
-    } catch (e: any) {
-      report.errors.push(`locations: ${String(e.message).slice(0, 160)}`);
-    }
-  }
-
-  // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we
-  // already track from the same company (repost / reworded / per-city)?
-  // Cheap funnel: no same-company rows → no LLM call at all; a titles-only
-  // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
-  if (llmEnabled() && newlyCreated.length > 0) {
-    let compareBudget = DEDUP_MAX_COMPARES;
-    let dedupErrors = 0;
-    for (const nj of newlyCreated.slice(0, DEDUP_MAX_CHECKS)) {
-      if (compareBudget <= 0) break;
-      try {
-        const candidates = await prisma.job.findMany({
-          where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
-          orderBy: { lastSeenAt: "desc" },
-          take: 12,
-          select: { id: true, title: true, content: { select: { description: true } } },
-        });
-        if (candidates.length === 0) continue;
-        const outcome = await findDuplicate(
-          nj,
-          candidates.map((c) => ({ id: c.id, title: c.title, description: c.content?.description ?? c.title })),
-        );
-        compareBudget -= outcome.compareCalls;
-        if (outcome.duplicateOfId) {
-          await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
-          // A repost proves the original role is still open.
-          await prisma.job.update({ where: { id: outcome.duplicateOfId }, data: { lastSeenAt: new Date() } });
-          report.semanticDupes++;
-        }
-      } catch (e: any) {
-        if (e instanceof RateLimitError) {
-          report.errors.push(`dedup stopped: token budget reached (${report.semanticDupes} found)`);
-          break;
-        }
-        // One line per failure flooded the first trial's report — summarize.
-        dedupErrors++;
-        if (dedupErrors <= 3) report.errors.push(`dedup ${nj.id}: ${e.message}`);
-      }
-    }
-    if (dedupErrors > 3) report.errors.push(`dedup: ${dedupErrors - 3} more failures suppressed`);
-  }
-
-  // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so the
-  // dashboard can rank by real fit, not just keyword score. No-ops without a key.
-  if (llmEnabled()) {
-    const toAnalyze = await prisma.job.findMany({
-      // openWhere, not a hand-written near-copy. The copy omitted delistedAt,
-      // so the one queue that ran right after a fetch was also the one queue
-      // that would spend a minute of LLM time on a posting already closed.
-      where: andWhere(openWhere(), { fitScore: null }),
-      orderBy: { score: "desc" },
-      take: AUTO_FIT_TOP_N,
-      include: { content: { select: { description: true } } },
+    // Harvest tier 4: aggregator jobs carry no company URL, but the company
+    // NAME slugifies into probeable ATS tokens. Verified hits join the board
+    // pool as active — the whole company upgrades to first-party next ingest.
+    report.nameProbe = await stage("name-probe", report.errors, async () => {
+      const names = newlyCreated
+        .filter((j) => !j.source.includes(":"))
+        .map((j) => j.company)
+        .filter(Boolean);
+      return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
     });
-    for (const j of toAnalyze) {
-      try {
-        const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
-        if (!fit) continue;
-        await prisma.job.update({
-          where: { id: j.id },
-          // The model read the posting: an explicit refusal beats "unknown",
-          // and verdictFields is what makes that a proper llm-strength write
-          // with the tier recomputed and the history row appended.
-          data: verdictFields(fit, "auto-fit", j),
-        });
-        report.fitAnalyzed++;
-        // Throttle to stay under the provider's per-minute token limit.
-        await new Promise((r) => setTimeout(r, 1500));
-      } catch (e: any) {
-        // Out of daily tokens — stop analyzing, keep everything else. Remaining
-        // jobs stay fitScore:null and get picked up on the next ingest.
-        if (e instanceof RateLimitError) {
-          report.errors.push(`fit stopped: daily token budget reached (${report.fitAnalyzed} analyzed)`);
-          break;
+
+    // Harvest tier 5: rescue lane for name-probe misses — LLM resolves the
+    // company website, the careers page reveals the ATS, probe verifies.
+    if (llmEnabled()) {
+      report.deepProbe = await stage("deep-probe", report.errors, () => runDeepProbes(DEEP_PROBE_MAX));
+    }
+
+    // Liveness probing: aggregator jobs have no diffable feed, so aging ones
+    // get their URLs probed for closure banners.
+    report.liveness = await stage("liveness", report.errors, () => runLivenessSweep());
+
+    // Batched LLM location resolution for strings the gazetteer+cache missed.
+    if (llmEnabled() && unknownLocations.size > 0) {
+      report.locations = await stage("locations", report.errors, () =>
+        resolveUnknownLocations(unknownLocations));
+    }
+
+    // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we
+    // already track from the same company (repost / reworded / per-city)?
+    // Cheap funnel: no same-company rows → no LLM call at all; a titles-only
+    // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
+    if (llmEnabled() && newlyCreated.length > 0) {
+      await stage("dedup", report.errors, async (p) => {
+        let compareBudget = DEDUP_MAX_COMPARES;
+        for (const nj of newlyCreated.slice(0, DEDUP_MAX_CHECKS)) {
+          if (compareBudget <= 0) break;
+          try {
+            const candidates = await prisma.job.findMany({
+              where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
+              orderBy: { lastSeenAt: "desc" },
+              take: 12,
+              select: { id: true, title: true, content: { select: { description: true } } },
+            });
+            if (candidates.length === 0) continue;
+            const outcome = await findDuplicate(
+              nj,
+              candidates.map((c) => ({ id: c.id, title: c.title, description: c.content?.description ?? c.title })),
+            );
+            compareBudget -= outcome.compareCalls;
+            if (outcome.duplicateOfId) {
+              await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
+              // A repost proves the original role is still open.
+              await prisma.job.update({ where: { id: outcome.duplicateOfId }, data: { lastSeenAt: new Date() } });
+              report.semanticDupes++;
+            }
+          } catch (e) {
+            // A token budget that ran out is not a bad row: it ends the stage,
+            // and everything found so far stays in the report.
+            p.failed(e, nj.id);
+          }
         }
-        report.errors.push(`fit ${j.id}: ${e.message}`);
-      }
+      });
+    }
+
+    // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so
+    // the dashboard can rank by real fit, not just keyword score.
+    if (llmEnabled()) {
+      await stage("fit", report.errors, async (p) => {
+        const toAnalyze = await prisma.job.findMany({
+          // openWhere, not a hand-written near-copy. The copy omitted delistedAt,
+          // so the one queue that ran right after a fetch was also the one queue
+          // that would spend a minute of LLM time on a posting already closed.
+          where: andWhere(openWhere(), { fitScore: null }),
+          orderBy: { score: "desc" },
+          take: AUTO_FIT_TOP_N,
+          include: { content: { select: { description: true } } },
+        });
+        for (const j of toAnalyze) {
+          try {
+            const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
+            if (!fit) continue;
+            await prisma.job.update({
+              where: { id: j.id },
+              // The model read the posting: an explicit refusal beats "unknown",
+              // and verdictFields is what makes that a proper llm-strength write
+              // with the tier recomputed and the history row appended.
+              data: verdictFields(fit, "auto-fit", j),
+            });
+            report.fitAnalyzed++;
+            // Throttle to stay under the provider's per-minute token limit.
+            await new Promise((r) => setTimeout(r, 1500));
+          } catch (e) {
+            // Out of daily tokens — the stage ends, everything else is kept.
+            // The remaining jobs stay fitScore:null for the next ingest.
+            p.failed(e, j.id);
+          }
+        }
+      });
     }
   }
 
-  // Dashboard snapshot: the stat strip reads this one row instead of
-  // group-by'ing half a million.
-  try {
-    const [statusCounts, verdictCounts, total] = await Promise.all([
-      prisma.job.groupBy({ by: ["status"], _count: true, where: { disqualified: false } }),
-      prisma.job.groupBy({ by: ["fitVerdict"], _count: true, where: { disqualified: false } }),
-      prisma.job.count(),
-    ]);
-    await prisma.dashboardStatsSnapshot.create({
-      data: {
-        at: new Date(),
-        stats: JSON.stringify({
-          total,
-          byStatus: Object.fromEntries(statusCounts.map((c) => [c.status, c._count])),
-          byVerdict: Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count])),
-        }),
-      },
+  // The stat strip reads this one row instead of group-by'ing half a million,
+  // so it is exactly as fresh as the last run that wrote it — and that used to
+  // mean "the last run that was not lean", because the early return that
+  // skipped the stages sat above this too. A hundred-slice sweep could store
+  // thousands of postings over a day while the strip showed the pool as it was
+  // before it started. Every run that changed the pool closes by re-reading it;
+  // a run that changed nothing has nothing to say.
+  if (report.stored + report.updated + report.delisted > 0) {
+    await stage("snapshot", report.errors, async () => {
+      const [statusCounts, verdictCounts, total] = await Promise.all([
+        prisma.job.groupBy({ by: ["status"], _count: true, where: { disqualified: false } }),
+        prisma.job.groupBy({ by: ["fitVerdict"], _count: true, where: { disqualified: false } }),
+        prisma.job.count(),
+      ]);
+      await prisma.dashboardStatsSnapshot.create({
+        data: {
+          at: new Date(),
+          stats: JSON.stringify({
+            total,
+            byStatus: Object.fromEntries(statusCounts.map((c) => [c.status, c._count])),
+            byVerdict: Object.fromEntries(verdictCounts.map((c) => [c.fitVerdict ?? "unscored", c._count])),
+          }),
+        },
+      });
     });
-  } catch (e: any) {
-    report.errors.push(`snapshot: ${String(e.message).slice(0, 100)}`);
   }
 
   return report;

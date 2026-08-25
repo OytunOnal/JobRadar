@@ -30,6 +30,7 @@ if (boardEntries.length) {
   console.log(`Discovered boards: ${boardEntries.length} fetched -> ${boardJobs} jobs`);
 }
 console.log(`Total fetched: ${report.fetched}`);
+if (report.sourceFailures) console.log(`Sources failed:  ${report.sourceFailures} (after their retry)`);
 console.log(`Passed scoring: ${report.scored}`);
 console.log(`New stored:     ${report.stored}`);
 console.log(`Updated:        ${report.updated}`);

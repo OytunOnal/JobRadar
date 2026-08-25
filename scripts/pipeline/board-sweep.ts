@@ -116,7 +116,7 @@ for (let i = 0; i < MAX_SLICES; i++) {
   state.stored += r.stored;
   state.updated += r.updated;
   state.delisted += r.delisted;
-  state.errors += r.errors.length;
+  state.errors += r.sourceFailures;
   writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
 
   const heapMB = Math.round(process.memoryUsage().heapUsed / 1_048_576);
@@ -124,7 +124,7 @@ for (let i = 0; i < MAX_SLICES; i++) {
   const mins = ((Date.now() - t) / 60_000).toFixed(1);
   const donePct = state.poolAtStart > 0 ? Math.min(100, Math.round((state.boards / state.poolAtStart) * 100)) : 0;
   log(
-    `slice ${state.slicesDone}: ${boards} boards (${mins}min) | +${r.stored} new, ${r.updated} upd, ${r.delisted} delist, ${r.errors.length} err | ` +
+    `slice ${state.slicesDone}: ${boards} boards (${mins}min) | +${r.stored} new, ${r.updated} upd, ${r.delisted} delist, ${r.sourceFailures} err | ` +
       `toplam ${state.boards}/${state.poolAtStart} (~%${donePct}) | heap ${heapMB}MB rss ${rssMB}MB | slice→${slice}`,
   );
 
@@ -133,7 +133,11 @@ for (let i = 0; i < MAX_SLICES; i++) {
   }
   // A near-total-failure slice means the net (or a proxy of it) died mid-run:
   // those boards were stamped wrongly — un-stamp them and wait for the net.
-  if (boards > 0 && r.errors.length >= boards * 0.9) {
+  //
+  // Counted from the report's own number, not from how many lines its error
+  // list holds: the ingest keeps a handful of examples and a total, so a
+  // thousand dead boards would show up here as five.
+  if (boards > 0 && r.sourceFailures >= boards * 0.9) {
     const windowStart = new Date(t - 60_000);
     const undone = await prisma.atsBoard.updateMany({
       where: { lastFetchedAt: { gte: windowStart } },

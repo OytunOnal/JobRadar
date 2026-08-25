@@ -141,6 +141,20 @@ An ingest across the whole discovered board pool rather than the curated set.
 Long, resumable, and run deliberately.
 _Avoid_: full run, batch
 
+**Stage**:
+One step of an ingest hung off its fetch-and-store core — the harvest, the
+probes, the liveness sweep, the auto-fit, the dashboard snapshot. What makes a
+stage a stage is that its failure is recorded and never sinks the run: by the
+time it runs, the run has already spent its network time, and losing that to
+report a harvest error is the worse trade.
+_Avoid_: step, phase, task, layer
+
+**Lean ingest**:
+One that does the fetch-and-store core and no stages. A sweep slice and a
+targeted text repair both want exactly this, for the same reason: they are
+after postings, not after everything else an ingest normally learns.
+_Avoid_: quick run, minimal, fast mode
+
 ## The text of a posting
 
 **Description**:

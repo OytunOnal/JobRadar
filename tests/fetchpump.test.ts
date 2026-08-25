@@ -107,6 +107,22 @@ test("moderate heap pressure halves the bound", async () => {
   assert.equal(log.peak, 4);
 });
 
+test("pressure never RAISES the bound above what the caller asked for", async () => {
+  // `Math.max(2, floor(conc / 2))` did: throttle a sweep to one in flight, let
+  // the heap cross the threshold, and memory pressure doubled the parallelism
+  // on the one path the branch exists to protect.
+  // DISTINCT hosts, or the raise cannot show: an unlisted host defaults to the
+  // CONFIGURED bound, so eight boards on one platform are capped at `conc`
+  // anyway and the widened global limit has nothing to spend itself on.
+  for (const conc of [1, 2, 3, 8]) {
+    const log = meter();
+    const sources = Array.from({ length: 8 }, (_, i) => probe(`board:p${i}:acme`, log));
+    await pump(sources, (s) => s.fetch().then(() => undefined), { concurrency: conc, heapMB: () => 900 });
+    assert.ok(log.peak <= conc, `conc ${conc} ran ${log.peak} at once`);
+    assert.ok(log.peak >= 1);
+  }
+});
+
 test("shuffling changes the order, never the identity or the caller's array", async () => {
   // The buckets the normal ingest reassembles are indexed by the ORIGINAL
   // position, which is what makes "source order wins dedupe" survive a

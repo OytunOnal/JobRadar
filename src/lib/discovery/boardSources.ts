@@ -32,7 +32,24 @@ export function isDue(
 
 const DEFAULT_MAX_BOARDS = Number(process.env.DISCOVERY_MAX_BOARDS) || 200;
 
-export async function boardSources(limit = DEFAULT_MAX_BOARDS): Promise<Source[]> {
+export interface BoardSourceOptions {
+  /**
+   * Offer every board, whether or not its interval has elapsed, and without
+   * the rotation's fairness limit.
+   *
+   * Both of those are this module choosing FOR the caller: which boards
+   * deserve this run's request budget. A targeted run has already chosen —
+   * `--only recruitee` exists to re-fetch a platform whose connector was
+   * fixed — and a due check would skip exactly the boards a sweep just
+   * stamped, while the limit would hand back an arbitrary 200 of them.
+   */
+  all?: boolean;
+}
+
+export async function boardSources(
+  limit = DEFAULT_MAX_BOARDS,
+  opts: BoardSourceOptions = {},
+): Promise<Source[]> {
   const curated = curatedKeys();
   // Stalest-first so a big backlog rotates fairly across ingest runs
   // (SQLite sorts NULLs first on ASC — never-fetched boards lead the queue).
@@ -44,12 +61,12 @@ export async function boardSources(limit = DEFAULT_MAX_BOARDS): Promise<Source[]
   const now = new Date();
   const out: Source[] = [];
   for (const b of boards) {
-    if (out.length >= limit) break;
+    if (!opts.all && out.length >= limit) break;
     const platform = getPlatform(b.platform);
     const fetcherId = platform?.fetcher;
     if (!fetcherId) continue; // discover-and-park platform — no fetcher yet
     if (curated.has(`${b.platform}:${b.token.toLowerCase()}`)) continue;
-    if (!isDue(b.lastFetchedAt, b.fetchIntervalDays, now)) continue;
+    if (!opts.all && !isDue(b.lastFetchedAt, b.fetchIntervalDays, now)) continue;
 
     const company = b.companyName ?? titleizeToken(b.token);
     out.push({

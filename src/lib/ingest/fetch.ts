@@ -110,10 +110,15 @@ export async function pump(
   // A cap of zero would leave its sources permanently unschedulable and the
   // pump waiting on work it can never start, so the floor is structural.
   const capOf = (host: string): number => Math.max(1, perHost[host] ?? conc);
+  // Never above the configured bound, never below one, otherwise half. The
+  // inline copies wrote this as `Math.max(2, floor(conc / 2))`, which RAISES
+  // the bound when the caller asked for one: set SWEEP_CONCURRENCY=1 to
+  // throttle a slice, let the heap cross the threshold, and memory pressure
+  // doubled the parallelism on the one path this branch exists to protect.
   const limitNow = (): number => {
     const mb = heapMB();
     if (mb > HEAP_CRITICAL_MB) return 1;
-    if (mb > HEAP_HIGH_MB) return Math.max(2, Math.floor(conc / 2));
+    if (mb > HEAP_HIGH_MB) return Math.max(1, Math.min(conc, Math.floor(conc / 2)));
     return conc;
   };
 

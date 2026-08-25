@@ -1,5 +1,4 @@
 import { prisma } from "../db";
-import { scoreJob } from "../scoring/score";
 import { arbeitnow } from "../sources/arbeitnow";
 import { remotive } from "../sources/remotive";
 import { remoteok } from "../sources/remoteok";
@@ -47,7 +46,7 @@ import { safeSlice, type RawJob, type Source } from "../sources/types";
 import { TEXT_VERSION } from "../text/html-text";
 import { invalidateVector } from "../llm/embed";
 import { andWhere, openWhere } from "../queue/pool";
-import { derivedFields, statedFields, STORE_THRESHOLD } from "../scoring/derive";
+import { derivedFields, statedFields } from "../scoring/derive";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, selectSources, PER_HOST } from "./fetch";
@@ -322,9 +321,20 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // exactly the same thing, since its whole purpose is to rewrite the text of
   // a handful of sources in minutes rather than hours.
   const lean = Boolean(opts.boardsOnly || opts.only?.length);
+  // No run has taken anything yet, and a board's hit rate is about the board
+  // rather than about what else this run happened to fetch first.
+  const NO_KEYS: ReadonlySet<string> = new Set();
 
+  // A targeted run asks the board pool for EVERYTHING, because the selection
+  // below is what narrows it. Without that, `--only recruitee` was narrowing a
+  // list the rotation had already narrowed for its own reasons — the 200
+  // stalest boards that happened to be due — so a promise the tests pinned
+  // ("a platform selects every discovered board on it") could return a handful
+  // of boards, or none at all if a sweep had just stamped them.
+  const targeted = Boolean(opts.only?.length);
   const discovered =
-    (await stage("boardSources", report.errors, () => boardSources(opts.boardLimit))) ?? [];
+    (await stage("boardSources", report.errors, () =>
+      boardSources(opts.boardLimit, { all: targeted }))) ?? [];
   const sources = selectSources(
     opts.boardsOnly ? discovered : [...companySources(), ...discovered, ...aggregators],
     opts.only,
@@ -369,12 +379,19 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         report.perSource[src.name] = jobs.length;
         failedSources.delete(src.name);
         sink.push(...jobs);
-        // Adaptive frequency: tell the board how it did against the keyword
-        // threshold, so no-hit boards get fetched less often over time.
+        // Adaptive frequency: tell the board how it did, so no-hit boards get
+        // fetched less often over time.
+        //
+        // Through intake, and not a private copy of the gate. The copy that
+        // was here scored the payload AS IT ARRIVED — before the named blocks
+        // are assembled — and lever, personio, comeet and oracle all publish
+        // their bodies as blocks. So four platforms' boards were judged on a
+        // fallback text, under-counted their hits, and had their fetch
+        // interval stretched for matching.
         if (src.name.startsWith("board:")) {
           const passed = jobs.filter((j) => {
-            const s = scoreJob(j);
-            return !s.disqualified && s.score >= STORE_THRESHOLD;
+            const r = intake(j, NO_KEYS);
+            return r.store && r.gate === null;
           }).length;
           await recordBoardOutcome(src.name, jobs.length, passed).catch(() => {});
         }
@@ -472,7 +489,6 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       else report.scored++;
       // The same role, already taken this run from a higher-priority source.
       if (r.why === "duplicate") { report.duplicates++; continue; }
-      seenContent.add(r.ck);
 
       const country = resolveWithCache(job.location, locationCache);
       // Company-level signal from the public sponsor registers (nl/gb/dk/ie).
@@ -505,6 +521,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       // the third crash class caught here, so guard the class.
       try {
         const outcome = await storeSighting(job, { key: r.key, ck: r.ck, country, sponsorReg, identity: data });
+        // The role is taken only once it is actually held. Burning the key
+        // before the write meant a poison row from a high-priority source
+        // ALSO refused the same role from every later one, and the run lost
+        // the posting entirely rather than costing one attempt.
+        seenContent.add(r.ck);
         if (outcome.kind === "updated") {
           report.updated++;
         } else {
@@ -662,7 +683,12 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // thousands of postings over a day while the strip showed the pool as it was
   // before it started. Every run that changed the pool closes by re-reading it;
   // a run that changed nothing has nothing to say.
-  if (report.stored + report.updated + report.delisted > 0) {
+  //
+  // "Changed the pool" has to mean the three things this row actually holds —
+  // a total, a status census and a VERDICT census. The fit stage writes
+  // verdicts on postings this run never fetched, so an ingest whose sources
+  // were all down could still change the strip and then decline to refresh it.
+  if (report.stored + report.updated + report.delisted + report.fitAnalyzed > 0) {
     await stage("snapshot", report.errors, async () => {
       const [statusCounts, verdictCounts, total] = await Promise.all([
         prisma.job.groupBy({ by: ["status"], _count: true, where: { disqualified: false } }),

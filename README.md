@@ -1,6 +1,8 @@
 # JobRadar
 
 [![CI](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%E2%89%A520-3ec5b7.svg)
 
 A local-first job-discovery engine and application tracker. It finds the hiring
 boards companies run themselves, reads them first-hand, scores every posting
@@ -14,10 +16,12 @@ leaves the disk.
 
 ![The radar: postings ranked by LLM fit, with country and visa filters, and risk labels under each score](docs/screenshot.png)
 
+**[Setup](docs/SETUP.md)** · **[Architecture](docs/ARCHITECTURE.md)** ·
+**[Glossary](CONTEXT.md)** · **[Roadmap](docs/ROADMAP.md)**
+
 > A personal tool and a portfolio project. Not affiliated with any job board.
-> The engineering is the interesting part — every claim below links to the
-> decision record behind it in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-> and the vocabulary it uses is defined in [CONTEXT.md](CONTEXT.md).
+> The engineering is the interesting part, so every claim below links to the
+> decision record behind it.
 
 ## What makes it different
 
@@ -127,46 +131,31 @@ company's history
 A cloud multi-provider chain (Anthropic → Groq → Gemini …) sits behind the same
 interface and replaces the local model with one environment variable.
 
-## Setup
+## Quickstart
 
-Requires **Node.js 20+**. For local scoring, [Ollama](https://ollama.com) with a
-model you can run — or set any cloud provider key instead.
+Node 20+, and [Ollama](https://ollama.com) if you want the judging to run
+locally. Most sources need no key at all.
 
 ```bash
 npm install
-
-# 1. Keys — optional. Most sources are keyless; any LLM key OR a local
-#    Ollama model is what turns on fit scoring and cover letters.
-cp .env.example .env
-
-# 2. Who you are. Kept private, gitignored.
-cp config/user.example.ts config/user.ts
-
-# 3. Your CV — hand it your resume and the radar aims itself.
-npm run cv:import -- "path/to/Resume.pdf"    # .pdf, .txt or .md
-npm run profile:generate                     # CV -> tracks, seniority, languages
-
-# 4. Database (local SQLite)
-npm run db:deploy        # and again after every `git pull`
-
-# 5. Recommended — fill the company pool from the web archives (~15 min)
-npm run discovery:crawl
-npm run discovery:validate -- 5000
-
-# 6. Run it
-npm run ingest           # fetch + score into the database
-npm run dev              # the radar at http://localhost:3000
-
-# 7. Optional — keep the pool judged in the background
-npm run worker           # Ctrl-C whenever; it resumes from the database
+cp .env.example .env                          # optional: any LLM provider key
+npm run cv:import -- "path/to/Resume.pdf"     # your CV aims the radar
+npm run profile:generate                      # -> tracks, seniority, languages
+npm run db:deploy                             # local SQLite
+npm run ingest                                # fetch + score
+npm run dev                                   # the radar at localhost:3000
 ```
 
-Everything else is on the **profile page** at `/profile`: your tracks and their
-keywords, seniority appetite, which model judges, and what each change costs —
-it tells you how many postings a change just made stale, and offers to repair
-them.
+That is a working radar. Everything else — filling the 53k-board company pool,
+what each step does, the full command list, upgrading without losing your
+database — is in **[docs/SETUP.md](docs/SETUP.md)**.
 
-### The worker
+Once it is running, the **[profile page](http://localhost:3000/profile)** owns
+the rest: your tracks and their keywords, seniority appetite, which model
+judges, and what each change costs — it tells you how many postings a change
+just made stale, and offers to repair them.
+
+## The worker
 
 `npm run ingest` fills the pool in minutes. Judging it takes far longer, because
 a 27B model reads about one posting a minute — so the worker runs between
@@ -207,63 +196,6 @@ already has.
 [ADR-11](docs/ARCHITECTURE.md#adr-11--the-gpu-is-held-by-a-run-not-by-a-process) ·
 [band, chunk, lane](CONTEXT.md#keeping-the-pool-judged))
 
-### Upgrading
-
-```bash
-git pull
-npm install
-npm run db:deploy        # apply schema changes to your existing database
-```
-
-Your database is the part you cannot get back: every judgment in it is a minute
-of GPU that re-running nothing reproduces, plus your application history and
-your dismissals. So schema changes ship as **migrations** — ordered, recorded,
-and applied without touching your rows.
-
-<details>
-<summary>If you used this before migrations existed, run these two once</summary>
-
-```bash
-npx prisma db push                            # bring the database to the current shape
-npx prisma migrate resolve --applied 0_init   # record that shape as the baseline
-```
-
-Both, in that order. `migrate resolve` only *records* a migration as applied —
-it does not run it — so on its own it would tell a database created by the old
-`db push` that it already has columns it has never had, and every query touching
-them would fail. The push adds them first; the resolve then routes every later
-change through migrations. Everything after that is `npm run db:deploy`.
-
-</details>
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `npm run ingest` | Fetch every source in parallel, score, dedupe, store all of it; harvest new ATS boards from aggregator URLs. `--only <source\|platform>` targets a few; `--boards N` sizes the board slice. |
-| `npm run sweep` | Full board-pool sweep — every due board, sliced, RAM-aware, resumable. |
-| `npm run worker` | The background worker: holds the GPU, runs embed → judge in chunks, visa-marked postings first. |
-| `npm run discovery:crawl` · `discovery:validate` · `discovery:audit` | Bulk board discovery, live probe validation, extractor corpus audit. |
-| `npm run cv:import` · `profile:generate` | Resume → CV context → generated scoring profile (reviewed JSON, never regenerated silently). |
-| `npm run rescore` | Version-aware re-score: only rows not yet scored by the current `SCORER_VERSION`. |
-| `npm run fit:fill` · `embed:fill` · `desc:fill` · `facts:fill` | The backfills — judging, embeddings, missing descriptions, extracted facts. |
-| `npm run sponsors` | Refresh the public visa-sponsor registers (NL / UK / DK / IE). |
-| `npm run doctor` | Health-check every source connector. |
-| `npm test` | 522 unit tests, grounded in real corpus data. |
-
-## Configuring for your search
-
-Every personal preference lives in your profile, not in code — edit it at
-`/profile` in the app, or by hand:
-
-- **`config/settings.json`** — what the profile page writes. Hand-editable.
-- **`config/profile.generated.json`** — the CV-generated profile (gitignored).
-  Never regenerates silently.
-- **`config/user.ts`** — identity and developer overrides.
-- **`src/lib/sources/companies.ts`** — companies to always watch.
-- **`src/lib/discovery/platforms.ts`** — the ATS registry. Adding a platform is
-  data, not code.
-
 ## Tech
 
 Next.js (App Router) · Prisma + SQLite · TypeScript · Ollama for the local
@@ -276,21 +208,16 @@ append-only history split off it. The main list query measures **4 ms** over
 
 ## Roadmap
 
-- **Download it and run it.** The same engine as a free, open-source app from
-  GitHub Releases, instead of a clone and six npm scripts. A tray process owns
-  the server and the workers; the browser tab is only a view, so closing it
-  stops nothing. Setup collapses into one flow — drop in your CV, confirm the
-  tracks it generates, scan. The judge follows your hardware: a local model
-  where there is a GPU for it, your own cloud key where there is not, and
-  keyword-plus-embedding alone where there is neither, which the bake-off says
-  is worth having on its own. Every worker is already resumable, which is what
-  makes this a supervisor rather than a rewrite. It stays free — the seed data
-  is non-commercial-licensed, and that is a constraint worth keeping.
-- Rescue lane: mine the disqualified pool by embedding similarity, to catch gate
-  mistakes automatically.
-- Scheduled ingest and an email digest.
-- A manual LinkedIn trigger (guest API — deliberately not automated).
-- Optional Postgres/pgvector and a deployed build.
+- **Download it and run it** — the same engine as a free, open-source app
+  rather than a clone and six npm scripts. A tray process owns the server and
+  the workers; the browser tab is only a view. Every worker is already
+  resumable, which is what makes this a supervisor rather than a rewrite.
+- **Rescue lane** — mine the disqualified pool by embedding similarity, to catch
+  gate mistakes automatically.
+- Scheduled ingest and a digest; a manual LinkedIn trigger.
+
+The decisions already made on each are in
+**[docs/ROADMAP.md](docs/ROADMAP.md)**.
 
 ## License
 

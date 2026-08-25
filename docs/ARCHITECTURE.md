@@ -11,13 +11,33 @@ Naming convention (it carries the semantics): `...History` = append-only,
 never overwritten · `...Log` = event stream · `...Snapshot` = computed
 summary, reproducible at will.
 
-```
-FACTS                CANONICAL              DERIVED (versioned)        USER
-─────                ─────────              ───────────────────        ────
-JobListingHistory ─▶ Job (thin hot core) ◀─ KeywordScoreHistory        UserActionLog
-                      ├─ JobContent      ◀─ LlmJudgmentHistory             │
-                      └─ JobEmbedding                                      ▼
-                                                              Job.status = projection
+```mermaid
+%%{init:{"theme":"base","themeVariables":{
+"primaryColor":"#11151d","primaryTextColor":"#e8ecf1","primaryBorderColor":"#2e3846",
+"lineColor":"#3ec5b7","secondaryColor":"#11151d","tertiaryColor":"#0b0e14",
+"clusterBkg":"#0b0e14","clusterBorder":"#222a36","edgeLabelBackground":"#0b0e14",
+"titleColor":"#8a94a3"
+},"flowchart":{"wrappingWidth":250,"curve":"basis"}}}%%
+flowchart TD
+  subgraph BIG["split off the hot row — by how each is read"]
+    JC["<b>JobContent</b> · description, up to 8 KB<br/>one row at a time, never in a list scan"]
+    JE["<b>JobEmbedding</b> · Float32 vector, 4 KB<br/>all of them at once, by the queue builder"]
+  end
+
+  subgraph HIST["append-only — nothing is ever overwritten"]
+    KSH["<b>KeywordScoreHistory</b> · verdict + scorer version"]
+    LJH["<b>LlmJudgmentHistory</b> · verdict + prompt version"]
+    UAL["<b>UserActionLog</b> · applied · dismissed with reason"]
+    JLH["<b>JobListingHistory</b> · listed · delisted · relisted"]
+  end
+
+  BIG -.-> JOB
+  HIST -- "current value projected onto the hot row" --> JOB
+  JOB["<b>Job</b> · about 300 B per row<br/>identity, and the current score, fit and status"]
+  JOB --> RQ["the radar's list query — filter + composite-index sort<br/>over 525k rows, <b>measured at 4 ms</b>"]
+
+  classDef key fill:#0e2b27,stroke:#3ec5b7,stroke-width:2px,color:#e8ecf1
+  class JOB,RQ key
 ```
 
 | Table | Holds | Why it exists |

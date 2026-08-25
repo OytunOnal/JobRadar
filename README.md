@@ -2,229 +2,285 @@
 
 [![CI](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml/badge.svg)](https://github.com/OytunOnal/JobRadar/actions/workflows/ci.yml)
 
-A local-first job-discovery engine and application tracker. JobRadar discovers
-**~53,000 live company ATS boards**, pulls their listings first-hand
-(**526k postings** in the current pool), scores each one against **your** CV
-with a locally-run LLM, and ranks the real matches on a dashboard — so you
-stop tab-hopping across job boards, and so an SEO repost, a ghost posting or a
-years-old evergreen ad arrives labelled as one instead of wasting an evening.
+A local-first job-discovery engine and application tracker. It finds the hiring
+boards companies run themselves, reads them first-hand, scores every posting
+against **your** CV with a model running on your own machine, and ranks what
+survives on one page — so you stop tab-hopping across job boards, and so an SEO
+repost, a ghost listing or a three-year-old evergreen ad arrives **labelled as
+one** instead of costing you an evening.
 
-It runs on your machine, uses your own API keys where keys are needed at all
-(most sources are keyless), and keeps your CV and personal data local — never
-committed, never uploaded.
+It runs on your machine. Most sources need no key at all, and your CV never
+leaves the disk.
 
-![JobRadar dashboard — jobs ranked by LLM fit, with verdict gauges, filters, and per-job cover-letter drafts](docs/screenshot.png)
+![The radar: postings ranked by LLM fit, with country and visa filters, and risk labels under each score](docs/screenshot.png)
 
-> Built as a personal tool + portfolio project. Not affiliated with any job board.
-> The interesting part is the engineering: see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-> for the layered data model and the measured decisions behind the ranking stack.
+> A personal tool and a portfolio project. Not affiliated with any job board.
+> The engineering is the interesting part — every claim below links to the
+> decision record behind it in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+> and the vocabulary it uses is defined in [CONTEXT.md](CONTEXT.md).
 
-## What it does
+## What makes it different
 
-- **Discovers companies at scale.** A platform-agnostic discovery layer speaks
-  **28 ATS platforms** — from startup staples (Greenhouse, Lever US+EU, Ashby,
-  Workable, Recruitee, Personio) through enterprise systems (Workday,
-  SuccessFactors, Oracle Cloud Recruiting, Eightfold, Cornerstone, Phenom,
-  Radancy, Avature, BeeSite, Jibe/iCIMS…), 22 of them in the discovery registry
-  that finds and probe-validates boards at scale. Boards are found four ways —
-  harvesting ATS identities out of aggregator job URLs, bulk Common
-  Crawl/Wayback CDX sweeps, public company datasets, and name-guess probing —
-  then **probe-validated live** against each platform's API. Every platform
-  entry documents its live-verified quirks (case-sensitive APIs, regional
-  namespaces, POST-only probes, redirect traps, locale-gated results).
-- **Aggregates 103 non-ATS sources**: national employment agencies
-  (Germany, Sweden, Denmark, Switzerland, Flanders, EURES), tech boards with
-  structured visa flags (GermanTechJobs, SwissDevJobs), visa-focused feeds
-  (Hunt UK Visa Sponsors), country boards (Poland, Finland, Malta, Ireland,
-  Portugal, Spain, France), remote boards, HN who-is-hiring, and a
-  66-feed curated RSS layer driven by one generic parser.
-- **Stores everything, hides judgment.** Gate-rejected postings aren't dropped
-  — they're stored with a `disqualified` flag. A scorer fix is a local
-  re-score, never a re-crawl; "what did the filter wrongly kill" is a SQL
-  query, not archaeology. Score and LLM-verdict history are **append-only and
-  version-stamped**, so every ranking change is measurable after the fact.
-- **Knows who sponsors visas.** The complete public sponsor registers of
-  NL (IND), UK (Home Office), DK (SIRI) and IE (DETE) — 146,746 companies — are
-  loaded and name-matched, so sponsor-registered employers rank first and wear
-  a badge backed by government data, not vibes.
-- **Scores in layers, each measured:**
-  1. a deterministic multilingual keyword scorer (title-first, gates + track
-     scoring, per-track seniority bands, language-requirement detection);
-  2. a local **embedding layer** (qwen3-embedding:0.6b, whole-CV query) whose
-     model and blend weight were chosen by a frozen-query bake-off — the
-     measured 40/60 keyword/embedding rank blend beats either signal alone;
-  3. a locally-run **27B LLM** as the single fit judge (0-100 score,
-     strong/possible/weak verdict, gap commentary, seniority classification,
-     ghost-posting detection), fed visa-priority-first through the blended queue.
-- **Fights junk on every layer**: SEO-farm domain denylist, source-trust
-  ranking (own ATS > curated board > mass aggregator), dual-signal freshness
-  (claimed date × "do we still see it listed"), closure-banner liveness probes
-  in 10+ languages, semantic dedup of reposts, and LLM ghost-risk flagging.
-  What it does **not** do is hide the result: a posting whose date is old or
-  whose text reads like a ghost listing carries a *may not be fresh* or *ghost
-  risk* badge under its score and stays in the list. A hidden posting teaches
-  you nothing and a filter that is wrong is invisible; a labelled one lets you
-  decide in a second and shows you when the label is wrong.
-- **Tracks your pipeline** on separate pages: a discovery-only radar with
-  one-click dismiss-with-reason (the reasons feed back into scorer tuning), an
-  applications page with follow-up nudges and ghosted detection, and a
-  dismissed page that doubles as undo.
+- **It reads the employer's own board, not a reseller's copy.** 53,315 live
+  company boards, discovered and probe-validated automatically across 22 ATS
+  platforms — plus 103 aggregator sources for reach.
+- **Nothing is ever deleted.** A posting the keyword gates reject is stored and
+  flagged, so fixing the scorer is a re-score rather than a re-crawl, and *"what
+  did my filter wrongly kill"* is a query.
+  ([ADR-1](docs/ARCHITECTURE.md#adr-1--store-everything-flag-judgment-store-all))
+- **Risks are labelled, never hidden.** An old date or a ghost-sounding posting
+  gets a badge under its score and stays in the list. A hidden posting teaches
+  you nothing, and a filter that is wrong is invisible.
+  ([ADR-9](docs/ARCHITECTURE.md#adr-9--disclose-the-risk-do-not-hide-the-posting) ·
+  [ghost risk](CONTEXT.md#judgment))
+- **Visa answers come from governments, not vibes.** The full public sponsor
+  registers of the Netherlands, the UK, Denmark and Ireland — 146,746 companies —
+  are matched by name, so a licensed employer ranks first and says so.
+  ([visa tier](CONTEXT.md#visa))
+- **Every ranking layer was measured, not guessed.** The embedding model and the
+  40/60 keyword-embedding blend were chosen by a bake-off against frozen
+  queries; the blend beats either signal alone.
+  ([ADR-2](docs/ARCHITECTURE.md#adr-2--embedding-bake-off-with-pre-frozen-queries) ·
+  [ADR-3](docs/ARCHITECTURE.md#adr-3--blend-ranks-not-scores--weight-chosen-by-sweep))
+- **One strong local judge, not a cheap triage tier.** A cheap first pass
+  measured 29% optimistic, so a single 27B model does the judging.
+  ([ADR-4](docs/ARCHITECTURE.md#adr-4--one-strong-local-judge-over-a-cheap-triage-cascade))
+- **It is not built around one person.** Tracks, seniority appetite, languages
+  and regions all live in a profile generated from your CV — a junior data
+  analyst and a staff game developer run the same code.
+  ([ADR-6](docs/ARCHITECTURE.md#adr-6--persona-independence-detection-is-universal-judgment-is-profile))
+- **Saying no is training data.** Dismissals are recorded with a reason, and
+  those reasons are the most useful labels the system has.
+  ([ADR-5](docs/ARCHITECTURE.md#adr-5--dismissal-reasons-as-labeled-training-data))
+
+<details>
+<summary><b>The 22 ATS platforms and the 103 other sources</b></summary>
+
+**ATS platforms in the discovery registry** — Ashby, BambooHR, BeeSite, Breezy,
+Comeet, Cornerstone, Eightfold, Greenhouse, Jibe/iCIMS, Jobvite, Join, Lever,
+Oracle Cloud Recruiting, Personio, Pinpoint, Recruitee, Rippling,
+SmartRecruiters, Softgarden, Teamtailor, Workable, Workday. Six more can be
+fetched but are not yet discovered at scale (Avature, Gem, Getro, Phenom,
+Radancy, SuccessFactors), for 28 in total. Every registry entry documents its
+live-verified quirks: case-sensitive APIs, regional namespaces, POST-only
+probes, redirect traps, locale-gated results.
+
+Boards are found four ways — ATS links mined out of aggregator postings, bulk
+Common Crawl and Wayback CDX sweeps, public company datasets, and guessing
+tokens from company names — then **probe-validated live** against the
+platform's own API before ingest trusts them.
+
+**Aggregators and feeds** — national employment agencies (Germany, Sweden,
+Denmark, Switzerland, Flanders, EURES), tech boards with structured visa flags
+(GermanTechJobs, SwissDevJobs), country boards (Poland, Finland, Portugal,
+Spain, France, Denmark), remote boards, HN "who is hiring", and a 66-feed
+curated RSS layer behind one generic parser.
+
+</details>
 
 ## How it works
 
-```
-                    DISCOVERY                                     INGEST
-Common Crawl / Wayback ─▶ crawl ─┐                 curated companies ──┐
-aggregator job URLs ────▶ harvest ├▶ AtsBoard ─▶ validate ─▶ 50k boards ├─▶ fetch (parallel,
-public datasets ────────▶ seed ───┘ (candidates)  (probe APIs)          │    timeout-guarded)
-company-name guesses ───▶ probe ──┘                    ~70 aggregators ─┘        │
-                                                                                ▼
-                                       keyword gates ─▶ store ALL (disqualified flagged)
-                                                                                │
-                          embedding (local) ──▶ 40/60 blended queue, visa tier first
-                                                                                ▼
-                                                     27B LLM fit judge (local Ollama)
-                                                                                ▼
-                                                dashboard (ranked, risks labelled)
+```mermaid
+%%{init:{"theme":"base","themeVariables":{
+"primaryColor":"#11151d","primaryTextColor":"#e8ecf1","primaryBorderColor":"#2e3846",
+"lineColor":"#3ec5b7","secondaryColor":"#11151d","tertiaryColor":"#0b0e14",
+"clusterBkg":"#0b0e14","clusterBorder":"#222a36","edgeLabelBackground":"#0b0e14",
+"titleColor":"#8a94a3"
+},"flowchart":{"wrappingWidth":300,"curve":"basis"}}}%%
+flowchart TD
+  DISC["<b>Discovery</b><br/>Common Crawl · Wayback CDX · ATS links inside<br/>aggregator postings · datasets · name guesses"]
+  DISC -- "probe the platform's own API" --> BOARDS[("53,315 live company boards")]
+
+  CUR["48 curated companies"] --> FETCH
+  BOARDS --> FETCH
+  AGG["103 aggregators<br/>66 of them RSS feeds"] --> FETCH
+
+  FETCH["<b>Fetch</b><br/>parallel, capped per host"] --> GATE{"keyword gates"}
+  GATE -- "rejected" --> FLAG["stored, flagged"]
+  GATE -- "passes" --> KEEP["stored"]
+  FLAG --> POOL
+  KEEP --> POOL
+
+  POOL[("<b>The pool</b> · 526k postings<br/>nothing is ever deleted")]
+  POOL --> EMB["embed · 0.6B, local"]
+  EMB --> Q["queue · 40/60 keyword+embedding blend<br/>visa-marked postings first"]
+  Q --> JUDGE["<b>27B judge</b> · local<br/>fit, verdict, gaps, ghost risk"]
+  JUDGE --> RADAR["<b>Radar</b><br/>ranked, and risks labelled rather than hidden"]
+
+  classDef key fill:#0e2b27,stroke:#3ec5b7,stroke-width:2px,color:#e8ecf1
+  classDef quiet fill:#11151d,stroke:#3a4454,color:#8a94a3
+  classDef gate fill:#1c1a12,stroke:#e5b84b,color:#e8ecf1
+  class BOARDS,POOL,RADAR key
+  class FLAG quiet
+  class GATE gate
 ```
 
-Job descriptions are treated as untrusted input (prompt-injection guarded, and
-verified against a live injection found in the pool). They are also **parsed
-into sections** — requirements, responsibilities, benefits, EEO boilerplate —
-so each consumer gets the parts it needs within its own budget: the fit judge
-sees requirements whole, the embedding sees what the job *is* rather than the
-company's history. A
-cloud multi-provider chain (Anthropic → Groq → Gemini …) exists behind the
-same interface and can replace the local model with one env var.
+Job descriptions are treated as untrusted input — prompt-injection guarded, and
+verified against a live injection found in the pool. They are also **parsed into
+sections** (requirements, responsibilities, benefits, boilerplate) so each
+consumer gets the parts it needs within its own budget: the judge sees
+requirements whole, the embedding sees what the job *is* rather than the
+company's history
+([ADR-7](docs/ARCHITECTURE.md#adr-7--a-posting-is-sections-not-a-prefix) ·
+[view](CONTEXT.md#the-text-of-a-posting)).
+
+A cloud multi-provider chain (Anthropic → Groq → Gemini …) sits behind the same
+interface and replaces the local model with one environment variable.
 
 ## Setup
 
-Requires Node.js 20+. For local LLM scoring: [Ollama](https://ollama.com) with
-a model you can run (fit judging defaults to cloud keys if you set them instead).
+Requires **Node.js 20+**. For local scoring, [Ollama](https://ollama.com) with a
+model you can run — or set any cloud provider key instead.
 
 ```bash
 npm install
 
-# 1. Keys (optional — most sources are keyless). Any LLM provider key OR a
-#    local Ollama model enables fit scoring + cover letters.
-cp .env.example .env         # then edit
+# 1. Keys — optional. Most sources are keyless; any LLM key OR a local
+#    Ollama model is what turns on fit scoring and cover letters.
+cp .env.example .env
 
-# 2. Your profile — name, location. Kept private (gitignored).
+# 2. Who you are. Kept private, gitignored.
 cp config/user.example.ts config/user.ts
 
-# 3. Your CV — hand it your resume and the radar aims itself:
-npm run cv:import -- "path/to/Resume.pdf"   # .pdf, .txt, or .md
-npm run profile:generate   # CV -> tracks, seniority bands, languages, search queries
+# 3. Your CV — hand it your resume and the radar aims itself.
+npm run cv:import -- "path/to/Resume.pdf"    # .pdf, .txt or .md
+npm run profile:generate                     # CV -> tracks, seniority, languages
 
 # 4. Database (local SQLite)
-npm run db:deploy          # and again after every `git pull` — see below
+npm run db:deploy        # and again after every `git pull`
 
-# 5. (recommended) Fill the company pool from the web archives (~15 min):
+# 5. Recommended — fill the company pool from the web archives (~15 min)
 npm run discovery:crawl
 npm run discovery:validate -- 5000
 
-# 6. Run
-npm run ingest    # fetch + score into the DB (also discovers new boards)
-npm run dev       # dashboard at http://localhost:3000
+# 6. Run it
+npm run ingest           # fetch + score into the database
+npm run dev              # the radar at http://localhost:3000
 
-# 7. (optional) Keep the pool judged in the background:
-npm run worker    # embeds and judges continuously; Ctrl-C whenever
+# 7. Optional — keep the pool judged in the background
+npm run worker           # Ctrl-C whenever; it resumes from the database
 ```
+
+Everything else is on the **profile page** at `/profile`: your tracks and their
+keywords, seniority appetite, which model judges, and what each change costs —
+it tells you how many postings a change just made stale, and offers to repair
+them.
 
 ### The worker
 
-`npm run ingest` fills the pool in minutes; judging it takes far longer, because
-a 27B model reads about one posting a minute. So the worker runs between
+`npm run ingest` fills the pool in minutes. Judging it takes far longer, because
+a 27B model reads about one posting a minute — so the worker runs between
 ingests and works the queue down.
 
-It processes the pool in **bands** (score ≥ 80 first, then ≥ 70, …) and inside
-a band in **chunks of ~1,000**: embed a chunk, judge it, embed the next. A band
-is not finished before the next one starts on its best postings, so the first
-hour produces the postings you would actually have read first rather than a
-complete pass over a band you may never reach the end of. Visa-marked postings
-form a priority lane above all of it.
+```mermaid
+%%{init:{"theme":"base","themeVariables":{
+"primaryColor":"#11151d","primaryTextColor":"#e8ecf1","primaryBorderColor":"#2e3846",
+"lineColor":"#3ec5b7","secondaryColor":"#11151d","tertiaryColor":"#0b0e14",
+"clusterBkg":"#0b0e14","clusterBorder":"#222a36","edgeLabelBackground":"#0b0e14",
+"titleColor":"#8a94a3"
+},"flowchart":{"wrappingWidth":300,"curve":"basis"}}}%%
+flowchart TD
+  L{"which lane next?"}
+  L -- "always first" --> V["<b>visa lane</b><br/>visa-marked postings, at any score"]
+  L -- "then the best band<br/>80s, then 70s, then 60s" --> C["<b>one chunk</b> · about 1,000 postings<br/>never splitting a single score"]
+  V --> G
+  C --> G
+  G["take the GPU for the whole run"] --> E["embedder · 0.6 GB"]
+  E --> JU["judge · 17.7 GB"]
+  JU --> R["release, and pick again"]
+  R --> L
 
-One model fits in a consumer GPU at a time — the judge is 17.7 GB, the embedder
-0.6 GB — so a **file lock with a heartbeat** hands the GPU to one phase at a
-time instead of letting the two swap models every few seconds. If you start an
-ingest or a manual script while the worker holds the GPU, it will say so and
-wait rather than thrash. The worker is safe to kill at any point: every lane
-resumes from what the database already has.
+  classDef key fill:#0e2b27,stroke:#3ec5b7,stroke-width:2px,color:#e8ecf1
+  classDef gate fill:#1c1a12,stroke:#e5b84b,color:#e8ecf1
+  class V key
+  class G gate
+```
+
+A band never finishes before the next one starts on its best postings, so the
+first hour returns the postings you would actually have read first rather than a
+complete pass over a band you may never reach the end of. One model fits in a
+consumer GPU at a time, so a file lock with a heartbeat hands the card to one
+phase at a time instead of letting two processes swap 17.7 GB of weights every
+few seconds. Kill it whenever — every lane resumes from what the database
+already has.
+([ADR-10](docs/ARCHITECTURE.md#adr-10--one-gpu-one-holder-chunked-bands) ·
+[ADR-11](docs/ARCHITECTURE.md#adr-11--the-gpu-is-held-by-a-run-not-by-a-process) ·
+[band, chunk, lane](CONTEXT.md#keeping-the-pool-judged))
 
 ### Upgrading
 
 ```bash
 git pull
 npm install
-npm run db:deploy   # apply any schema changes to your existing database
+npm run db:deploy        # apply schema changes to your existing database
 ```
 
-Your database is the part of this you cannot get back. It holds every
-judgment the model has made — each one a minute of GPU that re-running
-nothing will reproduce — plus your application history and dismissals. So
-schema changes ship as **migrations**, which are ordered, recorded, and
-applied without touching your rows.
+Your database is the part you cannot get back: every judgment in it is a minute
+of GPU that re-running nothing reproduces, plus your application history and
+your dismissals. So schema changes ship as **migrations** — ordered, recorded,
+and applied without touching your rows.
 
-If you used this project before migrations existed, run these two once:
+<details>
+<summary>If you used this before migrations existed, run these two once</summary>
 
 ```bash
-npx prisma db push                            # bring your database to the current shape
+npx prisma db push                            # bring the database to the current shape
 npx prisma migrate resolve --applied 0_init   # record that shape as the baseline
 ```
 
-Both are needed, and in that order. `migrate resolve` only *records* a
-migration as applied — it does not run it — so on its own it would tell a
-database created by the old `db push` that it already has columns it has
-never had, and every query touching them would fail. The push adds them
-first; the resolve then makes every later change go through migrations.
-Everything after that is `npm run db:deploy`.
+Both, in that order. `migrate resolve` only *records* a migration as applied —
+it does not run it — so on its own it would tell a database created by the old
+`db push` that it already has columns it has never had, and every query touching
+them would fail. The push adds them first; the resolve then routes every later
+change through migrations. Everything after that is `npm run db:deploy`.
+
+</details>
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `npm run ingest` | Parallel fetch from every source, score, dedupe, store-all; harvests new ATS boards from aggregator URLs; writes the dashboard stats snapshot. |
-| `npm run sweep` | Full board-pool sweep (all ~50k boards, sliced, RAM-aware, resumable). |
-| `npm run discovery:crawl` / `discovery:validate` / `discovery:audit` | Bulk board discovery, live probe validation, extractor corpus audit. |
-| `npm run cv:import` / `profile:generate` | Resume → CV context → generated scoring profile (reviewed JSON, never regenerates silently). |
-| `npm run rescore` | Version-aware keyword re-score: only rows not yet scored by the current `SCORER_VERSION`. |
-| `npm run fit:fill` | The LLM fit worker: blended-priority queue (visa tier first), self-resuming, quota-riding. |
-| `npm run embed:fill` | Local embedding backfill for the blended queue. |
-| `npm run desc:fill` | Description backfill for platforms whose list APIs carry no posting body. |
-| `npm run sponsors` | Refresh the public visa-sponsor registers (NL/UK/DK/IE). |
+| `npm run ingest` | Fetch every source in parallel, score, dedupe, store all of it; harvest new ATS boards from aggregator URLs. `--only <source\|platform>` targets a few; `--boards N` sizes the board slice. |
+| `npm run sweep` | Full board-pool sweep — every due board, sliced, RAM-aware, resumable. |
+| `npm run worker` | The background worker: holds the GPU, runs embed → judge in chunks, visa-marked postings first. |
+| `npm run discovery:crawl` · `discovery:validate` · `discovery:audit` | Bulk board discovery, live probe validation, extractor corpus audit. |
+| `npm run cv:import` · `profile:generate` | Resume → CV context → generated scoring profile (reviewed JSON, never regenerated silently). |
+| `npm run rescore` | Version-aware re-score: only rows not yet scored by the current `SCORER_VERSION`. |
+| `npm run fit:fill` · `embed:fill` · `desc:fill` · `facts:fill` | The backfills — judging, embeddings, missing descriptions, extracted facts. |
+| `npm run sponsors` | Refresh the public visa-sponsor registers (NL / UK / DK / IE). |
 | `npm run doctor` | Health-check every source connector. |
-| `npm run worker` | The continuous background worker: holds the GPU, runs the embed → judge lanes in chunks, visa-marked postings first. |
-| `npm test` | 300 unit tests grounded in real corpus data. |
+| `npm test` | 522 unit tests, grounded in real corpus data. |
 
 ## Configuring for your search
 
-The pipeline is **persona-independent by design**: every personal preference —
-tracks, seniority appetite (globally *and* per track), working languages, role
-exclusions, regions — lives in your generated profile, not in code. A junior
-data analyst and a staff game developer run the same code with different
-profiles. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#persona-independence).
+Every personal preference lives in your profile, not in code — edit it at
+`/profile` in the app, or by hand:
 
-- **`config/user.ts`** — identity + optional overrides (tracks, regions).
-- **`config/profile.generated.json`** — the CV-generated profile (gitignored);
-  review and hand-edit freely, it never regenerates silently.
-- **`src/lib/sources/companies.ts`** — hand-picked companies to always watch.
-- **`src/lib/discovery/platforms.ts`** — the ATS registry; adding a platform
-  is data, not code.
+- **`config/settings.json`** — what the profile page writes. Hand-editable.
+- **`config/profile.generated.json`** — the CV-generated profile (gitignored).
+  Never regenerates silently.
+- **`config/user.ts`** — identity and developer overrides.
+- **`src/lib/sources/companies.ts`** — companies to always watch.
+- **`src/lib/discovery/platforms.ts`** — the ATS registry. Adding a platform is
+  data, not code.
 
 ## Tech
 
-Next.js (App Router) · Prisma + SQLite (layered schema: thin hot rows +
-append-only history tables — main list query measured at 4 ms over 525k rows) ·
-TypeScript · local LLM via Ollama (27B judge, 0.6B embeddings) with a
-multi-provider cloud fallback · Common Crawl / Wayback CDX · 300 unit tests.
+Next.js (App Router) · Prisma + SQLite · TypeScript · Ollama for the local
+models, with a multi-provider cloud fallback · Common Crawl / Wayback CDX.
+
+The schema is deliberately layered — a thin hot row, with text, vectors and
+append-only history split off it. The main list query measures **4 ms** over
+525k rows; before the split the same query paged through gigabytes. See
+[the layered data model](docs/ARCHITECTURE.md#the-layered-data-model).
 
 ## Roadmap
 
-- Rescue lane: mine the disqualified pool by embedding similarity to catch
-  gate mistakes automatically.
-- Scheduled ingest + email digest.
-- Manual LinkedIn trigger button (guest API, deliberately not automated).
-- Optional Postgres/pgvector + deploy.
+- Rescue lane: mine the disqualified pool by embedding similarity, to catch gate
+  mistakes automatically.
+- Scheduled ingest and an email digest.
+- A manual LinkedIn trigger (guest API — deliberately not automated).
+- Optional Postgres/pgvector and a deployed build.
 
 ## License
 
@@ -232,5 +288,8 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Data credits
 
-- Company seed list from [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs) (CC BY-NC-SA 4.0) — used as a non-commercial discovery seed; boards are re-verified live before ingest.
-- Company/ATS map from [open-jobs-data](https://github.com/ConorsCode/open-jobs-data) (MIT), used as discovery candidates.
+- Company seed list from [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs)
+  (CC BY-NC-SA 4.0), used as a non-commercial discovery seed; boards are
+  re-verified live before ingest.
+- Company/ATS map from [open-jobs-data](https://github.com/ConorsCode/open-jobs-data)
+  (MIT), used as discovery candidates.

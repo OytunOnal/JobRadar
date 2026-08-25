@@ -286,10 +286,32 @@ append-only history split off it. The main list query measures **4 ms** over
 
 MIT — see [LICENSE](./LICENSE).
 
-## Data credits
+## Credits
 
-- Company seed list from [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs)
-  (CC BY-NC-SA 4.0), used as a non-commercial discovery seed; boards are
-  re-verified live before ingest.
-- Company/ATS map from [open-jobs-data](https://github.com/ConorsCode/open-jobs-data)
-  (MIT), used as discovery candidates.
+**Data used.** Every one of these is a starting point, not a source of truth —
+each board is re-probed live against its own platform before ingest trusts it.
+
+- [awesome-sustainability-jobs](https://github.com/pogopaule/awesome-sustainability-jobs)
+  (CC BY-NC-SA 4.0) — company seed list, used as a non-commercial discovery seed.
+- [open-jobs-data](https://github.com/ConorsCode/open-jobs-data) (MIT) —
+  company-to-ATS map, used as discovery candidates.
+- [awesome-job-boards](https://github.com/emredurukn/awesome-job-boards) (CC0) —
+  the survey that turned up most of the keyless JSON-API boards and a good part
+  of the RSS layer.
+
+**Prior art I read.** What these gave me were API contracts, lessons and
+mistakes already paid for. The specific debt is recorded at the line it applies
+to, not only here.
+
+- [career-ops](https://github.com/santifer/career-ops) — the largest debt by
+  far. Its URL-key handling is why tracking params are stripped by denylist
+  rather than allowlist, its liveness-core shaped the closure probing, and five
+  connectors (The Hub, VDAB, Welcome to the Jungle, the Polish boards, the niche
+  boards) were built against contracts it had already worked out.
+- [job-hunter](https://github.com/girshovich/job-hunter) — the Common Crawl CDX
+  approach to finding ATS boards, and a slug-rejection rule I deliberately
+  diverged from (`tests/discovery.test.ts` says why).
+- [ai-job-search](https://github.com/MadsLorentzen/ai-job-search) — organising
+  search queries by function rather than by title.
+- [job-ops](https://github.com/DaKheera47/job-ops) — go at the API first and
+  treat scraping as the fallback, which is how the sponsor registers are read.

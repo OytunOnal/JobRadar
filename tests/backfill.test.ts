@@ -22,6 +22,31 @@ test("a drained queue is the good ending, and it is recorded", async () => {
   assert.equal(r.failed, 0);
 });
 
+test("bookkeeping that fails does not unfinish a finished run", async () => {
+  // CI stayed red for six pushes on this. The last thing finish() does is
+  // close the database connection, and on a machine with no .env that threw
+  // `Environment variable not found: DATABASE_URL` — so a run that had done
+  // its work reported an error instead of a result. Locally invisible: .env
+  // is not committed, so only CI ever ran without one.
+  //
+  // The receipt write next to it already had this rule written down. This is
+  // the same rule, one line later.
+  const { prisma } = await import("../src/lib/db");
+  const real = prisma.$disconnect.bind(prisma);
+  prisma.$disconnect = async () => { throw new Error("no DATABASE_URL"); };
+  try {
+    const r = await backfill("t-disconnect", quiet, async (run) => {
+      run.did(4);
+      run.drained();
+    });
+    assert.equal(r.stopped, "drained");
+    assert.equal(r.done, 4, "the work is what happened; the disconnect is not");
+    assert.equal(readRun("t-disconnect")?.done, 4, "and the receipt still landed");
+  } finally {
+    prisma.$disconnect = real;
+  }
+});
+
 test("the budget bounds the run", async () => {
   const r = await backfill("t-budget", { budget: 5 }, async (run) => {
     while (run.round()) run.did();

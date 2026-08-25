@@ -186,7 +186,12 @@ export async function backfill(
       // bookkeeping fail the job.
     }
     log(`=== Bitti: ${done} işlendi${skipped ? `, ${skipped} atlandı` : ""}${failed ? `, ${failed} hata` : ""} (${stopped}) ===`);
-    await prisma.$disconnect();
+    // Same rule as the receipt above, and it took CI six red runs to say so:
+    // this line threw `Environment variable not found: DATABASE_URL` on a
+    // machine with no .env, and a run that had done its work reported a test
+    // failure instead of a result. Closing a connection is the last thing a
+    // finished run does; it cannot be allowed to unfinish it.
+    await prisma.$disconnect().catch(() => {});
     return result;
   };
 

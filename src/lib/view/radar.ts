@@ -107,6 +107,22 @@ export function radarFacetWhere(f: RadarFilters, poolNewest?: Date | null) {
   return andWhere(base, ...parts);
 }
 
+// The two buckets that are not countries, as predicates — spelled once. The
+// facet counters and the chip arms must mean the same thing by "remote" and
+// "unknown", and they used to say it independently in two files.
+export const REMOTE_BUCKET = { country: null, workMode: "remote" } as const;
+export const UNKNOWN_BUCKET = { country: null, workMode: { not: "remote" } } as const;
+
+// Which of the URL's countries this render actually honors: a chip on offer,
+// or a bucket. Exported because the PAGE needs the same answer — the chip
+// active-state and the query must agree, and while this rule lived only
+// inside radarWhere the page re-derived it with a hardcoded bucket list.
+export function selectedCountries(f: RadarFilters, top: readonly string[]): string[] {
+  return f.countries.filter(
+    (c) => top.includes(c) || (COUNTRY_BUCKETS as readonly string[]).includes(c),
+  );
+}
+
 // The final query, once the facet counts have told us which country chips exist.
 //
 // `top` is the chips actually offered; a country in the URL that is not among
@@ -116,17 +132,15 @@ export function radarWhere(
   f: RadarFilters,
   ctx: { poolNewest?: Date | null; top: readonly string[]; other: readonly string[] },
 ) {
-  const selected = f.countries.filter(
-    (c) => ctx.top.includes(c) || (COUNTRY_BUCKETS as readonly string[]).includes(c),
-  );
+  const selected = selectedCountries(f, ctx.top);
   if (selected.length === 0) return radarFacetWhere(f, ctx.poolNewest);
 
   const or: Array<Record<string, unknown>> = [];
   const codes = selected.filter((c) => !(COUNTRY_BUCKETS as readonly string[]).includes(c));
   if (codes.length) or.push({ country: { in: codes } });
   if (selected.includes("other")) or.push({ country: { in: [...ctx.other] } });
-  if (selected.includes("remote")) or.push({ country: null, workMode: "remote" });
-  if (selected.includes("unknown")) or.push({ country: null, workMode: { not: "remote" } });
+  if (selected.includes("remote")) or.push({ ...REMOTE_BUCKET });
+  if (selected.includes("unknown")) or.push({ ...UNKNOWN_BUCKET });
 
   return andWhere(radarFacetWhere(f, ctx.poolNewest), { OR: or });
 }

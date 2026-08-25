@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { testDb } from "./helpers/testdb";
 import {
   radarFilters, radarWhere, radarFacetWhere, radarPaging, countryChips,
   allowedCountries, PAGE_SIZE,
@@ -105,9 +102,7 @@ test("selecting a region narrows the countries a chip can come from", () => {
 
 // ── The half that asks the database ───────────────────────────────────────
 
-const dir = mkdtempSync(join(tmpdir(), "jr-radar-"));
-process.env.DATABASE_URL = `file:${join(dir, "test.db").replace(/\\/g, "/")}`;
-execSync("npx prisma db push --skip-generate --accept-data-loss", { env: process.env, stdio: "pipe" });
+const { teardown } = testDb("jr-radarq-");
 const { prisma } = await import("../src/lib/db");
 
 let seq = 0;
@@ -186,6 +181,5 @@ test("filters actually filter", async () => {
 });
 
 test.after(async () => {
-  await prisma.$disconnect();
-  rmSync(dir, { recursive: true, force: true });
+  await teardown(prisma);
 });

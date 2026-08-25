@@ -6,17 +6,13 @@ import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
 import { PURSUED_STATUSES } from "@/lib/queue/pool";
 import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/view/labels";
-import {
-  allowedCountries, countryChips, radarFacetWhere, radarFilters, radarPaging,
-  radarWhere, PAGE_SIZE, RADAR_ORDER, VERDICTS, VISA_TIERS, VISA_TIER_LABELS, WORK_MODES,
-} from "@/lib/view/radar";
+import { radarFilters, VERDICTS, VISA_TIERS, VISA_TIER_LABELS, WORK_MODES } from "@/lib/view/radar";
 
 export const dynamic = "force-dynamic";
 
 // Track chips come from the user's configured tracks (config/user.ts override,
 // generated profile, or the template defaults). Multi-select; "all" clears.
 const TRACK_KEYS = profile.tracks.map((t) => t.key);
-// The shortlist is a glance, not a list: bound it so it can never become one.
 
 
 // Labels carry MEANING (`tone`), not placement. The page decides what a risk
@@ -66,9 +62,9 @@ export default async function Page({
   const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, labelCtx } =
     await readRadar(f);
   const { top: topCountries, otherCount, counts, remoteCount, unknownCount } = chips;
-  const countrySet = new Set(
-    f.countries.filter((c) => topCountries.includes(c) || ["other", "remote", "unknown"].includes(c)),
-  );
+  // The selection the query was actually built from — not re-derived here, so
+  // the chip active-state cannot diverge from the list it claims to filter.
+  const countrySet = new Set(chips.selected);
   const country = [...countrySet].sort().join(",");
   const sc = stats.byStatus;
   const vc = stats.byVerdict;
@@ -316,7 +312,7 @@ export default async function Page({
                 <span className="src">{j.source}</span>
                 {" · "}
                 <span className="src" title={j.postedAt ? "posted" : "first seen"}>
-                  {ageLabel(j.postedAt ?? j.firstSeenAt)}
+                  {ageLabel(j.postedAt ?? j.firstSeenAt, labelCtx.now)}
                 </span>
               </div>
               {j.fitComment && <div className="fitcomment">{j.fitComment}</div>}

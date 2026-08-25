@@ -1,9 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { testDb } from "./helpers/testdb";
 
 // THE ONLY TEST IN THIS REPO THAT RUNS A WRITE PATH.
 //
@@ -18,14 +15,7 @@ import { join } from "node:path";
 // re-sighting of a posting whose body a detail fetch had enriched. That second
 // case is the one that has broken repeatedly.
 
-const dir = mkdtempSync(join(tmpdir(), "jr-store-"));
-const dbPath = join(dir, "test.db").replace(/\\/g, "/");
-process.env.DATABASE_URL = `file:${dbPath}`;
-
-execSync("npx prisma db push --skip-generate --accept-data-loss", {
-  env: process.env,
-  stdio: "pipe",
-});
+const { teardown } = testDb("jr-store-");
 
 // Dynamic, so the env above is set before db.ts constructs its client.
 const { prisma } = await import("../src/lib/db");
@@ -165,6 +155,5 @@ test("an llm seniority verdict survives a re-sighting", async () => {
 });
 
 test.after(async () => {
-  await prisma.$disconnect();
-  rmSync(dir, { recursive: true, force: true });
+  await teardown(prisma);
 });

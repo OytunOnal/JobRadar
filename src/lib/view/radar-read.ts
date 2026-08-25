@@ -2,7 +2,8 @@ import { prisma } from "../db";
 import { liveWhere, pursuedWhere } from "../queue/pool";
 import {
   allowedCountries, countryChips, radarFacetWhere, radarPaging, radarWhere,
-  PAGE_SIZE, RADAR_ORDER, type RadarFilters,
+  selectedCountries, PAGE_SIZE, RADAR_ORDER, REMOTE_BUCKET, UNKNOWN_BUCKET,
+  type RadarFilters,
 } from "./radar";
 
 // THE RADAR READING: everything one render of the radar needs, read once.
@@ -15,53 +16,24 @@ import {
 // pool.ts owns the predicates, pursuit.ts owns the effects; radar.ts owns the
 // question, this owns the round trips.
 //
-// THREE WAVES, AND THE ORDER IS NOT A PREFERENCE. The pool clock comes first
-// because the delisted guard needs it; the facet counts come second because
-// the country chips decide which country selections are even valid; only then
-// can the final where be built and everything else fetched in one parallel
-// wave. A caller cannot be trusted to remember that — one already forgot: the
-// starred strip and the applied set were once awaited on their own, and a
-// page load paid five sequential round trips where three suffice.
+// THREE DEPENDENT WAVES AND ONE INDEPENDENT STREAM. The pool clock comes
+// first because the delisted guard needs it; the facet counts second because
+// the chips decide which country selections are even valid; the page and its
+// count third, needing the final where. The stat snapshot, the starred strip
+// and the applied set depend on none of that, so they are STARTED before
+// anything is awaited and gathered at the end — serializing them behind the
+// waves was this module's own first mistake, made worse by a comment
+// declaring the order mandatory. The page had made the sibling mistake
+// before, awaiting them after everything else.
 
 // The starred strip is a shortlist, not a query result — bounded, because it
 // once had no `take` and a liberal star habit paid an unbounded read on every
 // page load.
 export const STARRED_MAX = 40;
 
-export type RadarReading = Awaited<ReturnType<typeof readRadar>>;
-
 export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
-  const now = opts.now ?? new Date();
-
-  // Wave 1 — the pool's own clock: how far the newest observation has
-  // advanced. Guards the delisted check against "we simply haven't ingested
-  // lately".
-  const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
-
-  // Wave 2 — the facet: counted against every filter EXCEPT the country
-  // selection, so the chips do not jump while the user is picking one.
-  const allowed = allowedCountries(f);
-  const facetWhere = radarFacetWhere(f, poolNewest);
-  const [countryCounts, remoteCount, unknownCount] = await Promise.all([
-    prisma.job.groupBy({ by: ["country"], _count: true, where: { AND: [facetWhere, { country: { in: allowed } }] } }),
-    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: "remote" }] } }),
-    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: { not: "remote" } }] } }),
-  ]);
-  const counts = new Map(countryCounts.map((c) => [c.country as string, c._count]));
-  const { top, other, otherCount } = countryChips(f, counts);
-  const where = radarWhere(f, { poolNewest, top, other });
-
-  // Wave 3 — everything else, in parallel.
-  const [jobs, filteredCount, snapshot, starred, appliedRows] = await Promise.all([
-    prisma.job.findMany({
-      where,
-      orderBy: [...RADAR_ORDER],
-      ...radarPaging(f),
-      // Only the tiny coverLetter field crosses the content split — one page
-      // of rows, usually null; descriptions stay out of the list path.
-      include: { content: { select: { coverLetter: true } } },
-    }),
-    prisma.job.count({ where }),
+  // The independent stream: nothing here needs the pool clock or the facet.
+  const independent = Promise.all([
     // The stat strip reads the ingest-end snapshot — one row instead of
     // group-by'ing half a million (measured cause of slow filter clicks).
     prisma.dashboardStatsSnapshot.findFirst({ orderBy: { at: "desc" } }),
@@ -76,16 +48,58 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
     prisma.job.findMany({ where: pursuedWhere(), select: { company: true }, distinct: ["company"] }),
   ]);
 
+  // Wave 1 — the pool's own clock: how far the newest observation has
+  // advanced. Guards the delisted check against "we simply haven't ingested
+  // lately".
+  const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
+
+  // Wave 2 — the facet: counted against every filter EXCEPT the country
+  // selection, so the chips do not jump while the user is picking one.
+  const allowed = allowedCountries(f);
+  const facetWhere = radarFacetWhere(f, poolNewest);
+  const [countryCounts, remoteCount, unknownCount] = await Promise.all([
+    prisma.job.groupBy({ by: ["country"], _count: true, where: { AND: [facetWhere, { country: { in: allowed } }] } }),
+    prisma.job.count({ where: { AND: [facetWhere, { ...REMOTE_BUCKET }] } }),
+    prisma.job.count({ where: { AND: [facetWhere, { ...UNKNOWN_BUCKET }] } }),
+  ]);
+  const counts = new Map(countryCounts.map((c) => [c.country as string, c._count]));
+  const { top, other, otherCount } = countryChips(f, counts);
+  const where = radarWhere(f, { poolNewest, top, other });
+
+  // Wave 3 — the page and its count, both needing the final where.
+  const [jobs, filteredCount] = await Promise.all([
+    prisma.job.findMany({
+      where,
+      orderBy: [...RADAR_ORDER],
+      ...radarPaging(f),
+      // Only the tiny coverLetter field crosses the content split — one page
+      // of rows, usually null; descriptions stay out of the list path.
+      include: { content: { select: { coverLetter: true } } },
+    }),
+    prisma.job.count({ where }),
+  ]);
+  const [snapshot, starred, appliedRows] = await independent;
+
   const stats = snapshot
     ? (JSON.parse(snapshot.stats) as { total: number; byStatus: Record<string, number>; byVerdict: Record<string, number> })
     : { total: 0, byStatus: {}, byVerdict: {} };
   const appliedCompanies = new Set(appliedRows.map((r) => r.company));
+  // The card clock is taken AFTER the reads, so freshness is judged against an
+  // instant no older than the data. Injectable for the tests, which need the
+  // response deterministic.
+  const now = opts.now ?? new Date();
 
   return {
     jobs,
     filteredCount,
     lastPage: Math.max(1, Math.ceil(filteredCount / PAGE_SIZE)),
-    chips: { top, other, otherCount, counts, remoteCount, unknownCount },
+    chips: {
+      top, other, otherCount, counts, remoteCount, unknownCount,
+      // Which of the URL's countries this render honors — the SAME answer the
+      // where was built from, so the chip active-state cannot diverge from
+      // the query. The page used to re-derive it with a hardcoded bucket list.
+      selected: selectedCountries(f, top),
+    },
     stats,
     starred,
     appliedCompanies,

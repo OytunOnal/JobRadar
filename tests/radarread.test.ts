@@ -1,9 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { testDb } from "./helpers/testdb";
+import { DELISTED_AFTER_DAYS } from "../src/lib/scoring/freshness";
 
 // THE RADAR READING, against a real database.
 //
@@ -14,13 +12,7 @@ import { join } from "node:path";
 // temp SQLite file, `prisma db push`, seeded rows — its own database, so a
 // running worker cannot contend with it and it cannot contend with the pool.
 
-const dir = mkdtempSync(join(tmpdir(), "jr-radar-"));
-process.env.DATABASE_URL = `file:${join(dir, "test.db").replace(/\\/g, "/")}`;
-
-execSync("npx prisma db push --skip-generate --accept-data-loss", {
-  env: process.env,
-  stdio: "pipe",
-});
+const { teardown } = testDb("jr-radar-");
 
 // Dynamic, so the env above is set before db.ts constructs its client.
 const { prisma } = await import("../src/lib/db");
@@ -58,13 +50,23 @@ await prisma.job.createMany({
     job({ country: null, workMode: "onsite" }),
     // Delisted: a direct source (":" in the name) that stopped listing it
     // while the pool moved on. An aggregator row of the same age STAYS — only
-    // a source that speaks for the employer can say a posting is gone.
-    job({ source: "gh:acme", country: "de", lastSeenAt: days(40) }),
-    job({ source: "eures", country: "de", lastSeenAt: days(40) }),
-    // The starred shortlist, and a company mid-application.
-    job({ status: "interested", country: "de", fitScore: 80 }),
+    // a source that speaks for the employer can say a posting is gone. The age
+    // is derived from the rule, not hardcoded: a hardcoded 40 kept passing —
+    // or failing, for an unrelated reason — whenever DELISTED_AFTER_DAYS moved.
+    job({ source: "gh:acme", country: "de", lastSeenAt: days(DELISTED_AFTER_DAYS + 5) }),
+    job({ source: "eures", country: "de", lastSeenAt: days(DELISTED_AFTER_DAYS + 5) }),
+    // A company mid-application.
     job({ status: "applied", company: "Applied GmbH", country: "de" }),
   ],
+});
+
+// One more starred row than the strip may show. The first version of this
+// suite asserted `STARRED_MAX > 0` — a compile-time constant, vacuous: delete
+// the `take` from the query (the exact regression the bound exists for) and
+// it still passed. A bound is only tested by exceeding it.
+await prisma.job.createMany({
+  data: Array.from({ length: STARRED_MAX + 1 }, () =>
+    job({ status: "interested", country: "de", fitScore: 80 })),
 });
 
 const none: Record<string, string | undefined> = {};
@@ -86,11 +88,13 @@ test("the chips do not jump while a country is being picked", async () => {
   const after = await readRadar(radarFilters({ country: "de" }, TRACKS), { now: NOW });
   // A count that changes as you click it is a count you cannot use: the facet
   // is computed against everything EXCEPT the country selection.
-  assert.deepEqual([...after.chips.counts.entries()], [...before.chips.counts.entries()]);
+  assert.deepEqual(Object.fromEntries(after.chips.counts), Object.fromEntries(before.chips.counts));
   assert.equal(after.chips.remoteCount, before.chips.remoteCount);
-  // But the list itself narrows.
+  // But the list itself narrows, and the render is told which selection the
+  // query was actually built from.
   assert.ok(after.filteredCount < before.filteredCount);
   assert.ok(after.jobs.every((j) => j.country === "de"));
+  assert.deepEqual(after.chips.selected, ["de"]);
 });
 
 test("a verdict filter narrows the list to the judged", async () => {
@@ -104,9 +108,8 @@ test("the starred strip ignores the filters entirely", async () => {
   // own list, not a discovery result.
   const r = await readRadar(radarFilters({ q: "zzz-no-such-posting" }, TRACKS), { now: NOW });
   assert.equal(r.filteredCount, 0);
-  assert.equal(r.starred.length, 1);
-  assert.equal(r.starred[0]?.status, "interested");
-  assert.ok(STARRED_MAX > 0, "and the strip is bounded, not unbounded");
+  assert.equal(r.starred.length, STARRED_MAX, "bounded: one more exists than is shown");
+  assert.ok(r.starred.every((j) => j.status === "interested"));
 });
 
 test("companies mid-application are named, for the badge and the one-click hide", async () => {
@@ -115,4 +118,8 @@ test("companies mid-application are named, for the badge and the one-click hide"
   assert.equal(r.labelCtx.appliedCompanies, r.appliedCompanies,
     "one set, shared with the label context — not two spellings of it");
   assert.deepEqual(r.labelCtx.now, NOW, "one clock for every card in the response");
+});
+
+test.after(async () => {
+  await teardown(prisma);
 });

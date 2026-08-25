@@ -92,6 +92,14 @@ The ranked reading surface for discoverable postings. Its defining rule is that
 it labels a posting's risks rather than hiding the posting.
 _Avoid_: dashboard, feed, board, results
 
+**Radar reading**:
+Everything one render of the radar needs, read once: the page of postings, the
+country chips and their counts, the stat strip, the starred shortlist, the
+companies mid-application, and the label context. The chips are counted
+against every filter except the country selection, so they do not jump while
+one is being picked; the shortlist ignores the filters entirely.
+_Avoid_: dashboard data, page props, view model
+
 ## Where postings come from
 
 **Source**:

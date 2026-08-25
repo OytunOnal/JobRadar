@@ -1,10 +1,10 @@
-import { prisma } from "@/lib/db";
 import { profile } from "@/lib/user/profile";
 import { ageLabel } from "@/lib/scoring/freshness";
 import { COUNTRY_NAMES, REGION_KEYS } from "@/lib/location/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
-import { liveWhere, pursuedWhere, PURSUED_STATUSES } from "@/lib/queue/pool";
+import { readRadar } from "@/lib/view/radar-read";
+import { PURSUED_STATUSES } from "@/lib/queue/pool";
 import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/view/labels";
 import {
   allowedCountries, countryChips, radarFacetWhere, radarFilters, radarPaging,
@@ -17,7 +17,6 @@ export const dynamic = "force-dynamic";
 // generated profile, or the template defaults). Multi-select; "all" clears.
 const TRACK_KEYS = profile.tracks.map((t) => t.key);
 // The shortlist is a glance, not a list: bound it so it can never become one.
-const STARRED_MAX = 40;
 
 
 // Labels carry MEANING (`tone`), not placement. The page decides what a risk
@@ -61,72 +60,19 @@ export default async function Page({
   const region = [...regionSet].sort().join(",");
   const visa = [...visaSet].sort().join(",");
 
-  // The pool's own clock: how far the newest observation has advanced. Guards
-  // the delisted check against "we simply haven't ingested lately".
-  const poolNewest = (await prisma.job.aggregate({ _max: { lastSeenAt: true } }))._max.lastSeenAt;
-
-  // Country chips cascade from the region selection: top 10 by count within the
-  // allowed set + "other" (the long tail) + "remote" (no location) + "unknown"
-  // (a location we could not place). Counted against every filter EXCEPT the
-  // country selection, so the chips do not jump while you are picking one.
-  const allowed = allowedCountries(f);
-  const facetWhere = radarFacetWhere(f, poolNewest);
-  const [countryCounts, remoteCount, unknownCount] = await Promise.all([
-    prisma.job.groupBy({ by: ["country"], _count: true, where: { AND: [facetWhere, { country: { in: allowed } }] } }),
-    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: "remote" }] } }),
-    prisma.job.count({ where: { AND: [facetWhere, { country: null, workMode: { not: "remote" } }] } }),
-  ]);
-  const counts = new Map(countryCounts.map((c) => [c.country as string, c._count]));
-  const { top: topCountries, other: otherCountries, otherCount } = countryChips(f, counts);
-
+  // The reading — nine queries in three waves — lives in view/radar-read.ts,
+  // where its invariants are tested against a real database. The page asks
+  // once and lays the answer out; it decides nothing and sequences nothing.
+  const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, labelCtx } =
+    await readRadar(f);
+  const { top: topCountries, otherCount, counts, remoteCount, unknownCount } = chips;
   const countrySet = new Set(
     f.countries.filter((c) => topCountries.includes(c) || ["other", "remote", "unknown"].includes(c)),
   );
   const country = [...countrySet].sort().join(",");
-  const where = radarWhere(f, { poolNewest, top: topCountries, other: otherCountries });
-
-  // One wave, not three. The starred strip and the applied-company set used to
-  // be awaited on their own after this block, so a page load waited on five
-  // round trips in sequence where three would do.
-  const [jobs, filteredCount, snapshot, starred, appliedRows] = await Promise.all([
-    prisma.job.findMany({
-      where,
-      orderBy: [...RADAR_ORDER],
-      ...radarPaging(f),
-      // Only the tiny coverLetter field crosses the content split — 30 rows,
-      // usually null; descriptions stay out of the list path entirely.
-      include: { content: { select: { coverLetter: true } } },
-    }),
-    prisma.job.count({ where }),
-    // The stat strip reads the ingest-end snapshot — one row instead of
-    // group-by'ing half a million (measured cause of slow filter clicks).
-    prisma.dashboardStatsSnapshot.findFirst({ orderBy: { at: "desc" } }),
-    // Starred ("interested") postings — a compact always-visible shortlist
-    // above the discovery list, unaffected by the filters. Bounded: this had no
-    // `take`, so a user who starred liberally would have paid for an unbounded
-    // read on every page load.
-    prisma.job.findMany({
-      where: { ...liveWhere(), status: "interested" },
-      orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
-      take: STARRED_MAX,
-    }),
-    // Companies with an application in progress — their remaining postings get
-    // a badge and a one-click "hide the rest" (born from 14 manual dismissals).
-    prisma.job.findMany({ where: pursuedWhere(), select: { company: true }, distinct: ["company"] }),
-  ]);
-  const snap = snapshot
-    ? (JSON.parse(snapshot.stats) as { total: number; byStatus: Record<string, number>; byVerdict: Record<string, number> })
-    : { total: 0, byStatus: {}, byVerdict: {} };
-  const appliedCompanies = new Set(appliedRows.map((r) => r.company));
-  // One clock and one pool reading for every card on the page, so two postings
-  // rendered in the same response cannot be judged fresh against different
-  // instants.
-  const labelCtx = { now: new Date(), poolNewest: poolNewest ?? undefined, appliedCompanies };
-
-  const sc = snap.byStatus;
-  const vc = snap.byVerdict;
-  const total = snap.total;
-  const lastPage = Math.max(1, Math.ceil(filteredCount / PAGE_SIZE));
+  const sc = stats.byStatus;
+  const vc = stats.byVerdict;
+  const total = stats.total;
 
   // Build hrefs that preserve every other filter (page resets on filter change).
   const href = (over: Partial<Record<"track" | "verdict" | "loc" | "q" | "page" | "region" | "country" | "visa", string>>) => {

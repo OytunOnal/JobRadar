@@ -120,7 +120,7 @@ export function contentKey(job: RawJob): string {
 // presence of newlines, raw markup has plenty, so unconverted markup can WIN
 // against clean text on a re-sighting — and TEXT_VERSION is stamped either
 // way, so the repair queue sees it as current.
-function readable(job: RawJob): { description: string; unconverted: boolean } {
+export function readable(job: RawJob): { description: string; unconverted: boolean } {
   let description = job.description;
   if (job.sections?.length) {
     const assembled = labelledSections(job.sections);

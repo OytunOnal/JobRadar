@@ -17,6 +17,7 @@ const { teardown } = testDb("jr-boards-");
 
 const { prisma } = await import("../src/lib/db");
 const { boardSources, isDue } = await import("../src/lib/discovery/boardSources");
+const { selects } = await import("../src/lib/ingest/fetch");
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
@@ -56,15 +57,86 @@ test("the rotation is capped, so one run cannot claim the whole pool", async () 
   assert.equal((await names(3)).length, 3);
 });
 
-test("a targeted run is offered every board, cap and due check included", async () => {
-  // The two halves the finding was about: `--only recruitee` after a sweep got
-  // nothing, because every recruitee board had just been stamped; and with a
-  // pool larger than the limit it got an arbitrary slice of whatever the
-  // rotation happened to be holding.
-  const got = await names(3, { all: true });
+test("a targeted run is offered boards that are not due", async () => {
+  // `--only recruitee` after a sweep got nothing, because every recruitee
+  // board had just been stamped and the rotation only offers what is due.
+  const got = await names(20, { all: true });
   assert.equal(got.length, 12, "six swept + five due + one never-fetched");
   assert.ok(got.includes("board:recruitee:swept0"), "not due is not the same as not wanted");
   assert.ok(!got.includes("board:recruitee:candidate"), "still only active boards");
+});
+
+test("but it is still bounded — a targeted run is a slice, not the whole pool", async () => {
+  // The first version of `all` lifted the cap too, which turned every
+  // `--only <platform>` into an unbounded run: 16,741 sources for `join`, on
+  // the code path that holds every fetched posting in memory, with the limit
+  // silently ignored. One process is not meant to hold a platform.
+  assert.equal((await names(3, { all: true })).length, 3);
+  assert.equal((await names(7, { all: true })).length, 7);
+});
+
+test("successive targeted runs walk the platform instead of repeating it", async () => {
+  // Stalest-first plus a stamp on every fetch IS the resumability: the second
+  // run cannot be handed the same head of the queue as the first.
+  const first = await boardSources(4, { all: true });
+  assert.equal(first.length, 4);
+  // Fetching is what stamps a board, so simulate the run having done so.
+  await prisma.atsBoard.updateMany({
+    where: { token: { in: first.map((s) => s.name.split(":")[2].split("|")[0]) } },
+    data: { lastFetchedAt: NOW },
+  });
+  const second = await boardSources(4, { all: true });
+  assert.equal(second.length, 4);
+  assert.deepEqual(
+    second.map((s) => s.name).filter((n) => first.some((f) => f.name === n)),
+    [],
+    "the second slice shares nothing with the first",
+  );
+});
+
+test("the slice is taken from the platform asked for, not from the pool", async () => {
+  // The bug this whole option exists for, and the one the first fix walked
+  // straight back into. `--only join` selecting AFTER a 200-board slice gets
+  // whichever of the 200 stalest boards happen to be on join — two, in the
+  // real pool, and none at all right after a sweep. A slice of the wrong
+  // population is not a smaller answer, it is a different one.
+  const onRecruitee = (n: string) => selects(n, ["recruitee"]);
+  // Five greenhouse boards are due and would fill any small slice first.
+  const got = await boardSources(3, { all: true, wanted: onRecruitee });
+  assert.equal(got.length, 3);
+  assert.ok(got.every((s) => s.name.startsWith("board:recruitee:")), got.map((s) => s.name).join(", "));
+});
+
+test("asking for an aggregator by name offers no boards at all", async () => {
+  const got = await boardSources(200, { all: true, wanted: (n) => selects(n, ["eures"]) });
+  assert.deepEqual(got, []);
+});
+
+test("a targeted run does not write the rotation's ledger", async () => {
+  // recordBoardOutcome answers one question — does this board deserve the
+  // normal rotation's request budget — and a hand-aimed text repair is not
+  // evidence about it. Letting it write meant one `--only recruitee` run
+  // finding no new keyword hits and DOUBLING fetchIntervalDays for every board
+  // on the platform, pushing thousands it had never judged toward monthly.
+  const { recordBoardOutcome } = await import("../src/lib/discovery/boardSources");
+  const board = await prisma.atsBoard.create({
+    data: {
+      platform: "recruitee", token: "ledger", status: "active",
+      discoveredVia: "seed", fetchIntervalDays: 4, hitRate: 0.5,
+    },
+  });
+  const name = "board:recruitee:ledger";
+
+  await recordBoardOutcome(name, 50, 0, { targeted: true });
+  const untouched = await prisma.atsBoard.findUnique({ where: { id: board.id } });
+  assert.equal(untouched!.fetchIntervalDays, 4, "a repair run did not demote it");
+  assert.equal(untouched!.hitRate, 0.5);
+
+  // A normal run still says what it found.
+  await recordBoardOutcome(name, 50, 0);
+  const demoted = await prisma.atsBoard.findUnique({ where: { id: board.id } });
+  assert.equal(demoted!.fetchIntervalDays, 8, "no hits, so it is asked half as often");
+  assert.ok(demoted!.hitRate < 0.5);
 });
 
 test("being asked for everything does not change what a board IS", async () => {

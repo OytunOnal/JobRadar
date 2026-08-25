@@ -49,9 +49,11 @@ import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields } from "../scoring/derive";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
-import { pump, selectSources, PER_HOST } from "./fetch";
+import { pump, selects, selectSources, wantsAnything, PER_HOST } from "./fetch";
 import { pass, stage } from "./stage";
-import { intake, isAggregatorJob } from "./intake";
+import { intake, isAggregatorJob, readable } from "./intake";
+import { scoreJob } from "../scoring/score";
+import { rejectedBy } from "../scoring/derive";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -321,20 +323,22 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // exactly the same thing, since its whole purpose is to rewrite the text of
   // a handful of sources in minutes rather than hours.
   const lean = Boolean(opts.boardsOnly || opts.only?.length);
-  // No run has taken anything yet, and a board's hit rate is about the board
-  // rather than about what else this run happened to fetch first.
-  const NO_KEYS: ReadonlySet<string> = new Set();
 
-  // A targeted run asks the board pool for EVERYTHING, because the selection
-  // below is what narrows it. Without that, `--only recruitee` was narrowing a
-  // list the rotation had already narrowed for its own reasons — the 200
-  // stalest boards that happened to be due — so a promise the tests pinned
-  // ("a platform selects every discovered board on it") could return a handful
-  // of boards, or none at all if a sweep had just stamped them.
-  const targeted = Boolean(opts.only?.length);
+  // A targeted run ignores the DUE CHECK, because the selection below is what
+  // narrows the pool and a sweep that just stamped the platform would
+  // otherwise leave `--only recruitee` with nothing to repair. It does not
+  // ignore the limit: boards arrive stalest-first and every fetch stamps, so
+  // successive runs walk the platform instead of one run trying to hold it.
+  // `--boards N` is how a caller asks for a bigger bite.
+  const targeted = wantsAnything(opts.only);
   const discovered =
     (await stage("boardSources", report.errors, () =>
-      boardSources(opts.boardLimit, { all: targeted }))) ?? [];
+      boardSources(opts.boardLimit, {
+        all: targeted,
+        // Asked before the slice is counted, so the slice comes out of the
+        // platform the caller named rather than out of the pool.
+        wanted: targeted ? (name) => selects(name, opts.only) : undefined,
+      }))) ?? [];
   const sources = selectSources(
     opts.boardsOnly ? discovered : [...companySources(), ...discovered, ...aggregators],
     opts.only,
@@ -382,18 +386,20 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
         // Adaptive frequency: tell the board how it did, so no-hit boards get
         // fetched less often over time.
         //
-        // Through intake, and not a private copy of the gate. The copy that
-        // was here scored the payload AS IT ARRIVED — before the named blocks
-        // are assembled — and lever, personio, comeet and oracle all publish
-        // their bodies as blocks. So four platforms' boards were judged on a
-        // fallback text, under-counted their hits, and had their fetch
-        // interval stretched for matching.
+        // Scored on the posting AS READ, not as it arrived. The copy that was
+        // here scored the raw payload — before the named blocks are assembled
+        // — and lever, personio, comeet and oracle all publish their bodies as
+        // blocks, so four platforms' boards were judged on a fallback text,
+        // under-counted their hits, and had their interval stretched for
+        // matching. `rejectedBy(scoreJob(...))` is the gate's one spelling;
+        // running the whole of intake here would repeat the store loop's two
+        // hashes and four guards for an answer that is measurably identical
+        // (930ms per 45k-posting slice, same count).
         if (src.name.startsWith("board:")) {
-          const passed = jobs.filter((j) => {
-            const r = intake(j, NO_KEYS);
-            return r.store && r.gate === null;
-          }).length;
-          await recordBoardOutcome(src.name, jobs.length, passed).catch(() => {});
+          const passed = jobs.filter(
+            (j) => rejectedBy(scoreJob({ ...j, description: readable(j).description })) === null,
+          ).length;
+          await recordBoardOutcome(src.name, jobs.length, passed, { targeted }).catch(() => {});
         }
       } catch (e) {
         report.perSource[src.name] = 0;
@@ -408,7 +414,7 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
               where: { platform: key.platform, token: key.token, region: key.region },
               data: { lastFetchedAt: new Date() },
             }).catch(() => {});
-            await recordBoardOutcome(src.name, 0, 0).catch(() => {});
+            await recordBoardOutcome(src.name, 0, 0, { targeted }).catch(() => {});
           }
         }
       }

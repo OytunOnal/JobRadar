@@ -29,8 +29,13 @@ test("an aggregator is selected by its exact name", () => {
   assert.deepEqual(picked(["eures"]), ["eures"]);
 });
 
-test("a platform selects every discovered board on it", () => {
-  // The case that never worked.
+test("a platform selects the discovered boards on it", () => {
+  // The case that never worked: the rule took the segment before the FIRST
+  // colon, which for every discovered board is the word "board".
+  //
+  // How MANY boards a run is offered is boardSources' question, not this
+  // one — it hands back a bounded, stalest-first slice, and repeating the
+  // command walks the platform. This decides which of them the word names.
   assert.deepEqual(picked(["recruitee"]), ["board:recruitee:11bitstudios", "board:recruitee:acme"]);
 });
 

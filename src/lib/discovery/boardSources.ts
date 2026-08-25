@@ -33,17 +33,35 @@ export function isDue(
 const DEFAULT_MAX_BOARDS = Number(process.env.DISCOVERY_MAX_BOARDS) || 200;
 
 export interface BoardSourceOptions {
-  /**
-   * Offer every board, whether or not its interval has elapsed, and without
-   * the rotation's fairness limit.
-   *
-   * Both of those are this module choosing FOR the caller: which boards
-   * deserve this run's request budget. A targeted run has already chosen —
-   * `--only recruitee` exists to re-fetch a platform whose connector was
-   * fixed — and a due check would skip exactly the boards a sweep just
-   * stamped, while the limit would hand back an arbitrary 200 of them.
-   */
+   /**
+    * Offer boards whether or not their interval has elapsed.
+    *
+    * The due check is this module choosing FOR the caller which boards deserve
+    * a run's budget, and a targeted run has already chosen: `--only recruitee`
+    * exists to re-fetch a platform whose connector was fixed, and the due check
+    * would skip exactly the boards a sweep had just stamped.
+    *
+    * It does NOT lift the limit. That was the first version of this flag and it
+    * turned every `--only <platform>` into an unbounded run — 16,741 sources
+    * for `join`, on the code path that holds every fetched posting in memory,
+    * with `boardLimit` silently ignored. The limit is the only thing keeping a
+    * run to a size one process can hold, so it always applies; a caller that
+    * wants more says so with a bigger limit.
+    *
+    * Boards come stalest-first and every fetch stamps `lastFetchedAt`, so
+    * successive targeted runs walk the platform rather than re-fetching the
+    * same head of the queue.
+    */
   all?: boolean;
+  /**
+   * Only offer boards this accepts — asked BEFORE the limit is counted.
+   *
+   * Which is the whole point: the slice has to be taken from the population
+   * the caller asked about. Filtering afterwards means `--only join` gets
+   * whichever of the 200 stalest boards happen to be on join, which was two,
+   * and after a sweep would be none.
+   */
+  wanted?: (sourceName: string) => boolean;
 }
 
 export async function boardSources(
@@ -61,17 +79,20 @@ export async function boardSources(
   const now = new Date();
   const out: Source[] = [];
   for (const b of boards) {
-    if (!opts.all && out.length >= limit) break;
+    if (out.length >= limit) break;
     const platform = getPlatform(b.platform);
     const fetcherId = platform?.fetcher;
     if (!fetcherId) continue; // discover-and-park platform — no fetcher yet
     if (curated.has(`${b.platform}:${b.token.toLowerCase()}`)) continue;
     if (!opts.all && !isDue(b.lastFetchedAt, b.fetchIntervalDays, now)) continue;
 
+    // "|" as the region separator — "@" appears inside Workday tokens.
+    const name = `board:${b.platform}:${b.token}${b.region ? `|${b.region}` : ""}`;
+    if (opts.wanted && !opts.wanted(name)) continue;
+
     const company = b.companyName ?? titleizeToken(b.token);
     out.push({
-      // "|" as the region separator — "@" appears inside Workday tokens.
-      name: `board:${b.platform}:${b.token}${b.region ? `|${b.region}` : ""}`,
+      name,
       fetch: async () => {
         const jobs = await atsFetchers[fetcherId](b.token, company, b.region);
         await prisma.atsBoard.update({
@@ -127,7 +148,16 @@ export async function recordBoardOutcome(
   sourceName: string,
   fetched: number,
   passed: number,
+  opts: { targeted?: boolean } = {},
 ): Promise<void> {
+  // A hand-aimed run says nothing about the rotation. This ledger answers one
+  // question — does this board deserve the normal rotation's request budget —
+  // and a `--only recruitee` text repair fetched boards the rotation did not
+  // choose, for a reason that has nothing to do with their hit rate. Letting
+  // it write here meant one repair run doubling `fetchIntervalDays` for a
+  // whole platform, pushing thousands of boards it had never judged before
+  // toward monthly.
+  if (opts.targeted) return;
   const key = parseBoardSourceName(sourceName);
   if (!key) return;
   const board = await prisma.atsBoard.findUnique({

@@ -40,7 +40,7 @@ export function hostOf(sourceName: string): string {
  *
  * Two differently-named things have to answer to one word: an aggregator is
  * "eures", a discovered board is "board:recruitee:acme", and a user asking for
- * "recruitee" means every board on that platform. That is the same question
+ * "recruitee" means the boards on that platform. That is the same question
  * `hostOf` already answers — and asking it here fixes a selection that never
  * worked: the rule used to take the segment before the first colon, which for
  * every discovered board is "board", so `--only recruitee` matched nothing at
@@ -50,12 +50,29 @@ export function hostOf(sourceName: string): string {
  * passing no --only gets.
  */
 export function selectSources(sources: readonly Source[], only?: readonly string[]): Source[] {
+  if (!wantsAnything(only)) return [...sources];
+  return sources.filter((s) => selects(s.name, only));
+}
+
+/** True when a selection was actually made. No selection means everything. */
+export function wantsAnything(only?: readonly string[]): boolean {
+  return (only ?? []).some((s) => s.trim().length > 0);
+}
+
+/**
+ * Does this selection name this source?
+ *
+ * The one-name shape, because the board pool has to ask BEFORE it counts. Its
+ * stalest-first slice used to be taken from the whole pool and filtered
+ * afterwards, so `--only join` got whichever of the first 200 boards happened
+ * to be on join — two, or none. A slice of the wrong population is not a
+ * smaller answer, it is a different one.
+ */
+export function selects(sourceName: string, only?: readonly string[]): boolean {
   const wanted = new Set((only ?? []).map((s) => s.trim().toLowerCase()).filter(Boolean));
-  if (wanted.size === 0) return [...sources];
-  return sources.filter((s) => {
-    const name = s.name.toLowerCase();
-    return wanted.has(name) || wanted.has(hostOf(name));
-  });
+  if (wanted.size === 0) return true;
+  const name = sourceName.toLowerCase();
+  return wanted.has(name) || wanted.has(hostOf(name));
 }
 
 // Platforms that serve every one of their boards from ONE host, so N boards

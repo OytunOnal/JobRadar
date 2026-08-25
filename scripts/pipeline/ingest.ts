@@ -7,14 +7,27 @@ import { prisma } from "../../src/lib/db";
 // is text repair: postings whose connector has since been fixed are rewritten
 // on re-sighting, and a targeted run does that in minutes where a full sweep
 // takes hours and pulls half a million postings nobody asked for.
+//
+// Naming a PLATFORM selects its discovered boards too, due or not — stalest
+// first, up to --boards N (default 200). Run it again to take the next slice.
 const argv = process.argv.slice(2);
 const onlyIdx = argv.indexOf("--only");
 const only = onlyIdx !== -1 && argv[onlyIdx + 1]
   ? argv[onlyIdx + 1].split(",").map((s) => s.trim()).filter(Boolean)
   : undefined;
-if (only) console.log(`(yalnızca ${only.length} kaynak: ${only.join(", ")})`);
 
-const report = await runIngest(only ? { only } : {});
+// How many discovered boards this run may take. A targeted run ignores whether
+// a board is due, but never the count: boards come stalest-first and every
+// fetch stamps them, so repeating the command walks the platform. `join` alone
+// has 16,741 boards — one process is not meant to hold them.
+const boardsIdx = argv.indexOf("--boards");
+const boardLimit = boardsIdx !== -1 && Number(argv[boardsIdx + 1]) > 0
+  ? Number(argv[boardsIdx + 1])
+  : undefined;
+
+if (only) console.log(`(yalnızca ${only.length} kaynak: ${only.join(", ")}${boardLimit ? `, en fazla ${boardLimit} board` : ""})`);
+
+const report = await runIngest({ ...(only ? { only } : {}), ...(boardLimit ? { boardLimit } : {}) });
 
 console.log("\n=== JobRadar ingest ===");
 // Discovered-board sources can number in the hundreds — summarize them.

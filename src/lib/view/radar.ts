@@ -13,6 +13,9 @@
 import { andWhere, discoverableWhere } from "../queue/pool";
 import { COUNTRY_NAMES, REGION_KEYS, REGIONS } from "../location/geo";
 import { DELISTED_AFTER_DAYS } from "../scoring/freshness";
+// The tier list lives with the function that derives it; this module only
+// validates what the URL claims against it.
+import { VISA_TIERS } from "../visa/visa";
 
 export const VERDICTS = ["all", "strong", "possible", "weak"] as const;
 export const WORK_MODES = [
@@ -20,11 +23,6 @@ export const WORK_MODES = [
   { value: "hybrid", label: "hybrid" },
   { value: "onsite", label: "on-site" },
 ] as const;
-export const VISA_TIERS = ["yes", "maybe", "no", "unknown", "not-needed"] as const;
-export const VISA_TIER_LABELS: Record<string, string> = {
-  yes: "visa: yes", maybe: "visa: maybe", no: "visa: no",
-  unknown: "visa: unknown", "not-needed": "no visa needed",
-};
 // The country chips that are not countries: the long tail, postings with no
 // location at all, and locations we could not place.
 export const COUNTRY_BUCKETS = ["other", "remote", "unknown"] as const;

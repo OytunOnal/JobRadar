@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postingLabels, isVerdictStale, staleVerdictTitle, type LabelledPosting } from "../src/lib/view/labels";
+import {
+  postingLabels, isVerdictStale, staleVerdictTitle,
+  VISA_LABELS, VISA_TIERS, type LabelledPosting,
+} from "../src/lib/view/labels";
 import { FIT_PROMPT_VERSION } from "../src/lib/llm/fit";
 import { languageBarriers, profile } from "../src/lib/user/profile";
 
@@ -122,4 +125,52 @@ test("delisting is judged against the pool's clock, not the wall clock", () => {
   const poolAlsoStale = { poolNewest: new Date("2026-07-02T00:00:00Z") };
   assert.ok(kinds(lagging, poolMovedOn).includes("delisted"));
   assert.equal(kinds(lagging, poolAlsoStale).includes("delisted"), false);
+});
+
+// ── One vocabulary, two surfaces ──────────────────────────────────────────
+
+test("every tier a URL may name has a chip, and it comes from the card's record", () => {
+  // The filter bar used to name the tiers itself: `visa: yes` where the card
+  // said sponsor✓, and `visa: no` (you are ruled out) sitting immediately
+  // beside `no visa needed` (nothing to worry about). Two modules, one fact.
+  for (const tier of VISA_TIERS) {
+    const label = VISA_LABELS[tier];
+    assert.ok(label, `${tier} has no label at all`);
+    assert.ok(label.chip.trim().length > 0, `${tier} has a blank chip`);
+  }
+  const chips = VISA_TIERS.map((t) => VISA_LABELS[t].chip);
+  assert.equal(new Set(chips).size, chips.length, "two tiers cannot share a chip");
+});
+
+test("no chip reads as the opposite of what it means", () => {
+  // The two the rename was for. "visa: yes" was the good news and read as
+  // "a visa is required"; "visa: no" was the bad news and sat next to
+  // "no visa needed", which is the best news there is.
+  assert.equal(VISA_LABELS.yes.chip, "sponsors");
+  assert.equal(VISA_LABELS.maybe.chip, "can sponsor");
+  assert.equal(VISA_LABELS.no.chip, "no sponsorship");
+  assert.equal(VISA_LABELS.unknown.chip, "not stated");
+  assert.equal(VISA_LABELS["not-needed"].chip, "no visa needed");
+  for (const tier of VISA_TIERS) {
+    assert.equal(VISA_LABELS[tier].chip.startsWith("visa:"), false,
+      `${tier} still names the document instead of the answer`);
+  }
+});
+
+test("silence on a card is a decision, and only unknown gets it", () => {
+  // Every other tier speaks, because silence used to mean both "nobody said"
+  // and "explicitly refused" on 1,323 postings.
+  assert.equal(VISA_LABELS.unknown.badge, undefined);
+  for (const tier of VISA_TIERS.filter((t) => t !== "unknown")) {
+    assert.ok(VISA_LABELS[tier].badge, `${tier} says nothing on a card`);
+  }
+});
+
+test("the badge a card shows is the badge in the record — not a second table", () => {
+  for (const tier of VISA_TIERS) {
+    const badge = VISA_LABELS[tier].badge;
+    const shown = find(posting({ visaTier: tier }), "visa");
+    assert.equal(shown?.text, badge?.text, tier);
+    assert.equal(shown?.tone, badge?.tone, tier);
+  }
 });

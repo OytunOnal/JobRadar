@@ -5,14 +5,18 @@ import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyR
 import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
 import { PURSUED_STATUSES } from "@/lib/queue/pool";
-import { isVerdictStale, postingLabels, staleVerdictTitle, type Label } from "@/lib/view/labels";
-import { radarFilters, VERDICTS, VISA_TIERS, VISA_TIER_LABELS, WORK_MODES } from "@/lib/view/radar";
+import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS, type Label } from "@/lib/view/labels";
+import { radarFilters, VERDICTS, WORK_MODES } from "@/lib/view/radar";
 
 export const dynamic = "force-dynamic";
 
 // Track chips come from the user's configured tracks (config/user.ts override,
 // generated profile, or the template defaults). Multi-select; "all" clears.
 const TRACK_KEYS = profile.tracks.map((t) => t.key);
+
+// Half a million is the point of the stat strip; `526367` reads as noise and
+// `526,367` reads as a number. Same spelling the profile page uses.
+const fmt = (v: number): string => v.toLocaleString("en");
 
 
 // Labels carry MEANING (`tone`), not placement. The page decides what a risk
@@ -119,10 +123,10 @@ export default async function Page({
       </header>
 
       <div className="statstrip">
-        <span><b>{total}</b> tracked</span>
-        <span className="s-strong"><b>{vc["strong"] ?? 0}</b> strong</span>
-        <span className="s-possible"><b>{vc["possible"] ?? 0}</b> possible</span>
-        <a href={`/applied${fromQS}`}><b>{PURSUED_STATUSES.reduce((n, st) => n + (sc[st] ?? 0), 0)}</b> in progress</a>
+        <span><b>{fmt(total)}</b> tracked</span>
+        <span className="s-strong"><b>{fmt(vc["strong"] ?? 0)}</b> strong</span>
+        <span className="s-possible"><b>{fmt(vc["possible"] ?? 0)}</b> possible</span>
+        <a href={`/applied${fromQS}`}><b>{fmt(PURSUED_STATUSES.reduce((sum, st) => sum + (sc[st] ?? 0), 0))}</b> in progress</a>
       </div>
 
       <div className="filterbar">
@@ -177,7 +181,7 @@ export default async function Page({
             if (next.has(c)) next.delete(c); else next.add(c);
             return (
               <a key={c} href={href({ country: [...next].sort().join(",") })}
-                 className={`chip ${countrySet.has(c) ? "active" : ""}`}>{COUNTRY_NAMES[c] ?? c} {counts.get(c)}</a>
+                 className={`chip ${countrySet.has(c) ? "active" : ""}`}>{COUNTRY_NAMES[c] ?? c} {fmt(counts.get(c) ?? 0)}</a>
             );
           })}
           {([["other", otherCount], ["remote", remoteCount], ["unknown", unknownCount]] as const).map(([b, n]) => {
@@ -186,7 +190,7 @@ export default async function Page({
             if (next.has(b)) next.delete(b); else next.add(b);
             return (
               <a key={b} href={href({ country: [...next].sort().join(",") })}
-                 className={`chip ${countrySet.has(b) ? "active" : ""}`}>{b} {n}</a>
+                 className={`chip ${countrySet.has(b) ? "active" : ""}`}>{b} {fmt(n)}</a>
             );
           })}
         </div>
@@ -198,7 +202,7 @@ export default async function Page({
             if (next.has(v)) next.delete(v); else next.add(v);
             return (
               <a key={v} href={href({ visa: [...next].sort().join(",") })}
-                 className={`chip ${visaSet.has(v) ? "active" : ""}`}>{VISA_TIER_LABELS[v]}</a>
+                 className={`chip ${visaSet.has(v) ? "active" : ""}`}>{VISA_LABELS[v].chip}</a>
             );
           })}
         </div>

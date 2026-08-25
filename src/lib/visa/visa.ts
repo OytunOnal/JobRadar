@@ -77,7 +77,16 @@ export function detectVisa(description: string, title = ""): VisaSignal {
 // Whether sponsorship is needed AT ALL is a per-user question: an EU citizen
 // applying inside the EU never needs it. profile.workAuthorization carries the
 // regions the user may already work in.
-export type VisaTier = "not-needed" | "yes" | "maybe" | "no" | "unknown";
+// THE FIVE TIERS, in the order a reader wants them: what the posting promises,
+// what the company could do, what it rules out, silence, and the one that is
+// not about the employer at all.
+//
+// The list lives with the function that derives it, and every surface imports
+// it from here. It used to be a hand-written union in this file AND an array
+// in view/radar.ts AND a label table in view/labels.ts — three spellings of
+// five strings, in one feature.
+export const VISA_TIERS = ["yes", "maybe", "no", "unknown", "not-needed"] as const;
+export type VisaTier = (typeof VISA_TIERS)[number];
 
 // Sources whose every posting comes from a licensed sponsor by construction
 // (e.g. a board built solely from a government sponsor register). Declared

@@ -27,6 +27,9 @@ import { classifyFreshness, ageLabel, type Freshness } from "../scoring/freshnes
 import { languageBarriers } from "../user/profile";
 import { LANG_NAMES } from "../scoring/langreq";
 import { FIT_PROMPT_VERSION } from "../llm/fit";
+import { VISA_TIERS, type VisaTier } from "../visa/visa";
+
+export { VISA_TIERS, type VisaTier };
 
 export type LabelTone = "risk" | "note" | "good";
 
@@ -81,30 +84,68 @@ export function staleVerdictTitle(job: { fitPromptVersion: string | null }): str
   return `Judged by an older version (${job.fitPromptVersion ?? "?"}) on text we have since repaired — waiting to be re-judged by ${FIT_PROMPT_VERSION}.`;
 }
 
-// All five tiers speak. Silence used to mean two opposite things — "nobody has
-// said" and "the posting explicitly rules it out" — and the filter chips named
-// all five while the card rendered two.
+// ONE RECORD PER TIER, AND BOTH SURFACES READ IT.
+//
+// Silence used to mean two opposite things on a card — "nobody has said" and
+// "the posting rules it out" — so `no` speaks now, and silence means exactly
+// one thing. But the FILTER BAR was never brought under this module: it named
+// the tiers itself, in its own words, and put `visa: no` (you are ruled out)
+// immediately beside `no visa needed` (nothing to worry about), while calling
+// the good news `visa: yes` — which most readers hear as "a visa is required".
+//
+// A card and a chip want different lengths of the same sentence: a card is
+// scanned in a dense list, a chip has to explain itself to someone who has
+// never seen the app. That is not two spellings. Two spellings was two
+// MODULES disagreeing; this is one record with two renderings, declared on
+// the same line so they cannot drift, and keyed by VisaTier so a new tier
+// without a name is a compile error rather than a blank chip.
 //
 // Everything reads visaTier, never sponsorReg. They are not the same claim: a
 // company holding a sponsor licence is evidence that it CAN sponsor, which
 // deriveVisaTier maps to "maybe", and rendering that as sponsor✓ promised more
 // than the evidence supports on 1,920 postings.
-const VISA_LABELS: Record<string, Label> = {
+export interface VisaTierLabel {
+  /** What a card shows — absent where the card deliberately says nothing. */
+  badge?: Label;
+  /** What the filter chip shows. Every tier is filterable, so every tier has one. */
+  chip: string;
+}
+
+export const VISA_LABELS: Record<VisaTier, VisaTierLabel> = {
   yes: {
-    kind: "visa", text: "sponsor✓", tone: "good",
-    title: "The posting itself states it sponsors visas / offers relocation.",
+    chip: "sponsors",
+    badge: {
+      kind: "visa", text: "sponsor✓", tone: "good",
+      title: "The posting itself states it sponsors visas / offers relocation.",
+    },
   },
   maybe: {
-    kind: "visa", text: "sponsor?", tone: "note",
-    title: "The posting is silent, but the company is listed in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE) — it CAN sponsor.",
+    chip: "can sponsor",
+    badge: {
+      kind: "visa", text: "sponsor?", tone: "note",
+      title: "The posting is silent, but the company is listed in its country's public sponsor register (NL IND / UK Home Office / DK SIRI / IE DETE) — it CAN sponsor.",
+    },
   },
   no: {
-    kind: "visa", text: "no sponsorship", tone: "risk",
-    title: "The posting explicitly rules sponsorship out, or requires an existing right to work.",
+    chip: "no sponsorship",
+    badge: {
+      kind: "visa", text: "no sponsorship", tone: "risk",
+      title: "The posting explicitly rules sponsorship out, or requires an existing right to work.",
+    },
+  },
+  unknown: {
+    // No badge on purpose. Now that `no` speaks, a card saying nothing about
+    // sponsorship can only mean nobody has said — which is the honest
+    // majority and does not need a word taking up room in a dense list. A
+    // filter still has to name it, because you can filter FOR silence.
+    chip: "not stated",
   },
   "not-needed": {
-    kind: "visa", text: "no visa needed", tone: "good",
-    title: "You already have the right to work in this job's country — sponsorship is not a factor.",
+    chip: "no visa needed",
+    badge: {
+      kind: "visa", text: "no visa needed", tone: "good",
+      title: "You already have the right to work in this job's country — sponsorship is not a factor.",
+    },
   },
 };
 
@@ -137,7 +178,7 @@ export function postingLabels(job: LabelledPosting, ctx: LabelContext = {}): Lab
   }
 
   // ── Visa: all five tiers, one column ──────────────────────────────────
-  const visa = VISA_LABELS[job.visaTier];
+  const visa = VISA_LABELS[job.visaTier as VisaTier]?.badge;
   if (visa) labels.push(visa);
 
   // ── Barriers the user cares about ─────────────────────────────────────

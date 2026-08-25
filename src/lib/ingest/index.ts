@@ -1,61 +1,62 @@
 import { createHash } from "node:crypto";
-import { prisma } from "./db";
-import { scoreJob } from "./scoring/score";
-import { arbeitnow } from "./sources/arbeitnow";
-import { remotive } from "./sources/remotive";
-import { remoteok } from "./sources/remoteok";
-import { jobicy } from "./sources/jobicy";
-import { himalayas } from "./sources/himalayas";
-import { weworkremotely } from "./sources/weworkremotely";
-import { adzuna } from "./sources/adzuna";
-import { jsearch } from "./sources/jsearch";
-import { linkedin } from "./sources/linkedin";
-import { indeed } from "./sources/indeed";
-import { freehire } from "./sources/freehire";
-import { arbeitsagentur } from "./sources/arbeitsagentur";
-import { eures } from "./sources/eures";
-import { sweden } from "./sources/sweden";
-import { denmark } from "./sources/denmark";
-import { switzerland } from "./sources/switzerland";
-import { hn } from "./sources/hn";
-import { landingjobs } from "./sources/landingjobs";
-import { swissdevjobs } from "./sources/swissdevjobs";
-import { berlinstartupjobs } from "./sources/berlinstartupjobs";
-import { manfred } from "./sources/manfred";
-import { netempregos } from "./sources/netempregos";
-import { wttj } from "./sources/wttj";
-import { greenjobsde } from "./sources/greenjobsde";
-import { germantechjobs } from "./sources/germantechjobs";
-import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "./sources/apiboards";
-import { rssSources } from "./sources/rssfeeds";
-import { vdab } from "./sources/vdab";
-import { justjoin, nofluffjobs } from "./sources/poland";
-import { thehub } from "./sources/thehub";
-import { agenticjobs, a16zspeedrun } from "./sources/nichejobs";
-import { workingnomads } from "./sources/workingnomads";
-import { jobindexdk } from "./sources/jobindexdk";
-import { companySources } from "./sources/companies";
-import { analyzeFit, verdictFields } from "./llm/fit";
-import { llmEnabled, RateLimitError } from "./llm/llm";
-import { harvest, type HarvestReport } from "./discovery/harvest";
-import { boardSources, parseBoardSourceName, recordBoardOutcome } from "./discovery/boardSources";
-import { tooOldToStore } from "./scoring/freshness";
-import { canonicalJobUrl, isJunkJobUrl, sourceTrust } from "./domains";
-import { findDuplicate } from "./scoring/dedup";
-import { runNameProbes, type NameProbeReport } from "./discovery/nameprobe";
-import { runDeepProbes, type DeepProbeReport } from "./discovery/deepprobe";
-import { runLivenessSweep, type LivenessReport } from "./liveness";
-import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "./visa/sponsors";
-import { safeSlice, type RawJob, type Source } from "./sources/types";
-import { htmlToText, looksLikeHtml, TEXT_VERSION } from "./text/html-text";
-import { labelledSections } from "./text/sections";
-import { invalidateVector } from "./llm/embed";
-import { andWhere, openWhere } from "./queue/pool";
-import { derivedFields, statedFields, STORE_THRESHOLD } from "./scoring/derive";
-import { visaFields } from "./visa/visa-write";
-import { normalizeLocation, resolveCountry } from "./location/geo";
-import { detectVisa } from "./visa/visa";
-import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "./location/locresolve";
+import { prisma } from "../db";
+import { scoreJob } from "../scoring/score";
+import { arbeitnow } from "../sources/arbeitnow";
+import { remotive } from "../sources/remotive";
+import { remoteok } from "../sources/remoteok";
+import { jobicy } from "../sources/jobicy";
+import { himalayas } from "../sources/himalayas";
+import { weworkremotely } from "../sources/weworkremotely";
+import { adzuna } from "../sources/adzuna";
+import { jsearch } from "../sources/jsearch";
+import { linkedin } from "../sources/linkedin";
+import { indeed } from "../sources/indeed";
+import { freehire } from "../sources/freehire";
+import { arbeitsagentur } from "../sources/arbeitsagentur";
+import { eures } from "../sources/eures";
+import { sweden } from "../sources/sweden";
+import { denmark } from "../sources/denmark";
+import { switzerland } from "../sources/switzerland";
+import { hn } from "../sources/hn";
+import { landingjobs } from "../sources/landingjobs";
+import { swissdevjobs } from "../sources/swissdevjobs";
+import { berlinstartupjobs } from "../sources/berlinstartupjobs";
+import { manfred } from "../sources/manfred";
+import { netempregos } from "../sources/netempregos";
+import { wttj } from "../sources/wttj";
+import { greenjobsde } from "../sources/greenjobsde";
+import { germantechjobs } from "../sources/germantechjobs";
+import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
+import { rssSources } from "../sources/rssfeeds";
+import { vdab } from "../sources/vdab";
+import { justjoin, nofluffjobs } from "../sources/poland";
+import { thehub } from "../sources/thehub";
+import { agenticjobs, a16zspeedrun } from "../sources/nichejobs";
+import { workingnomads } from "../sources/workingnomads";
+import { jobindexdk } from "../sources/jobindexdk";
+import { companySources } from "../sources/companies";
+import { analyzeFit, verdictFields } from "../llm/fit";
+import { llmEnabled, RateLimitError } from "../llm/llm";
+import { harvest, type HarvestReport } from "../discovery/harvest";
+import { boardSources, parseBoardSourceName, recordBoardOutcome } from "../discovery/boardSources";
+import { tooOldToStore } from "../scoring/freshness";
+import { canonicalJobUrl, isJunkJobUrl, sourceTrust } from "../domains";
+import { findDuplicate } from "../scoring/dedup";
+import { runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
+import { runDeepProbes, type DeepProbeReport } from "../discovery/deepprobe";
+import { runLivenessSweep, type LivenessReport } from "../liveness";
+import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "../visa/sponsors";
+import { safeSlice, type RawJob, type Source } from "../sources/types";
+import { htmlToText, looksLikeHtml, TEXT_VERSION } from "../text/html-text";
+import { labelledSections } from "../text/sections";
+import { invalidateVector } from "../llm/embed";
+import { andWhere, openWhere } from "../queue/pool";
+import { derivedFields, statedFields, STORE_THRESHOLD } from "../scoring/derive";
+import { visaFields } from "../visa/visa-write";
+import { normalizeLocation, resolveCountry } from "../location/geo";
+import { detectVisa } from "../visa/visa";
+import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
+import { pump, PER_HOST } from "./fetch";
 
 // How many top-keyword-scored jobs to auto-analyze with the LLM per ingest.
 // Bounded to keep token cost + rate-limit pressure predictable.
@@ -436,94 +437,24 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
 
   if (opts.boardsOnly) {
     // Sweep mode: boards are independent companies, so ordering carries no
-    // dedupe priority — fetch them through a RAM-adaptive worker pool.
-    //
-    // Two politeness lessons learned live:
-    //  - The pool arrives in PLATFORM BLOCKS (crawl insertion order), so a
-    //    slice can be 1500 consecutive requests to one host. Shuffle first:
-    //    mixed platforms spread the concurrency across distinct hosts.
-    //  - Single-host platforms (join.com; apply.workable.com 429'd at 8-wide
-    //    live) additionally get a PER-PLATFORM in-flight cap.
-    for (let i = sources.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [sources[i], sources[j]] = [sources[j], sources[i]];
-    }
-    const base = Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16);
-    const PER_PLATFORM_CAP: Record<string, number> = { join: 2, workable: 2, recruitee: 2 };
-    const platformOf = (name: string): string => name.split(":")[1] ?? "";
-    const limitNow = (): number => {
-      const heapMB = process.memoryUsage().heapUsed / 1_048_576;
-      if (heapMB > 1200) return 1;
-      if (heapMB > 800) return Math.max(2, Math.floor(base / 2));
-      return base;
-    };
-    const queue = [...sources];
-    const inFlight = new Map<string, number>();
-    let active = 0;
-    await new Promise<void>((resolve) => {
-      const pump = (): void => {
-        while (active < limitNow()) {
-          // First queued source whose platform is under its cap.
-          const qi = queue.findIndex((s) => {
-            const p = platformOf(s.name);
-            return (inFlight.get(p) ?? 0) < (PER_PLATFORM_CAP[p] ?? base);
-          });
-          if (qi === -1) break;
-          const src = queue.splice(qi, 1)[0];
-          const p = platformOf(src.name);
-          inFlight.set(p, (inFlight.get(p) ?? 0) + 1);
-          active++;
-          void fetchOne(src).finally(() => {
-            inFlight.set(p, (inFlight.get(p) ?? 0) - 1);
-            active--;
-            pump();
-          });
-        }
-        if (queue.length === 0 && active === 0) resolve();
-      };
-      pump();
+    // dedupe priority. Nothing has to be reassembled, so every board fetches
+    // straight into the shared list — a sweep slice is the RAM-sensitive path
+    // and there is no reason to hold its jobs twice. Shuffled, because the
+    // discovered pool arrives in platform blocks.
+    await pump(sources, (src) => fetchOne(src, all), {
+      concurrency: Math.min(Number(process.env.SWEEP_CONCURRENCY) || 8, 16),
+      perHost: PER_HOST,
+      shuffle: true,
     });
   } else {
     // Normal ingest: PARALLEL fetch, sequential priority. Source order only
-    // matters at dedupe time, so each source fetches into its own bucket
-    // concurrently and the buckets are concatenated in the original priority
-    // order afterwards — same dedupe outcome, wall time ~= slowest source
-    // instead of the sum. Heap-aware like the sweep pool; shared-host
-    // platforms keep a politeness cap.
+    // matters at dedupe time, so each source fetches into its own bucket and
+    // the buckets are concatenated in the original priority order afterwards —
+    // same dedupe outcome, wall time ~= slowest source instead of the sum.
     const buckets: RawJob[][] = sources.map(() => []);
-    const CAP: Record<string, number> = { join: 2, workable: 2, recruitee: 2 };
-    const hostKey = (name: string): string => name.split(":")[0];
-    const conc = Math.min(Number(process.env.INGEST_CONCURRENCY) || 6, 12);
-    const limitNow = (): number => {
-      const heapMB = process.memoryUsage().heapUsed / 1_048_576;
-      if (heapMB > 1200) return 1;
-      if (heapMB > 800) return Math.max(2, Math.floor(conc / 2));
-      return conc;
-    };
-    const pending = sources.map((_, i) => i);
-    const inFlight = new Map<string, number>();
-    let active = 0;
-    await new Promise<void>((resolve) => {
-      const pump = (): void => {
-        while (active < limitNow()) {
-          const qi = pending.findIndex((i) => {
-            const h = hostKey(sources[i].name);
-            return (inFlight.get(h) ?? 0) < (CAP[h] ?? conc);
-          });
-          if (qi === -1) break;
-          const i = pending.splice(qi, 1)[0];
-          const h = hostKey(sources[i].name);
-          inFlight.set(h, (inFlight.get(h) ?? 0) + 1);
-          active++;
-          void fetchOne(sources[i], buckets[i]).finally(() => {
-            inFlight.set(h, (inFlight.get(h) ?? 0) - 1);
-            active--;
-            pump();
-          });
-        }
-        if (pending.length === 0 && active === 0) resolve();
-      };
-      pump();
+    await pump(sources, (src, i) => fetchOne(src, buckets[i]), {
+      concurrency: Math.min(Number(process.env.INGEST_CONCURRENCY) || 6, 12),
+      perHost: PER_HOST,
     });
     // One retry pass for sources that failed (timeouts included): transient
     // hiccups get a second chance in the same run; a second failure stays in

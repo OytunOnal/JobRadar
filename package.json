@@ -31,6 +31,7 @@
     "facts:fill": "tsx --env-file=.env scripts/backfill/facts-fill.ts",
     "visa:retier": "tsx --env-file=.env scripts/backfill/visa-retier.ts",
     "repair:descriptions": "tsx --env-file=.env scripts/backfill/repair-descriptions.ts",
+    "measure:discovery": "tsx --env-file=.env scripts/measure/discovery-health.ts",
     "measure:sections": "tsx --env-file=.env scripts/measure/measure-sections.ts",
     "diagnose:sections": "tsx --env-file=.env scripts/measure/diagnose-sections.ts",
     "audit:sections": "tsx --env-file=.env scripts/measure/audit-sections.ts",

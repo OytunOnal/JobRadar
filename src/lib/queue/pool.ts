@@ -62,9 +62,22 @@ export const AWAITING_STATUSES = ["applied", "interview", "stopped"] as const;
 // The three ways a pursuit is over. Nothing needs nudging after one of these.
 export const CONCLUDED_STATUSES = ["offer", "rejected", "ghosted"] as const;
 export const DISMISSED_STATUS = "ignored" as const;
+// Pursuits still moving under their own power: the next thing that happens to
+// one of these is another stage. A conclusion is over and a freeze is on hold,
+// so neither is somewhere you advance FROM, and /applied offers them one
+// button back to live rather than the whole stage row.
+//
+// It reads as awaiting-minus-stopped and is not: those two sets answer
+// different questions and would come apart the moment a status is added that
+// nudges without advancing, or advances without anyone owing an answer.
+export const ADVANCING_STATUSES = ["applied", "interview"] as const;
 
 export function isAwaitingReply(status: string): boolean {
   return (AWAITING_STATUSES as readonly string[]).includes(status);
+}
+
+export function isAdvancing(status: string): boolean {
+  return (ADVANCING_STATUSES as readonly string[]).includes(status);
 }
 
 export function isConcluded(status: string): boolean {

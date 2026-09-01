@@ -123,6 +123,30 @@ test("re-opening a dismissal restarts its clock too", () => {
   assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY));
 });
 
+// ── When the status started ──────────────────────────────────────────────────
+
+test("a status remembers when it started, and appliedAt does not move", () => {
+  const applied = new Date(NOW.getTime() - 20 * DAY);
+  const { fields } = transitionFields(
+    { status: "applied", appliedAt: applied, followUpAt: null }, "rejected", { at: NOW });
+  assert.equal(fields.appliedAt, undefined, "when the pursuit began has not changed");
+  assert.deepEqual(fields.statusAt, NOW, "when the rejection came is a different date");
+});
+
+test("a fresh application starts both clocks together", () => {
+  const { fields } = transitionFields(open, "applied", { at: NOW });
+  assert.deepEqual(fields.appliedAt, NOW);
+  assert.deepEqual(fields.statusAt, NOW);
+});
+
+test("pressing the status you are already in does not restart the clock", () => {
+  const { fields } = transitionFields(
+    { status: "applied", appliedAt: NOW, followUpAt: null }, "applied",
+    { at: new Date(NOW.getTime() + 5 * DAY) });
+  assert.equal(fields.statusAt, undefined,
+    "absent means untouched — a stray click is not a new rejection");
+});
+
 // ── The employer's pause ─────────────────────────────────────────────────────
 
 test("a hiring freeze nudges on the slower clock", () => {

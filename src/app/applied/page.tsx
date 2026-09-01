@@ -3,7 +3,7 @@ import { saveNote, setFollowUp, setStatus } from "../actions";
 import { postingLabels } from "@/lib/view/labels";
 import { FitScore } from "@/lib/view/FitScore";
 import { Badges } from "@/lib/view/Badges";
-import { TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
+import { isAdvancing, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
 import { ageWords } from "@/lib/scoring/freshness";
 
@@ -33,6 +33,15 @@ const SHOWN_LABELS = new Set(["visa", "delisted", "track", "work-mode"]);
 
 function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
+}
+
+// Both dates, on hover, and only both when they differ. A pursuit still in the
+// status it started in has one date wearing two names, and printing it twice
+// would read as two events.
+function pursuitDates(j: { status: string; appliedAt: Date | null; statusAt: Date | null }): string {
+  const applied = j.appliedAt ? `applied ${fmt(j.appliedAt)}` : null;
+  const since = j.statusAt && fmt(j.statusAt) !== fmt(j.appliedAt) ? `${j.status} ${fmt(j.statusAt)}` : null;
+  return [applied, since].filter(Boolean).join(" · ");
 }
 
 export default async function AppliedPage({
@@ -140,26 +149,55 @@ export default async function AppliedPage({
           </form>
         </div>
         <div className="actions">
-          {/* The corner is the pursuit clock: where this one stands, and how
-              long it has stood there. "applied 2026-08-21" is a record; the
-              number you actually reason about is how long the silence has
-              lasted, because that is what turns "waiting" into "they are not
-              going to answer". The exact date is one hover away. */}
+          {/* The corner is the pursuit clock, and it reads as one sentence:
+              the pill is the state, the chip is how long it has been in it.
+              APPLIED · 5 days ago, REJECTED · yesterday.
+
+              So the chip anchors on statusAt, not appliedAt. Beside REJECTED
+              the number nobody reads as "days since you applied" is the one
+              this used to show, and the misreading is not the user's fault:
+              the two words sit together and the eye joins them. The exact
+              dates, both of them, are one hover away. */}
           <div className="status-pill">
             {j.status}
-            {j.appliedAt && (
-              <span className="agechip" title={`Applied ${fmt(j.appliedAt)}`}>
-                {ageWords(j.appliedAt, nowDate)}
+            {(j.statusAt ?? j.appliedAt) && (
+              <span className="agechip" title={pursuitDates(j)}>
+                {ageWords((j.statusAt ?? j.appliedAt)!, nowDate)}
               </span>
             )}
           </div>
-          {TRACKED_STATUSES.filter((s) => s !== j.status).map((s) => (
-            <form action={setStatus} key={s}>
+          {/* Everything you can do about it, in one row that fills the space
+              under the pill. One container for one and for five, so a settled
+              card is the same card with less in it. */}
+          <div className="actionrow">
+          {/* A pursuit that is not moving does not need five ways forward.
+              Offering applied / interview / stopped / offer / ghosted on a
+              rejection is a row of buttons for a conversation that is over,
+              and on a frozen req it is a row for a conversation that cannot
+              happen yet. Both have exactly one meaningful next move, and it is
+              the same one: this is live again.
+
+              `reopen` returns it to applied, which is where transitionFields
+              already knows how to land. From a conclusion it keeps the
+              original application date and restarts the follow-up clock; from
+              a freeze it comes off the thirty-day clock and back onto ten. The
+              stage buttons come back with it, so nothing is unreachable — it
+              just takes saying "this is live" first, which is true. */}
+          {!isAdvancing(j.status) ? (
+            <form action={setStatus}>
               <input type="hidden" name="id" value={j.id} />
-              <input type="hidden" name="status" value={s} />
-              <button className="btn" type="submit">{s}</button>
+              <input type="hidden" name="status" value="applied" />
+              <button className="btn quiet" type="submit">reopen</button>
             </form>
-          ))}
+          ) : (
+            TRACKED_STATUSES.filter((s) => s !== j.status).map((s) => (
+              <form action={setStatus} key={s}>
+                <input type="hidden" name="id" value={j.id} />
+                <input type="hidden" name="status" value={s} />
+                <button className="btn" type="submit">{s}</button>
+              </form>
+            ))
+          )}
           {/* THE NUDGE CONTROLS BELONG TO THE NUDGE, NOT TO THE CARD.
               They used to render on all 23 tracked cards, which asked a
               question nobody was being asked: "+3d" on a card whose reminder
@@ -186,6 +224,7 @@ export default async function AppliedPage({
               )}
             </>
           )}
+          </div>
         </div>
       </article>
     );

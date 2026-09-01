@@ -102,7 +102,13 @@ export interface TransitionOptions {
  *   deferral, it is a different question. applied→interview carries, because
  *   the window did not change and re-arming would silently push back a date
  *   the user chose;
- * - dismissing records the reason; every other entry clears it.
+ * - dismissing records the reason; every other entry clears it;
+ * - and a status remembers when it started. `appliedAt` says when the pursuit
+ *   began and never moves again; `statusAt` says when it entered the state it
+ *   is in now. They are the same instant for a fresh application and diverge
+ *   the moment anything happens, which is the whole point: what a card wants
+ *   beside REJECTED is when the rejection came. Pressing a status you are
+ *   already in leaves it alone, so a stray click does not restart the clock.
  */
 export function transitionFields(
   current: PursuitState,
@@ -111,6 +117,7 @@ export function transitionFields(
 ): { fields: {
   status: string;
   appliedAt?: Date;
+  statusAt?: Date;
   followUpAt: Date | null;
   dismissReason: string | null;
 }; event: PursuitEvent } {
@@ -136,6 +143,7 @@ export function transitionFields(
     fields: {
       status: to,
       ...(stamping ? { appliedAt: at } : {}),
+      ...(current.status !== to ? { statusAt: at } : {}),
       followUpAt: isConcluded(to) || dismissed
         ? null
         : arming

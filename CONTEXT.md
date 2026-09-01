@@ -73,6 +73,13 @@ A pursued posting where the other side still owes an answer. The only state a
 follow-up nudge is for.
 _Avoid_: pending, open application, waiting
 
+**Advancing**:
+A pursuit still moving under its own power: the next thing that happens to it
+is another stage. Distinct from awaiting a reply, which asks who owes an
+answer. A frozen req is awaited and not advancing; the two sets look alike
+today and answer different questions.
+_Avoid_: active, in progress, live
+
 **Hiring paused**:
 A pursuit the employer froze: the req was pulled or put on hold, and nobody
 was rejected. It is awaiting a reply rather than concluded, because the only

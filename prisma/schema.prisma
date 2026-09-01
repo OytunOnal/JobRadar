@@ -127,9 +127,14 @@ model Job {
   // across the live pool, because a stored derivation is only safe if its
   // drift can be seen.
   visaTier    String   @default("unknown")
-  // Application tracking (the /applied page): when it was applied to, the
-  // next follow-up nudge, and a free-form note.
+  // Application tracking (the /applied page): when it was applied to, when it
+  // entered the status it is in now, the next follow-up nudge, and a free-form
+  // note. appliedAt and statusAt are the same instant for a fresh application
+  // and diverge the moment anything happens: what a card wants to show beside
+  // REJECTED is when the rejection came, not when the pursuit began. Written
+  // only by transitionFields.
   appliedAt   DateTime?
+  statusAt    DateTime?
   followUpAt  DateTime?
   note        String?
   // Why the user dismissed it (status "ignored") — doubles as labeled feedback

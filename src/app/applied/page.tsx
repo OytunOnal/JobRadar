@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
 import { postingLabels } from "@/lib/view/labels";
+import { FitScore } from "@/lib/view/FitScore";
 import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
 
@@ -50,6 +51,12 @@ export default async function AppliedPage({
       <article className="job trackrow" key={j.id}>
         <div className="jobmain">
           <p className="title">
+            {/* The judge's number, same rendering the radar uses — including
+                the fade on a verdict an older prompt produced. A pursuit is
+                where you decide whether to keep spending on a role, and the
+                page that tracks it was the one page that did not say what the
+                judge thought of it. */}
+            <FitScore job={j} />{" "}
             <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
           </p>
           <div className="meta">

@@ -6,6 +6,7 @@ import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
 import { PURSUED_STATUSES } from "@/lib/queue/pool";
 import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS, type Label } from "@/lib/view/labels";
+import { FitScore } from "@/lib/view/FitScore";
 import { radarFilters, VERDICTS, WORK_MODES } from "@/lib/view/radar";
 
 export const dynamic = "force-dynamic";
@@ -215,12 +216,7 @@ export default async function Page({
             <article className="job trackrow" key={j.id}>
               <div className="jobmain">
                 <p className="title">
-                  {j.fitScore != null && (
-                    <span
-                      className={`fitnum-inline v-${j.fitVerdict}${isVerdictStale(j) ? " verdict-stale" : ""}`}
-                      title={isVerdictStale(j) ? staleVerdictTitle(j) : undefined}
-                    >{j.fitScore}</span>
-                  )}{" "}
+                  <FitScore job={j} />{" "}
                   <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
                 </p>
                 <div className="meta">

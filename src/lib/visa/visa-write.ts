@@ -38,9 +38,15 @@ export function visaFields(current: {
 
 // Persist extracted posting facts (the CV-independent stage) onto a job:
 // the facts row itself, plus the projections the radar and the queue read.
-// Not yet: the extractor's workMode answer has not been measured against
-// ground truth. The eval exists (scripts/measure/workmode-llm.ts); run it on
-// a free GPU and flip this when it clears the bar the text detector cleared.
+// Measured 2026-09-01 and FAILED: 68.3% where it speaks, on the slice where
+// the text detector is silent — the only place it would ever write (bar: 90%,
+// scripts/measure/workmode-llm.ts, 150 employer-labelled postings). The
+// failure mode is inference from a bare city location to "onsite" — 74 onsite
+// answers of which 29 were stated hybrid or remote — despite the prompt's
+// never-infer instruction. The same disease the old regex default had, worn
+// by a model. The answer keeps being RECORDED on PostingFacts, so a better
+// prompt can be re-measured against it without re-running the queue; this
+// stays false until a measurement clears the bar.
 const APPLY_LLM_WORKMODE = false;
 
 export async function applyFactsToJob(jobId: string, facts: PostingFactsResult): Promise<void> {

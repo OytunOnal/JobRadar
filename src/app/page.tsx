@@ -5,7 +5,8 @@ import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyR
 import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
 import { PURSUED_STATUSES } from "@/lib/queue/pool";
-import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS, type Label } from "@/lib/view/labels";
+import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS } from "@/lib/view/labels";
+import { Badges } from "@/lib/view/Badges";
 import { FitScore } from "@/lib/view/FitScore";
 import { radarFilters, VERDICTS, WORK_MODES } from "@/lib/view/radar";
 
@@ -22,18 +23,6 @@ const fmt = (v: number): string => v.toLocaleString("en");
 
 // Labels carry MEANING (`tone`), not placement. The page decides what a risk
 // looks like and where it goes; the rule module decides what is one.
-function Badges({ labels }: { labels: Label[] }) {
-  return (
-    <>
-      {labels.map((l) => (
-        <span key={l.kind + l.text} className={`badge t-${l.tone}`} title={l.title}>
-          {l.text}
-        </span>
-      ))}
-    </>
-  );
-}
-
 function RadarMark() {
   return (
     <svg className="radar-mark" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">

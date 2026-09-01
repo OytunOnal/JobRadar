@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
 import { postingLabels } from "@/lib/view/labels";
 import { FitScore } from "@/lib/view/FitScore";
+import { Badges } from "@/lib/view/Badges";
 import { TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
 import { ageWords } from "@/lib/scoring/freshness";
@@ -24,6 +25,12 @@ const GROUPS: Array<{ status: string; label: string }> = [
   { status: "rejected", label: "Rejected" },
   { status: "ghosted", label: "Ghosted" },
 ];
+// What a card in the pipeline says about its posting. `track` and `work-mode`
+// are here because a pipeline is read across roles rather than down one: which
+// of your tracks a pursuit belongs to, and whether it would move you, are the
+// two facts you compare between cards.
+const SHOWN_LABELS = new Set(["visa", "delisted", "track", "work-mode"]);
+
 function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
@@ -44,6 +51,18 @@ export default async function AppliedPage({
     // here as on the radar rather than against wall-clock time.
     prisma.job.aggregate({ _max: { lastSeenAt: true } }).then((a) => a._max.lastSeenAt),
   ]);
+  // The postings themselves. Storing the text locally is what makes an
+  // application survive its posting being taken down, and this is the page
+  // where that pays off: a card marked "posting closed" still opens and reads,
+  // which is not true of the link in its title. The radar has to think about
+  // this — its list is thirty rows off a 525k table and the text lives in a
+  // separate row for exactly that reason — while a pipeline is thirty-odd rows
+  // in total, so the whole thing comes down with the page.
+  const texts = await prisma.jobContent.findMany({
+    where: { jobId: { in: jobs.map((j) => j.id) } },
+    select: { jobId: true, description: true },
+  });
+  const descriptions = new Map(texts.map((t) => [t.jobId, t.description]));
   const nowDate = new Date();
   // Lifecycle rules come from queue/pursuit.ts — a render function is where
   // one of them used to live, which meant it could only be tested by
@@ -71,18 +90,24 @@ export default async function AppliedPage({
           <div className="meta">
             {j.company}
             {j.location ? ` · ${j.location}` : ""}{" "}
-            {/* The radar's vocabulary, not a second one. These three badges
-                used to be written here by hand: sponsor✓ from `sponsorReg`
-                (where the radar's card reads the derived tier and says
-                sponsor?), and "⚠ posting closed" from a bare `delistedAt`
-                where the radar uses the broader, tested classifier — so a
-                posting its source had stopped listing could show closed on one
-                page and nothing on the other. */}
-            {postingLabels(j, { now: nowDate, poolNewest: poolNewest ?? undefined })
-              .filter((l) => l.kind === "visa" || l.kind === "delisted")
-              .map((l) => (
-                <span key={l.kind} className={`badge t-${l.tone}`} title={l.title}>{l.text}</span>
-              ))}
+            {/* The radar's vocabulary, not a second one. These badges used to
+                be written here by hand: sponsor✓ from `sponsorReg` (where the
+                radar's card reads the derived tier and says sponsor?), and
+                "⚠ posting closed" from a bare `delistedAt` where the radar
+                uses the broader, tested classifier — so a posting its source
+                had stopped listing could show closed on one page and nothing
+                on the other. The rendering is shared now too.
+
+                An allow-list rather than an exclusion: this page wants a
+                different subset than the radar, and admitting each kind
+                deliberately is what stops a new label appearing on a tracker
+                where it makes no sense. "may not be fresh" is the example —
+                true of the posting, irrelevant to an application already
+                sent — and "applied@co" would be true of every card here. */}
+            <Badges
+              labels={postingLabels(j, { now: nowDate, poolNewest: poolNewest ?? undefined })
+                .filter((l) => SHOWN_LABELS.has(l.kind))}
+            />
             {" · "}
             <span className="src">{j.source}</span>
           </div>
@@ -95,6 +120,18 @@ export default async function AppliedPage({
                 <button className="btn quiet" type="submit">Ghosted</button>
               </form>
             </div>
+          )}
+          {/* The posting, kept. Closed, so the browser paints none of it, and
+              open with no round trip because the text came down with the page.
+              On this page it is the copy of record: the link in the title
+              points at a source that may have taken the posting down, and by
+              the time an interview asks what the role actually said, it often
+              has. */}
+          {descriptions.get(j.id) && (
+            <details className="posting">
+              <summary>the posting</summary>
+              <pre>{descriptions.get(j.id)}</pre>
+            </details>
           )}
           <form action={saveNote} className="noteform">
             <input type="hidden" name="id" value={j.id} />

@@ -45,6 +45,9 @@ model CompanyProbe {
   // Tier 5 (website -> careers-page scan) already attempted for this name.
   deepChecked Boolean  @default(false)
   website     String? // domain the LLM resolved (kept even on a miss)
+  // The platform set this verdict was probed under (see PROBE_SIGNATURE).
+  // A miss recorded under a smaller set than today's is stale, not final.
+  probeVersion String?
   createdAt   DateTime @default(now())
 }
 

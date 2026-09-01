@@ -14,6 +14,19 @@ import { probeBoard } from "./validate";
 // Platforms whose probe body carries a company name (see validate.ts).
 const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecruiters", "personio"] as const;
 
+// The coverage fingerprint a verdict was produced under. A cached miss only
+// means "not found on THESE platforms" — when the list grows, every old miss
+// silently stops being an answer. Staleness is cache invalidation: the
+// invalidator is the list itself, never a hand-bumped constant someone
+// forgets to touch.
+export const PROBE_SIGNATURE = [...VERIFIABLE_PLATFORMS].sort().join(",");
+
+// A miss from an older (or unknown) platform set deserves a re-probe; a hit
+// never goes stale — the board it found is real regardless of coverage.
+export function isStaleMiss(row: { found: boolean; probeVersion: string | null }): boolean {
+  return !row.found && row.probeVersion !== PROBE_SIGNATURE;
+}
+
 // Legal suffixes carry no identity; product words (Games, Labs, Studio) DO —
 // stripping "Games" would turn Dream Games into a different company.
 const LEGAL_SUFFIX_RE =
@@ -136,23 +149,55 @@ export async function runNameProbes(
 
     report.checked++;
     const hit = await probeCompany(raw, probeFn);
-    await prisma.companyProbe.create({ data: { name: norm, displayName: raw, found: hit !== null } });
+    await prisma.companyProbe.create({
+      data: { name: norm, displayName: raw, found: hit !== null, probeVersion: PROBE_SIGNATURE },
+    });
     if (hit) {
       report.found++;
-      await prisma.atsBoard.upsert({
-        where: { platform_token_region: { platform: hit.platform, token: hit.token, region: "" } },
-        update: {},
-        create: {
-          platform: hit.platform,
-          token: hit.token,
-          region: "",
-          companyName: hit.companyName,
-          status: "active", // we just probed it live
-          discoveredVia: "name-probe",
-          validatedAt: new Date(),
-        },
+      await recordHit(hit);
+    }
+  }
+
+  // Leftover budget goes to stale misses: verdicts recorded under a smaller
+  // platform set than today's. Fresh names always come first — a re-probe is
+  // a second chance, not a priority.
+  if (report.checked < budget) {
+    const stale = await prisma.companyProbe.findMany({
+      where: {
+        found: false,
+        OR: [{ probeVersion: null }, { probeVersion: { not: PROBE_SIGNATURE } }],
+      },
+      orderBy: { createdAt: "asc" },
+      take: budget - report.checked,
+    });
+    for (const row of stale) {
+      report.checked++;
+      const hit = await probeCompany(row.displayName ?? row.name, probeFn);
+      await prisma.companyProbe.update({
+        where: { id: row.id },
+        data: { found: hit !== null, probeVersion: PROBE_SIGNATURE },
       });
+      if (hit) {
+        report.found++;
+        await recordHit(hit);
+      }
     }
   }
   return report;
+}
+
+async function recordHit(hit: NameProbeHit): Promise<void> {
+  await prisma.atsBoard.upsert({
+    where: { platform_token_region: { platform: hit.platform, token: hit.token, region: "" } },
+    update: {},
+    create: {
+      platform: hit.platform,
+      token: hit.token,
+      region: "",
+      companyName: hit.companyName,
+      status: "active", // we just probed it live
+      discoveredVia: "name-probe",
+      validatedAt: new Date(),
+    },
+  });
 }

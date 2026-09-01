@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  PROBE_SIGNATURE,
+  isStaleMiss,
   namesMatch,
   normalizeCompanyName,
   probeCompany,
@@ -30,6 +32,24 @@ test("namesMatch: the gh:peak guard", () => {
   assert.equal(namesMatch("Dream Games", "dreamgames"), true); // spacing-insensitive
   assert.equal(namesMatch("Preply", "Preply Barcelona SL"), true);
   assert.equal(namesMatch("", "Anything"), false);
+});
+
+// ── cache versioning ─────────────────────────────────────────────────────────
+
+test("PROBE_SIGNATURE is order-independent and readable", () => {
+  // Sorted join: reordering VERIFIABLE_PLATFORMS must not invalidate caches.
+  const parts = PROBE_SIGNATURE.split(",");
+  assert.deepEqual(parts, [...parts].sort());
+  assert.ok(parts.includes("greenhouse"));
+});
+
+test("isStaleMiss: misses go stale across signatures, hits never do", () => {
+  assert.equal(isStaleMiss({ found: false, probeVersion: null }), true);
+  assert.equal(isStaleMiss({ found: false, probeVersion: "greenhouse" }), true);
+  assert.equal(isStaleMiss({ found: false, probeVersion: PROBE_SIGNATURE }), false);
+  // A found board is real regardless of what coverage found it:
+  assert.equal(isStaleMiss({ found: true, probeVersion: null }), false);
+  assert.equal(isStaleMiss({ found: true, probeVersion: "old" }), false);
 });
 
 // ── probe orchestration with a scripted prober ───────────────────────────────

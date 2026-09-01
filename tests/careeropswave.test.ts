@@ -162,6 +162,21 @@ test("liveness: typographic punctuation normalized before matching", () => {
   assert.equal(normalizeForMatch("café “quoted”"), 'cafe "quoted"');
 });
 
+test("liveness: a banner may name the thing with two words, not one", () => {
+  // Arbeitnow: "This job position has been removed from Arbeitnow". The pattern
+  // allowed exactly one noun between "this" and "has", so a genuinely closed
+  // posting read as ACTIVE — measured against the live page, which is how it
+  // was found rather than by reading the regex.
+  const arbeitnow =
+    "Post a Job Jobs in Germany This job position has been removed from Arbeitnow and might not be hiring still.";
+  assert.equal(classifyLiveness(200, arbeitnow), "expired");
+  assert.equal(classifyLiveness(200, "This job has been removed"), "expired");
+  assert.equal(classifyLiveness(200, "This job listing has expired"), "expired");
+  assert.equal(classifyLiveness(200, "This job posting has been taken down"), "expired");
+  // And a page that says the opposite still reads as open.
+  assert.equal(classifyLiveness(200, "We are still hiring for this position"), "active");
+});
+
 test("liveness: hard statuses, banners, and the honest defaults", () => {
   assert.equal(classifyLiveness(404, ""), "expired");
   assert.equal(classifyLiveness(410, ""), "expired");

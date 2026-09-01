@@ -50,7 +50,10 @@ const EXPIRED_PATTERNS: RegExp[] = [
   /\bjob (is )?no longer (available|open|active)\b/i,
   /no longer accepting applications/i,
   /\b(?:position|role|posting|opening|vacancy|requisition)\b[\s\S]{0,60}?has been filled\b(?!\s+out)/i,
-  /this (?:job|posting|position) has (?:expired|closed|been closed|been removed)/i,
+  // One noun or two: Arbeitnow says "this JOB POSITION has been removed", and
+  // the single-word version read that page as live. A closure banner names the
+  // thing however it likes.
+  /this (?:(?:job|posting|position|listing|vacancy|opening)\s+){1,2}has (?:expired|closed|been closed|been removed|been taken down)/i,
   /\bjob (?:posting )?(?:has )?expired\b/i,
   /posting (?:is )?(?:closed|inactive|not found)/i,
   // German

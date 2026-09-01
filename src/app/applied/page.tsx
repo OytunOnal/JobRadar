@@ -167,9 +167,10 @@ export default async function AppliedPage({
             )}
           </div>
           {/* Everything you can do about it, in one row that fills the space
-              under the pill. One container for one and for five, so a settled
-              card is the same card with less in it. */}
-          <div className="actionrow">
+              under the pill. Five buttons sit at the top of that space, under
+              the label they act on; a settled card's single button centres in
+              it instead of hanging off the top edge. */}
+          <div className={`actionrow${isAdvancing(j.status) ? "" : " settled"}`}>
           {/* A pursuit that is not moving does not need five ways forward.
               Offering applied / interview / stopped / offer / ghosted on a
               rejection is a row of buttons for a conversation that is over,

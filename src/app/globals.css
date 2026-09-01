@@ -202,17 +202,20 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 }
 .trackrow .actions .btn { width: auto; padding: 3px 9px; font-size: 11.5px; }
 .trackrow .status-pill { text-align: right; padding-bottom: 4px; }
-/* ONE FORM FOR EVERY CARD, whatever it can do.
-   The corner is a column: the state pinned to the top right, and everything
-   you can do about it in the space underneath, vertically centred. That row
-   holds five buttons on a live pursuit and one on a settled one, and neither
-   case gets its own layout — a lone button parked hard against the top edge
-   reads as the leftovers of a row that was removed. */
+/* The corner is a column: the state pinned to the top right on every card,
+   whatever that card can do, and everything you can do about it in the space
+   underneath.
+   Where in that space depends on how much there is. A row of five sits
+   directly under the label it acts on, which is where the eye goes after
+   reading it. A lone button in the same place reads as the leftovers of a row
+   that was removed, so a settled card centres its one action in the space
+   instead — deliberate rather than left over. */
 .trackrow .actionrow {
   flex: 1;
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end;
   gap: 4px;
 }
+.trackrow .actionrow.settled { align-items: center; }
 .trackrow .actionrow form { margin: 0; }
 /* How long you have been waiting, beside the status it is waiting in. Lower
    case and outlined so it reads as a second fact rather than a longer status:

@@ -19,7 +19,15 @@ const { prisma } = await import("../src/lib/db");
 const { boardSources, isDue } = await import("../src/lib/discovery/boardSources");
 const { selects } = await import("../src/lib/ingest/fetch");
 
-const NOW = new Date("2026-08-25T12:00:00Z");
+// The real clock, deliberately. These rows are read back through
+// boardSources(), which asks isDue without a `now` and therefore gets the real
+// one. Anchored to a frozen date, "freshly stamped" meant "stamped on
+// 2026-08-25" — true for seven days and false on the eighth, when the fixture's
+// own interval elapsed and this file started failing on its own.
+//
+// A frozen clock is right where the code under test accepts one. Here it only
+// froze half the comparison.
+const NOW = new Date();
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
 
 // greenhouse and recruitee both have fetchers wired; without one a board is

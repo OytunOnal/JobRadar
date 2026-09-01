@@ -55,8 +55,13 @@ await prisma.job.createMany({
     // or failing, for an unrelated reason — whenever DELISTED_AFTER_DAYS moved.
     job({ source: "gh:acme", country: "de", lastSeenAt: days(DELISTED_AFTER_DAYS + 5) }),
     job({ source: "eures", country: "de", lastSeenAt: days(DELISTED_AFTER_DAYS + 5) }),
-    // A company mid-application.
+    // A company mid-application, with two pursuits at it — the strip counts
+    // pursuits, the badge names companies, and one is not the other.
     job({ status: "applied", company: "Applied GmbH", country: "de" }),
+    job({ status: "interview", company: "Applied GmbH", country: "de" }),
+    job({ status: "stopped", company: "Frozen AG", country: "de" }),
+    // Ended, so it is no longer in progress.
+    job({ status: "rejected", company: "Nope BV", country: "de" }),
   ],
 });
 
@@ -126,6 +131,18 @@ test("companies mid-application are named, for the badge and the one-click hide"
   assert.equal(r.labelCtx.appliedCompanies, r.appliedCompanies,
     "one set, shared with the label context — not two spellings of it");
   assert.deepEqual(r.labelCtx.now, NOW, "one clock for every card in the response");
+});
+
+// The strip used to sum the ingest-end snapshot's byStatus, so the number was
+// whatever it had been when the last scan finished: marking a posting applied
+// left it saying 8 while the pipeline held 24. A snapshot is right for pool
+// statistics and wrong for the one number the user changes by clicking.
+test("the in-progress count is the pipeline now, not the pipeline at the last scan", async () => {
+  const r = await readRadar(radarFilters(none, TRACKS), { now: NOW });
+  assert.equal(r.pursuedCount, 3,
+    "applied + interview + stopped; the rejection has ended and does not count");
+  assert.equal(r.appliedCompanies.size, 2,
+    "two companies, three pursuits — the count is not the size of the set");
 });
 
 test("the reading carries this page's postings, keyed by the posting they belong to", async () => {

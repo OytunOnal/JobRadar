@@ -4,7 +4,6 @@ import { COUNTRY_NAMES, REGION_KEYS } from "@/lib/location/geo";
 import { setStatus, triggerIngest, draftCover, analyzeFitAction, dismissCompanyRest } from "./actions";
 import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
-import { PURSUED_STATUSES } from "@/lib/queue/pool";
 import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS } from "@/lib/view/labels";
 import { Badges } from "@/lib/view/Badges";
 import { FitScore } from "@/lib/view/FitScore";
@@ -53,14 +52,13 @@ export default async function Page({
   // The reading — nine queries in three waves — lives in view/radar-read.ts,
   // where its invariants are tested against a real database. The page asks
   // once and lays the answer out; it decides nothing and sequences nothing.
-  const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, labelCtx, descriptions } =
+  const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, pursuedCount, labelCtx, descriptions } =
     await readRadar(f);
   const { top: topCountries, otherCount, counts, remoteCount, unknownCount } = chips;
   // The selection the query was actually built from — not re-derived here, so
   // the chip active-state cannot diverge from the list it claims to filter.
   const countrySet = new Set(chips.selected);
   const country = [...countrySet].sort().join(",");
-  const sc = stats.byStatus;
   const vc = stats.byVerdict;
   const total = stats.total;
 
@@ -116,7 +114,7 @@ export default async function Page({
         <span><b>{fmt(total)}</b> tracked</span>
         <span className="s-strong"><b>{fmt(vc["strong"] ?? 0)}</b> strong</span>
         <span className="s-possible"><b>{fmt(vc["possible"] ?? 0)}</b> possible</span>
-        <a href={`/applied${fromQS}`}><b>{fmt(PURSUED_STATUSES.reduce((sum, st) => sum + (sc[st] ?? 0), 0))}</b> in progress</a>
+        <a href={`/applied${fromQS}`}><b>{fmt(pursuedCount)}</b> in progress</a>
       </div>
 
       <div className="filterbar">

@@ -43,9 +43,18 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
       orderBy: [{ fitScore: { sort: "desc", nulls: "last" } }, { score: "desc" }],
       take: STARRED_MAX,
     }),
-    // Companies with an application in progress — their remaining postings get
-    // a badge and a one-click "hide the rest".
-    prisma.job.findMany({ where: pursuedWhere(), select: { company: true }, distinct: ["company"] }),
+    // The user's own pipeline. Two things come off this one read: which
+    // companies have an application in progress (their remaining postings get
+    // a badge and a one-click "hide the rest") and how many pursuits there are.
+    //
+    // NOT from the snapshot, which is where the count used to come from. That
+    // row is written at the end of an ingest, so the number was frozen at the
+    // last scan: mark a posting applied and the strip kept saying 8 while the
+    // pipeline held 24. A snapshot is right for pool statistics — half a
+    // million postings, expensive to group, changed only by the pipeline that
+    // writes it — and wrong for the one number the user changes by clicking.
+    // Their pipeline is two dozen indexed rows.
+    prisma.job.findMany({ where: pursuedWhere(), select: { company: true } }),
   ]);
 
   // Wave 1 — the pool's own clock: how far the newest observation has
@@ -101,6 +110,7 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
     ? (JSON.parse(snapshot.stats) as { total: number; byStatus: Record<string, number>; byVerdict: Record<string, number> })
     : { total: 0, byStatus: {}, byVerdict: {} };
   const appliedCompanies = new Set(appliedRows.map((r) => r.company));
+  const pursuedCount = appliedRows.length;
   // The card clock is taken AFTER the reads, so freshness is judged against an
   // instant no older than the data. Injectable for the tests, which need the
   // response deterministic.
@@ -120,6 +130,7 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
     stats,
     starred,
     appliedCompanies,
+    pursuedCount,
     // Keyed by posting id, so a card can only ever show its own text.
     descriptions,
     // One clock and one pool reading for every card in the response, so two

@@ -6,6 +6,12 @@ import { DISMISS_REASONS } from "@/lib/view/dismiss-reasons";
 import { readRadar } from "@/lib/view/radar-read";
 import { isVerdictStale, postingLabels, staleVerdictTitle, VISA_LABELS, VISA_TIERS } from "@/lib/view/labels";
 import { Badges } from "@/lib/view/Badges";
+
+// The title line describes what the job IS — its track, where it happens —
+// and everything else a card says is an ASSESSMENT, which lives under the
+// score with the verdict that produced it. One card, two registers: facts up
+// top with the name, judgements in the judgement column.
+const FACT_LABELS = new Set(["track", "work-mode"]);
 import { FitScore } from "@/lib/view/FitScore";
 import { radarFilters, VERDICTS, WORK_MODES } from "@/lib/view/radar";
 
@@ -271,7 +277,13 @@ export default async function Page({
                 </>
               )}
 
-              {/* Risks are disclosed here rather than used to hide the card.
+              {/* Everything the SYSTEM says about this posting, stacked
+                  under the system's number. The title line keeps only what
+                  the job IS — track and where it happens — and the verdict
+                  column carries the assessments: risks, the visa reading,
+                  the language barrier, the judge's cap, applied@co.
+
+                  Risks are disclosed here rather than used to hide the card.
                   Both were previously reasons a posting never appeared: the
                   age filter dropped it outright, and ghost risk was a badge
                   buried among the meta chips. Neither is a reason to decide
@@ -284,6 +296,9 @@ export default async function Page({
                   {l.text}
                 </div>
               ))}
+              <div className="fitlabels">
+                <Badges labels={labels.filter((l) => !FACT_LABELS.has(l.kind) && l.kind !== "freshness" && l.kind !== "ghost-risk")} />
+              </div>
             </div>
 
             <div className="jobmain">
@@ -291,7 +306,7 @@ export default async function Page({
                 <a href={j.url} target="_blank" rel="noopener noreferrer">{j.title}</a>
               </p>
               <div className="meta">
-                <Badges labels={labels.filter((l) => l.kind !== "freshness" && l.kind !== "ghost-risk")} />
+                <Badges labels={labels.filter((l) => FACT_LABELS.has(l.kind))} />
                 {j.company}
                 {j.location ? ` · ${j.location}` : ""}
                 {j.salaryText ? ` · ${j.salaryText}` : ""}

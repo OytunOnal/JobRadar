@@ -161,7 +161,7 @@ export default async function AppliedPage({
           <div className="status-pill">
             {j.status}
             {(j.statusAt ?? j.appliedAt) && (
-              <span className="agechip" title={pursuitDates(j)}>
+              <span className="agebadge" title={pursuitDates(j)}>
                 {ageWords((j.statusAt ?? j.appliedAt)!, nowDate)}
               </span>
             )}

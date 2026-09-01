@@ -266,9 +266,29 @@ _Avoid_: level filter, experience range
 
 **Label**:
 Something a posting's card says about it — a risk, a plain fact, or good news.
-Every surface draws from one vocabulary, so the same fact cannot read as
-`sponsor✓` on one page and `sponsor?` on another.
+Every surface draws from one vocabulary, so two pages cannot make different
+claims about one posting. `sponsor✓` and `sponsor?` are not two spellings of
+one label — the first says the posting itself offers sponsorship, the second
+says only that the company appears in a public sponsor register — and 1,920
+postings once wore one on the radar and the other on the tracker, because the
+two surfaces read different columns to decide which applied.
+
+A label is the claim and its tone, not its appearance; badges and chips are
+how one gets drawn.
 _Avoid_: badge, chip, tag, flag
+
+**Badge** / **Chip**:
+The two ways a fact is drawn, and they are drawings rather than meanings: a
+badge is what a card wears, a chip is what you click to filter by. Neither is
+a synonym for label. The same visa tier is `sponsor✓` on a card and `sponsors`
+in the filter bar, because a card is scanned by the hundred and a chip has to
+explain itself to someone who has never seen the app. One record, two
+renderings, declared on the same line so they cannot drift.
+
+Anything on a card that is not clickable is a badge, whatever it is made of.
+The age beside a pursuit's status was called a chip for a day, on the strength
+of being small and round.
+_Avoid_: pill, tag, token; and using either word for the fact itself
 
 **Tone**:
 Whether a label is a risk, a note, or good news. The label's meaning; the

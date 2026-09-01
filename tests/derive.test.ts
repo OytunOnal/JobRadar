@@ -21,7 +21,7 @@ const CTX = { country: "de", sponsorReg: false };
 
 function current(over: Partial<CurrentRow> = {}): CurrentRow {
   return {
-    visa: "unknown", visaBy: "regex", seniorityLevel: null, seniorityBy: null,
+    visa: "unknown", visaBy: "regex", seniorityLevel: null, seniorityBy: null, workModeBy: null,
     sponsorReg: false, source: "gh:acme", country: "de", ...over,
   };
 }

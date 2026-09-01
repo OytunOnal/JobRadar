@@ -18,6 +18,7 @@
   --strong: #3dd68c;        /* signal */
   --possible: #e5b84b;      /* maybe-signal */
   --weak: #5a6472;          /* noise fades, it doesn't shout */
+  --danger: #e0605e;        /* a hard stop — used sparingly, so it stays one */
 
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", monospace;
   --sans: system-ui, "Segoe UI", -apple-system, sans-serif;
@@ -95,7 +96,10 @@ header.top {
 .job {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 16px 18px; margin-bottom: 10px;
-  display: grid; grid-template-columns: 84px 1fr auto; gap: 18px; align-items: start;
+  /* The verdict column is sized by its widest resident: assessment badges
+     like MAY NOT BE FRESH live under the score now, and at 84px they wrapped
+     to two lines, which made every caveat twice as tall as its neighbours. */
+  display: grid; grid-template-columns: 132px 1fr auto; gap: 18px; align-items: start;
 }
 .job:hover { border-color: var(--line-strong); }
 
@@ -131,6 +135,12 @@ header.top {
    the same idea wore different classes on different surfaces, and one badge
    (`.badge.ghost`) had no user at all. */
 .badge.t-risk { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
+/* Risk is not one severity. A caution is something to weigh (amber); a hard
+   requirement you don't meet is a stop (red). Kind-level sharpening on top of
+   the tone default — the meaning is still the label's, only the colour of
+   attention is decided here. */
+.badge.b-freshness, .badge.b-ghost-risk { color: var(--possible); opacity: 1; }
+.badge.b-language { color: var(--danger); opacity: 1; }
 .badge.t-good { color: var(--strong); border-color: currentColor; }
 .badge.t-note { color: var(--muted); }
 .fitcomment { margin-top: 8px; font-size: 13px; color: var(--text); opacity: 0.92; }
@@ -297,13 +307,16 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .verdict-stale .vlabel { font-style: italic; }
 .fitnum-inline.verdict-stale { opacity: 0.45; font-weight: 500; }
 
-/* Risk disclosures under the fit score. These replace two things that used to
-   HIDE a posting or bury the warning: the 45-day age filter (which dropped 74
-   already-judged postings, 72 of them real openings by the model's own
-   reading) and a ghost badge lost among the meta chips. Showing the risk lets
-   the reader weigh it; hiding decided for them on worse evidence. */
-.risk {
-  margin-top: 6px; font-size: 10px; line-height: 1.25; letter-spacing: 0.02em;
-  color: var(--muted); text-align: center; cursor: help;
-}
-.risk.warn { color: var(--weak); }
+/* Assessment badges under the score, one per line: the verdict column reads
+   top to bottom as "the number, the confidence, the caveats". Inline they
+   competed with the company name for the reader's first glance.
+
+   The freshness and ghost disclosures render here as ordinary risk-toned
+   badges now — they used to be bare text in their own `.risk` style, which
+   made two of the six assessments look like a different kind of thing than
+   the other four. They still replace what once HID a posting: the 45-day age
+   filter (dropped 74 already-judged postings, 72 of them real openings by the
+   model's own reading) and a ghost badge lost among the meta chips. Showing
+   the risk lets the reader weigh it; hiding decided for them. */
+.fitlabels { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.fitlabels .badge { margin-right: 0; white-space: nowrap; }

@@ -264,6 +264,15 @@ The levels one track will accept. Per track, because ten years in one field and
 two in another want different answers.
 _Avoid_: level filter, experience range
 
+**Work mode**:
+Whether a role is remote, hybrid, or onsite — a claim with an author, never a
+default. The employer's structural field outranks anything read from text, and
+`unknown` means nobody said. Measured 2026-09: postings state the arrangement
+in the ATS dropdown, not in prose, so most text is honestly silent — and until
+then `onsite` doubled as "nobody said" on ~45k postings, a default wearing the
+clothes of a finding.
+_Avoid_: workplace type, location type, remote flag (a boolean cannot say hybrid)
+
 **Label**:
 Something a posting's card says about it — a risk, a plain fact, or good news.
 Every surface draws from one vocabulary, so two pages cannot make different

@@ -22,6 +22,10 @@ export const WORK_MODES = [
   { value: "remote", label: "remote" },
   { value: "hybrid", label: "hybrid" },
   { value: "onsite", label: "on-site" },
+  // Filterable silence, like the visa tiers: most postings state no
+  // arrangement anywhere (measured — employers fill a dropdown, not prose),
+  // and "nobody said" is a population you can want to see or exclude.
+  { value: "unknown", label: "not stated" },
 ] as const;
 // The country chips that are not countries: the long tail, postings with no
 // location at all, and locations we could not place.

@@ -94,7 +94,7 @@ export function cardToRawJob(card: BaCard, detail?: { description?: string; exte
     title: card.title,
     company: card.company,
     location: card.location,
-    remote: false, // BA listings are location-bound; deriveWorkMode reads the text
+    remote: false, // BA listings are location-bound; the work-mode detector reads the text
     salaryText: card.salaryText,
     // Converted HERE, in the pure mapper, rather than inside fetchDetail:
     // this function is exported and tested, and a mapper that trusts its

@@ -51,7 +51,7 @@ export function parseFeed(xml: string): RawJob[] {
       title: rawTitle,
       company,
       location: "Denmark",
-      remote: false, // deriveWorkMode reads the text
+      remote: false, // the work-mode detector reads the text
       description: stripHtml(decodeEntities(decodeEntities(pick(body, "description")))),
       postedAt: pub ? new Date(pub) : undefined,
     });

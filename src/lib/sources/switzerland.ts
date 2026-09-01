@@ -68,7 +68,7 @@ export function cardToRawJob(card: ChCard, description?: string): RawJob {
     title: card.title,
     company: card.company,
     location: card.location,
-    remote: false, // deriveWorkMode reads the text
+    remote: false, // the work-mode detector reads the text
     // Converted here rather than trusting the caller. `preview` arrives
     // already converted from parseAd, and htmlToText on clean text is a no-op;
     // a detail body handed in raw is not, and this mapper is exported.

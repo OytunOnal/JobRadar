@@ -203,7 +203,12 @@ export function postingLabels(job: LabelledPosting, ctx: LabelContext = {}): Lab
 
   // ── Plain facts ───────────────────────────────────────────────────────
   if (job.track) labels.push({ kind: "track", text: job.track, tone: "note" });
-  if (job.workMode !== "onsite") labels.push({ kind: "work-mode", text: job.workMode, tone: "note" });
+  // Every KNOWN mode speaks, onsite included — silence is reserved for
+  // "nobody said". Until the unknown value existed this line hid onsite,
+  // because onsite was the default and showing it would have stamped a guess
+  // on ~45k cards; now a card saying onsite means the employer or the text
+  // actually said so.
+  if (job.workMode !== "unknown") labels.push({ kind: "work-mode", text: job.workMode, tone: "note" });
 
   if (ctx.appliedCompanies?.has(job.company)) {
     labels.push({

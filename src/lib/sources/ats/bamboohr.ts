@@ -13,7 +13,14 @@ export function mapBambooRows(rows: any[], token: string, company: string): RawJ
       title: String(j.jobOpeningName),
       company,
       location: [j.location?.city, j.location?.state].filter(Boolean).join(", "),
-      remote: Boolean(j.isRemote),
+      remote: Boolean(j.isRemote) || String(j.locationType) === "1",
+      // locationType is the employer's dropdown, decoded by correlation over
+      // 23 boards: "1" rows carry no city at all (remote), "2" rows carry a
+      // city plus flexibility (hybrid). "0" is 81% of rows and is the field's
+      // resting state — a default, not an employer choosing onsite — so it
+      // stays undefined. isRemote was null on every row observed.
+      workMode: String(j.locationType) === "1" ? "remote" as const
+        : String(j.locationType) === "2" ? "hybrid" as const : undefined,
       // List payload has no body; title-based scoring classifies these.
       description: String(j.jobOpeningName),
       postedAt: undefined,

@@ -10,6 +10,13 @@ export const DISMISS_REASONS: Array<{ key: string; label: string }> = [
   { key: "terms", label: "Weak terms / salary" },
   { key: "no-visa", label: "No visa sponsorship" },
   { key: "ghost", label: "Ghost / suspicious" },
+  // Not a preference like the others: an OBSERVATION about the pool. The user
+  // opened the posting and the source said it is gone — which is exactly the
+  // evidence the liveness prober exists to collect, delivered by hand. The
+  // dismiss action treats it accordingly (see setStatus): the posting is also
+  // marked delisted, and a wrong click self-heals, because a re-sighting
+  // clears delistedAt on any posting its source still lists.
+  { key: "closed", label: "Posting closed" },
 ];
 
 export function reasonLabel(key: string | null): string {

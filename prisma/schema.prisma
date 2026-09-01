@@ -45,6 +45,9 @@ model CompanyProbe {
   // Tier 5 (website -> careers-page scan) already attempted for this name.
   deepChecked Boolean  @default(false)
   website     String? // domain the LLM resolved (kept even on a miss)
+  // The platform set this verdict was probed under (see PROBE_SIGNATURE).
+  // A miss recorded under a smaller set than today's is stale, not final.
+  probeVersion String?
   createdAt   DateTime @default(now())
 }
 
@@ -70,10 +73,16 @@ model Job {
   // ISO alpha-2, resolved from the location string (gazetteer → cache →
   // batched LLM). null = no location (remote) or unresolved.
   country     String?
-  // remote | hybrid | onsite — explicit from the source when it says so,
-  // else derived from the posting text. `remote` stays as the boolean the
-  // region filter keys on (hybrid is location-bound, NOT remote).
-  workMode    String   @default("onsite")
+  // remote | hybrid | onsite | unknown — a claim with an author, never a
+  // default. workModeBy says whose: "source" (the employer's structural ATS
+  // field), "text" (the position-first detector), "llm" (the facts extractor),
+  // null (nobody said — workMode is then "unknown"). Stronger authors are
+  // never overwritten by weaker ones. Until 2026-09 the default was "onsite",
+  // which put a guess on ~45k postings whose text and source were both silent.
+  // `remote` stays as the boolean the region filter keys on (hybrid is
+  // location-bound, NOT remote).
+  workMode    String   @default("unknown")
+  workModeBy  String?
   salaryText  String?
   // description moved to JobContent (layered split) — the hot row carries
   // only what list rendering and sorting need.
@@ -218,6 +227,7 @@ model PostingFacts {
   jobId            String  @id
   job              Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
   visaOffered      String? // yes | no | null (posting silent)
+  workMode         String? // remote | hybrid | onsite | null (posting silent)
   seniorityLevel   String? // intern|junior|mid|senior|staff|management|unknown
   langReq          String? // comma-separated ISO codes required by the posting
   ghostRisk        Boolean @default(false)

@@ -297,18 +297,16 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
 .verdict-stale .vlabel { font-style: italic; }
 .fitnum-inline.verdict-stale { opacity: 0.45; font-weight: 500; }
 
-/* Risk disclosures under the fit score. These replace two things that used to
-   HIDE a posting or bury the warning: the 45-day age filter (which dropped 74
-   already-judged postings, 72 of them real openings by the model's own
-   reading) and a ghost badge lost among the meta chips. Showing the risk lets
-   the reader weigh it; hiding decided for them on worse evidence. */
-.risk {
-  margin-top: 6px; font-size: 10px; line-height: 1.25; letter-spacing: 0.02em;
-  color: var(--muted); text-align: center; cursor: help;
-}
-.risk.warn { color: var(--weak); }
 /* Assessment badges under the score, one per line: the verdict column reads
    top to bottom as "the number, the confidence, the caveats". Inline they
-   competed with the company name for the reader's first glance. */
+   competed with the company name for the reader's first glance.
+
+   The freshness and ghost disclosures render here as ordinary risk-toned
+   badges now — they used to be bare text in their own `.risk` style, which
+   made two of the six assessments look like a different kind of thing than
+   the other four. They still replace what once HID a posting: the 45-day age
+   filter (dropped 74 already-judged postings, 72 of them real openings by the
+   model's own reading) and a ghost badge lost among the meta chips. Showing
+   the risk lets the reader weigh it; hiding decided for them. */
 .fitlabels { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .fitlabels .badge { margin-right: 0; }

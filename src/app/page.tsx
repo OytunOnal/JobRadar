@@ -291,13 +291,8 @@ export default async function Page({
                   (Ashby reports Elicit's still-listed ML role as published in
                   2021) and a ghost flag is a judgement worth showing, not
                   acting on silently. */}
-              {labels.filter((l) => l.kind === "freshness" || l.kind === "ghost-risk").map((l) => (
-                <div key={l.kind} className={l.kind === "ghost-risk" ? "risk warn" : "risk"} title={l.title}>
-                  {l.text}
-                </div>
-              ))}
               <div className="fitlabels">
-                <Badges labels={labels.filter((l) => !FACT_LABELS.has(l.kind) && l.kind !== "freshness" && l.kind !== "ghost-risk")} />
+                <Badges labels={labels.filter((l) => !FACT_LABELS.has(l.kind))} />
               </div>
             </div>
 

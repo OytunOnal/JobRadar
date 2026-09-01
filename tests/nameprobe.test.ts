@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PROBE_SIGNATURE,
+  boardTitleName,
   isStaleMiss,
   namesMatch,
   normalizeCompanyName,
@@ -54,45 +55,123 @@ test("isStaleMiss: misses go stale across signatures, hits never do", () => {
 
 // ── probe orchestration with a scripted prober ───────────────────────────────
 
-function scripted(responses: Record<string, { result: string; companyName?: string | null; jobCount?: number }>) {
+function scripted(
+  responses: Record<string, { result: string; companyName?: string | null; jobCount?: number }>,
+  pages: Record<string, { status: number; text: string }> = {},
+) {
   const calls: string[] = [];
   const fn = (async (platform: string, token: string) => {
     calls.push(`${platform}:${token}`);
     return responses[`${platform}:${token}`] ?? { result: "dead" };
   }) as any;
-  return { fn, calls };
+  // HTML tier: scripted pages by URL; anything unscripted 404s.
+  const html = async (url: string) => {
+    calls.push(`html:${url}`);
+    return pages[url] ?? { status: 404, text: "" };
+  };
+  return { fn, calls, html };
 }
 
 test("first VERIFIED hit wins; live-but-wrong-name slugs are rejected", async () => {
-  const { fn, calls } = scripted({
+  const { fn, calls, html } = scripted({
     // greenhouse slug is live but belongs to someone else — must be skipped:
     "greenhouse:dreamgames": { result: "active", companyName: "Dream Physical Therapy" },
     "workable:dreamgames": { result: "active", companyName: "Dream Games Ltd", jobCount: 14 },
   });
-  const hit = await probeCompany("Dream Games", fn);
+  const hit = await probeCompany("Dream Games", fn, html);
   assert.equal(hit?.platform, "workable");
   assert.equal(hit?.companyName, "Dream Games Ltd");
   assert.ok(calls.includes("greenhouse:dreamgames")); // tried, rejected, moved on
 });
 
 test("no verified hit anywhere → null (hyphen variant also tried)", async () => {
-  const { fn, calls } = scripted({});
-  const hit = await probeCompany("Good Job Games", fn);
+  const { fn, calls, html } = scripted({});
+  const hit = await probeCompany("Good Job Games", fn, html);
   assert.equal(hit, null);
   assert.ok(calls.includes("greenhouse:goodjobgames"));
   assert.ok(calls.includes("greenhouse:good-job-games"));
 });
 
 test("nameless probe results can never verify", async () => {
-  const { fn } = scripted({
+  const { fn, html } = scripted({
     "greenhouse:azumo": { result: "active", companyName: null },
   });
-  assert.equal(await probeCompany("Azumo", fn), null);
+  assert.equal(await probeCompany("Azumo", fn, html), null);
 });
 
 test("name-matching but EMPTY boards are squats, not hits", async () => {
-  const { fn } = scripted({
+  const { fn, html } = scripted({
     "workable:jpmorgan": { result: "active", companyName: "jpmorgan", jobCount: 0 },
   });
-  assert.equal(await probeCompany("JPMorgan", fn), null);
+  assert.equal(await probeCompany("JPMorgan", fn, html), null);
+});
+
+// ── the HTML verification tier ───────────────────────────────────────────────
+
+test("boardTitleName strips boilerplate, keeps identity", () => {
+  assert.equal(boardTitleName("Clera Jobs"), "Clera");
+  assert.equal(boardTitleName("Jobs at Dream Games | JOIN"), "Dream Games");
+  assert.equal(boardTitleName("Careers at Replika"), "Replika");
+  assert.equal(boardTitleName("<![CDATA[Oneflow]]>"), "Oneflow");
+  // Bare hyphens are identity, not separators:
+  assert.equal(boardTitleName("e-bot7 Careers"), "e-bot7");
+});
+
+test("teamtailor: RSS channel title verifies, items carry the live-count", async () => {
+  const rss = `<rss><channel><title><![CDATA[Replika]]></title>
+    <item><title>Engineer</title></item><item><title>Designer</title></item></channel></rss>`;
+  const { fn, html } = scripted({}, {
+    "https://replika.teamtailor.com/jobs.rss": { status: 200, text: rss },
+  });
+  const hit = await probeCompany("Replika", fn, html);
+  assert.equal(hit?.platform, "teamtailor");
+  assert.equal(hit?.token, "replika");
+});
+
+test("teamtailor: live RSS with the WRONG name is someone else's board", async () => {
+  const rss = `<rss><channel><title>Peak Physical Therapy</title><item><title>PT</title></item></channel></rss>`;
+  const { fn, html } = scripted({}, {
+    "https://peakgames.teamtailor.com/jobs.rss": { status: 200, text: rss },
+    "https://peak-games.teamtailor.com/jobs.rss": { status: 200, text: rss },
+  });
+  assert.equal(await probeCompany("Peak Games", fn, html), null);
+});
+
+test("join: embedded state carries name and live jobs", async () => {
+  const state = { company: { name: "Dream Games", domain: "dreamgames" }, jobs: { items: [{}, {}] } };
+  const page = `<html><head><title>Jobs at Dream Games | JOIN</title></head>
+    <script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { initialState: state } } })}</script></html>`;
+  const { fn, html } = scripted({}, {
+    "https://join.com/companies/dreamgames": { status: 200, text: page },
+  });
+  const hit = await probeCompany("Dream Games", fn, html);
+  assert.equal(hit?.platform, "join");
+  assert.equal(hit?.companyName, "Dream Games");
+});
+
+test("ashby: page title verifies the name, the API probe supplies the count", async () => {
+  const { fn, html, calls } = scripted(
+    { "ashby:clera": { result: "active", jobCount: 14 } },
+    { "https://jobs.ashbyhq.com/clera": { status: 200, text: "<title>Clera Jobs</title>" } },
+  );
+  const hit = await probeCompany("Clera", fn, html);
+  assert.equal(hit?.platform, "ashby");
+  assert.equal(hit?.companyName, "Clera");
+  assert.ok(calls.includes("ashby:clera")); // count came from the API, not the page
+});
+
+test("ashby: verified name but an EMPTY board via the API is still a squat", async () => {
+  const { fn, html } = scripted(
+    { "ashby:hollow": { result: "active", jobCount: 0 } },
+    { "https://jobs.ashbyhq.com/hollow": { status: 200, text: "<title>Hollow Jobs</title>" } },
+  );
+  assert.equal(await probeCompany("Hollow", fn, html), null);
+});
+
+test("PROBE_SIGNATURE covers the HTML tier — old five-platform misses read stale", () => {
+  for (const p of ["ashby", "join", "teamtailor"]) assert.ok(PROBE_SIGNATURE.includes(p));
+  assert.equal(
+    isStaleMiss({ found: false, probeVersion: "greenhouse,personio,recruitee,smartrecruiters,workable" }),
+    true,
+  );
 });

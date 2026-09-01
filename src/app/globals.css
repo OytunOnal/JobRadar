@@ -96,7 +96,10 @@ header.top {
 .job {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 16px 18px; margin-bottom: 10px;
-  display: grid; grid-template-columns: 84px 1fr auto; gap: 18px; align-items: start;
+  /* The verdict column is sized by its widest resident: assessment badges
+     like MAY NOT BE FRESH live under the score now, and at 84px they wrapped
+     to two lines, which made every caveat twice as tall as its neighbours. */
+  display: grid; grid-template-columns: 132px 1fr auto; gap: 18px; align-items: start;
 }
 .job:hover { border-color: var(--line-strong); }
 
@@ -316,4 +319,4 @@ nav.pages { display: flex; gap: 6px; align-items: center; }
    model's own reading) and a ghost badge lost among the meta chips. Showing
    the risk lets the reader weigh it; hiding decided for them. */
 .fitlabels { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.fitlabels .badge { margin-right: 0; }
+.fitlabels .badge { margin-right: 0; white-space: nowrap; }

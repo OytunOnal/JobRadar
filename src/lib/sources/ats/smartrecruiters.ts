@@ -16,6 +16,12 @@ export function mapSmartRecruitersJob(j: any, token: string, company: string): R
     company,
     location: loc,
     remote: Boolean(j.location?.remote),
+    // location.remote and location.hybrid are statements when TRUE; both
+    // false is the field's resting state and says nothing — a boolean's
+    // default is not an employer choosing "onsite", so it stays undefined
+    // and the text detector gets its turn.
+    workMode: j.location?.hybrid ? "hybrid" as const
+      : j.location?.remote ? "remote" as const : undefined,
     // Postings list has no body; title-based scoring still classifies these.
     description: j.name ?? "",
     postedAt: j.releasedDate ? new Date(j.releasedDate) : undefined,

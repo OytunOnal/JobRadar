@@ -38,7 +38,7 @@ export function mapHit(h: any): RawJob | null {
     title: String(h.headline),
     company: String(h.employer?.name ?? ""),
     location: city ? `${city}, Sweden` : "Sweden",
-    remote: false, // no reliable flag; deriveWorkMode reads the text
+    remote: false, // no reliable flag; the work-mode detector reads the text
     description: stripHtml(h.description?.text ?? ""),
     postedAt: h.publication_date ? new Date(h.publication_date) : undefined,
   };

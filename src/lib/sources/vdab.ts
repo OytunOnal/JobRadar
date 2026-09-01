@@ -57,7 +57,7 @@ export function mapResult(r: any): RawJob | null {
     title,
     company: String(r.vacatureBedrijfsnaam ?? "").trim(),
     location: loc ? `${loc}, Belgium` : "Belgium",
-    remote: false, // location-bound national board; deriveWorkMode reads text
+    remote: false, // location-bound national board; the work-mode detector reads text
     description: title, // light search payload has no body — title scoring
     postedAt: r.eerstePublicatieDatum ? new Date(r.eerstePublicatieDatum) : undefined,
   };

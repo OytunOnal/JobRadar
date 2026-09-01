@@ -39,7 +39,7 @@ export async function main() {
         select: {
           id: true, title: true, company: true,
           location: true, remote: true, source: true, externalId: true, url: true,
-          seniorityBy: true, seniorityLevel: true, visa: true, visaBy: true,
+          seniorityBy: true, seniorityLevel: true, visa: true, visaBy: true, workModeBy: true,
           content: { select: { description: true } },
         },
         take: BATCH,
@@ -69,6 +69,7 @@ export async function main() {
             current: {
               visa: j.visa, visaBy: j.visaBy,
               seniorityLevel: j.seniorityLevel, seniorityBy: j.seniorityBy,
+              workModeBy: j.workModeBy,
               sponsorReg, source: j.source, country,
             },
           });

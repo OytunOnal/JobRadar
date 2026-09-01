@@ -33,7 +33,7 @@ export function parseFeed(xml: string): RawJob[] {
       title: (title ?? decoded).trim(),
       company: (company ?? "").trim(),
       location: "Berlin, Germany",
-      remote: false, // Berlin board; deriveWorkMode reads the text
+      remote: false, // Berlin board; the work-mode detector reads the text
       description: stripHtml(pick(body, "content:encoded") || pick(body, "description")),
       postedAt: pub ? new Date(pub) : undefined,
     });

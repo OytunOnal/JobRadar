@@ -9,8 +9,11 @@ export interface RawJob {
   company: string;
   location?: string;
   remote: boolean;
-  // Set only when the source states it explicitly (Lever workplaceType,
-  // Recruitee's hybrid flag); otherwise deriveWorkMode infers it at ingest.
+  // Set ONLY when the source states it explicitly (Lever/Ashby workplaceType,
+  // SmartRecruiters' hybrid flag, BambooHR's locationType). A statement is a
+  // dropdown someone filled, never a boolean's resting state. When absent, the
+  // work-mode text detector gets its turn at ingest, and honest silence stays
+  // unknown.
   workMode?: WorkMode;
   salaryText?: string;
   description: string;
@@ -35,16 +38,12 @@ export interface RawJob {
   visa?: "yes" | "no" | "unknown";
 }
 
-// Explicit source signal wins; otherwise "hybrid" in the posting text beats
-// the remote flag (a "hybrid, 2 days office" job often also says remote-ish
-// things), then the remote flag, then onsite.
-export function deriveWorkMode(job: RawJob): WorkMode {
-  if (job.workMode) return job.workMode;
-  const text = `${job.title} ${job.location ?? ""} ${job.description.slice(0, 2000)}`;
-  if (/\bhybrid\b/i.test(text)) return "hybrid";
-  if (job.remote) return "remote";
-  return "onsite";
-}
+// deriveWorkMode used to live here: whole-description "hybrid" scan, then the
+// remote flag, then an onsite default. Measured against 599 employer-stated
+// postings it was right 46.7% of the time — the default meant it answered
+// loudest exactly where it knew least. Its replacement is text/workmode.ts
+// (position-first, silent when the text is silent) layered under the source
+// statement in scoring/derive.ts.
 
 export type Source = {
   name: string;

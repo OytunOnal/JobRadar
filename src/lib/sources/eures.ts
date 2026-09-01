@@ -83,7 +83,7 @@ export function mapJv(jv: any, country: string): RawJob | null {
     title: stripHtml(String(jv.title)),
     company: employer,
     location: countryName,
-    remote: false, // no work-mode facet in results; deriveWorkMode reads the text
+    remote: false, // no work-mode facet in results; the work-mode detector reads the text
     description: stripHtml(String(jv.description ?? "")),
     postedAt: typeof posted === "number" ? new Date(posted) : undefined,
   };

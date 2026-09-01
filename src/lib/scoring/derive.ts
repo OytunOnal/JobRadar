@@ -30,7 +30,8 @@
 // in tests/derive.test.ts now catches.
 
 import { scoreJob, SCORER_VERSION, type Scored, type ScoreGate } from "./score";
-import { deriveWorkMode, type RawJob } from "../sources/types";
+import type { RawJob } from "../sources/types";
+import { detectWorkMode } from "../text/workmode";
 import { detectVisa } from "../visa/visa";
 import { visaFields } from "../visa/visa-write";
 import { sourceTrust, canonicalJobUrl } from "../domains";
@@ -70,6 +71,7 @@ export interface CurrentRow {
   visaBy: string | null;
   seniorityLevel: string | null;
   seniorityBy: string | null;
+  workModeBy: string | null;
   sponsorReg: boolean;
   source: string;
   country: string | null;
@@ -82,6 +84,21 @@ export interface DeriveContext {
   country: string | null;
   sponsorReg: boolean;
   current?: CurrentRow;
+}
+
+// The work-mode layer, spreadable like everything else a writer spreads.
+// Absent keys mean "leave the row alone", which is how a stated or LLM-read
+// mode survives a sighting whose text is silent.
+export function workModeFields(
+  job: RawJob,
+  current?: Pick<CurrentRow, "workModeBy">,
+): { workMode?: string; workModeBy?: string | null } {
+  if (job.workMode) return { workMode: job.workMode, workModeBy: "source" };
+  if (current?.workModeBy === "source") return {};
+  const read = detectWorkMode(job.title, job.location, job.description);
+  if (read) return { workMode: read, workModeBy: "text" };
+  if (current?.workModeBy) return {}; // llm or text already answered; silence changes nothing
+  return { workMode: "unknown", workModeBy: null };
 }
 
 // EVERYTHING A POSTING'S TEXT MAKES TRUE.
@@ -138,9 +155,18 @@ export function derivedFields(job: RawJob, ctx: DeriveContext) {
     scoredBy: s.scoredBy,
     disqualified: rejected,
     langReq: s.langReq || null,
-    // deriveWorkMode reads the description for "hybrid", so it follows the kept
-    // text like everything else here.
-    workMode: deriveWorkMode(job),
+    // WHERE THE WORK HAPPENS — a claim with an author, layered by strength:
+    // the employer's structural field, then the position-first text detector,
+    // then (written elsewhere, by applyFactsToJob) the LLM, then unknown. A
+    // weaker author never overwrites a stronger one across re-sightings, and
+    // the detector re-reading the text MAY overwrite the LLM: it is measured
+    // at ~95% where it speaks, and the LLM only ever had the same text.
+    //
+    // This replaced deriveWorkMode, whose whole-description "hybrid" scan was
+    // measured at 46% against 599 employer-stated Lever postings — worse than
+    // it sounds, because its onsite default meant it was WRONG loudly: 45k
+    // postings wore a guess as a finding.
+    ...workModeFields(job, current),
     ...visa,
     sponsorReg: ctx.sponsorReg,
     // The LLM's level verdict outranks the detector — don't overwrite it.

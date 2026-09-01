@@ -205,6 +205,7 @@ export async function storeSighting(
         current: {
           visa: existing.visa, visaBy: existing.visaBy,
           seniorityLevel: existing.seniorityLevel, seniorityBy: existing.seniorityBy,
+          workModeBy: existing.workModeBy,
           sponsorReg, source: existing.source, country,
         },
       }),

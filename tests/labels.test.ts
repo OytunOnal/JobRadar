@@ -99,7 +99,10 @@ test("plain facts are notes, not risks", () => {
   assert.equal(find(posting({ track: "unity" }), "track")?.tone, "note");
   assert.equal(find(posting({ workMode: "remote" }), "work-mode")?.text, "remote");
   // onsite is the default and says nothing worth a badge.
-  assert.equal(find(posting({ workMode: "onsite" }), "work-mode"), undefined);
+  assert.equal(find(posting({ workMode: "onsite" }), "work-mode")?.text, "onsite",
+    "a stated onsite is a finding now, not a default");
+  assert.equal(find(posting({ workMode: "unknown" }), "work-mode"), undefined,
+    "silence is reserved for nobody-said");
 });
 
 test("the fit category explains a cap, but only when it says something", () => {

@@ -228,7 +228,7 @@ const rows = await prisma.job.findMany({
     { OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })) },
   ),
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
-  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, country: true, visa: true, visaBy: true, seniorityLevel: true, seniorityBy: true, sponsorReg: true, content: { select: { description: true, textVersion: true } } },
+  select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, country: true, visa: true, visaBy: true, seniorityLevel: true, seniorityBy: true, workModeBy: true, sponsorReg: true, content: { select: { description: true, textVersion: true } } },
 });
 // Two reasons to fetch a posting's detail page.
 //
@@ -314,6 +314,7 @@ for (const r of queue) {
     const current = {
       visa: r.visa, visaBy: r.visaBy,
       seniorityLevel: r.seniorityLevel, seniorityBy: r.seniorityBy,
+      workModeBy: r.workModeBy,
       sponsorReg: r.sponsorReg, source: r.source, country,
     };
     const fields = derivedFields(raw, { country, sponsorReg: r.sponsorReg, current });

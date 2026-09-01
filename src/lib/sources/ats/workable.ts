@@ -9,6 +9,9 @@ export function mapWorkableJob(j: any, token: string, company: string, boardName
     company: boardName || company,
     location: [j.city, j.country].filter(Boolean).join(", "),
     remote: Boolean(j.telecommuting),
+    // telecommuting is a statement when true; false is a default, not an
+    // employer choosing onsite.
+    workMode: j.telecommuting === true ? "remote" as const : undefined,
     // The widget listing has no body text; title-based scoring classifies
     // these (same trade-off as SmartRecruiters).
     description: j.title ?? "",

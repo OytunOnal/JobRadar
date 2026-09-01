@@ -18,6 +18,12 @@ export function mapBreezyRows(rows: any[], token: string, company: string): RawJ
       company,
       location: base,
       remote: Boolean(loc.is_remote),
+      // remote_details.value is Breezy's own enum ("remote" observed; treated
+      // as a statement only for values we have seen). is_remote alone is the
+      // weaker boolean and maps to remote only when true.
+      workMode: loc.remote_details?.value === "remote" || loc.is_remote === true
+        ? "remote" as const
+        : loc.remote_details?.value === "hybrid" ? "hybrid" as const : undefined,
       description: String(j.name), // no body in the list payload
       postedAt: j.published_date && !Number.isNaN(Date.parse(j.published_date))
         ? new Date(j.published_date)

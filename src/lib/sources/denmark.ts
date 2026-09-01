@@ -37,7 +37,7 @@ export function mapAd(ad: any): RawJob | null {
     title: String(ad.title),
     company: String(ad.hiringOrgName ?? ""),
     location: city ? `${city}, Denmark` : "Denmark",
-    remote: false, // no flag; deriveWorkMode reads the text
+    remote: false, // no flag; the work-mode detector reads the text
     description: stripHtml(ad.description ?? ""),
     postedAt: ad.publicationDate ? new Date(ad.publicationDate) : undefined,
   };

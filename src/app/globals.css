@@ -138,9 +138,13 @@ header.top {
   margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--faint);
 }
 
-.cover { margin-top: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
-.cover summary { cursor: pointer; color: var(--accent); font-size: 12.5px; font-family: var(--mono); }
-.cover pre { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; margin: 8px 0 0; color: var(--text); }
+.cover, .posting { margin-top: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.cover summary, .posting summary { cursor: pointer; color: var(--accent); font-size: 12.5px; font-family: var(--mono); }
+.cover pre, .posting pre { white-space: pre-wrap; font-family: var(--sans); font-size: 13px; margin: 8px 0 0; color: var(--text); }
+/* The posting is the longest thing on a card and the only one worth scrolling
+   inside: a 8,000-character description would otherwise push every row below
+   it off the screen. */
+.posting[open] pre { max-height: 340px; overflow-y: auto; padding-right: 6px; }
 
 /* ── Actions ────────────────────────────────────────────── */
 .actions { display: flex; flex-direction: column; gap: 6px; min-width: 128px; }

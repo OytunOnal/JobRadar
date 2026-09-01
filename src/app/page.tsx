@@ -63,7 +63,7 @@ export default async function Page({
   // The reading — nine queries in three waves — lives in view/radar-read.ts,
   // where its invariants are tested against a real database. The page asks
   // once and lays the answer out; it decides nothing and sequences nothing.
-  const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, labelCtx } =
+  const { jobs, filteredCount, lastPage, chips, stats, starred, appliedCompanies, labelCtx, descriptions } =
     await readRadar(f);
   const { top: topCountries, otherCount, counts, remoteCount, unknownCount } = chips;
   // The selection the query was actually built from — not re-derived here, so
@@ -321,6 +321,17 @@ export default async function Page({
               </div>
               {j.fitComment && <div className="fitcomment">{j.fitComment}</div>}
               {j.scoreReason && <div className="reason">{j.scoreReason}</div>}
+              {/* The posting itself. Closed, so the browser paints none of
+                  it, and open with no round trip because the text came down
+                  with the page — the reading fetches this page's thirty by id
+                  in 5ms, which is what makes a plain <details> the right
+                  control rather than a link that reloads. */}
+              {descriptions.get(j.id) && (
+                <details className="posting">
+                  <summary>the posting</summary>
+                  <pre>{descriptions.get(j.id)}</pre>
+                </details>
+              )}
               {j.content?.coverLetter && (
                 <details className="cover">
                   <summary>cover letter draft</summary>

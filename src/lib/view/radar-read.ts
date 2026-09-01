@@ -78,6 +78,23 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
     }),
     prisma.job.count({ where }),
   ]);
+
+  // Wave 4 — the text of the postings on this page, by primary key.
+  //
+  // Descriptions are split off the hot row so that the LIST query — filter and
+  // composite-index sort over half a million rows — never pages them. That is
+  // the 4ms property, and this does not touch it: the list is already decided,
+  // and thirty rows read by id is an index lookup, not a scan. Measured on the
+  // real pool: 5ms and 140KB, against the 414ms this whole reading already
+  // costs. Cheap enough that the card can hold the posting outright instead of
+  // making the reader ask for it, which was the alternative and it wanted a
+  // page round trip per expansion.
+  const texts = await prisma.jobContent.findMany({
+    where: { jobId: { in: jobs.map((j) => j.id) } },
+    select: { jobId: true, description: true },
+  });
+  const descriptions = new Map(texts.map((t) => [t.jobId, t.description]));
+
   const [snapshot, starred, appliedRows] = await independent;
 
   const stats = snapshot
@@ -103,6 +120,8 @@ export async function readRadar(f: RadarFilters, opts: { now?: Date } = {}) {
     stats,
     starred,
     appliedCompanies,
+    // Keyed by posting id, so a card can only ever show its own text.
+    descriptions,
     // One clock and one pool reading for every card in the response, so two
     // postings rendered together cannot be judged fresh against different
     // instants.

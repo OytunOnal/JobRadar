@@ -69,6 +69,14 @@ await prisma.job.createMany({
     job({ status: "interested", country: "de", fitScore: 80 })),
 });
 
+// Every seeded posting gets a body. createMany cannot write the nested row, and
+// the card reads descriptions through a separate by-id lookup anyway, so this
+// mirrors the real shape: the text lives beside the posting, not on it.
+await prisma.jobContent.createMany({
+  data: (await prisma.job.findMany({ select: { id: true, title: true } }))
+    .map((j) => ({ jobId: j.id, description: `body of ${j.title}` })),
+});
+
 const none: Record<string, string | undefined> = {};
 const TRACKS: string[] = [];
 
@@ -118,6 +126,28 @@ test("companies mid-application are named, for the badge and the one-click hide"
   assert.equal(r.labelCtx.appliedCompanies, r.appliedCompanies,
     "one set, shared with the label context — not two spellings of it");
   assert.deepEqual(r.labelCtx.now, NOW, "one clock for every card in the response");
+});
+
+test("the reading carries this page's postings, keyed by the posting they belong to", async () => {
+  // The card shows the description outright rather than asking for it, which
+  // only works because the text comes down with the page. Keyed by id so a
+  // card cannot render another posting's text.
+  const r = await readRadar(radarFilters(none, TRACKS), { now: NOW });
+  assert.ok(r.jobs.length > 0);
+  for (const j of r.jobs) {
+    assert.equal(r.descriptions.get(j.id), `body of ${j.title}`, j.title);
+  }
+});
+
+test("it fetches the page's descriptions and no others", async () => {
+  // The whole reason this is affordable is that it reads the page by primary
+  // key rather than every live posting's text. A filter that narrows the list
+  // must narrow this too.
+  const all = await readRadar(radarFilters(none, TRACKS), { now: NOW });
+  const one = await readRadar(radarFilters({ verdict: "strong" }, TRACKS), { now: NOW });
+  assert.equal(one.jobs.length, 1);
+  assert.equal(one.descriptions.size, 1, "one row on the page, one description");
+  assert.ok(all.descriptions.size > one.descriptions.size);
 });
 
 test.after(async () => {

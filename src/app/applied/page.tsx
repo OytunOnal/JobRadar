@@ -4,6 +4,7 @@ import { postingLabels } from "@/lib/view/labels";
 import { FitScore } from "@/lib/view/FitScore";
 import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
+import { ageLabel } from "@/lib/scoring/freshness";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,14 @@ const GROUPS: Array<{ status: string; label: string }> = [
   { status: "rejected", label: "Rejected" },
   { status: "ghosted", label: "Ghosted" },
 ];
+// ageLabel answers "how old", and its shortest answer is the word "today" —
+// which does not take "ago" after it. Reading the page is what showed that:
+// every card said "applied today ago".
+function sinceApplied(appliedAt: Date, now: Date): string {
+  const age = ageLabel(appliedAt, now);
+  return age === "today" ? "today" : `${age} ago`;
+}
+
 function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
@@ -74,7 +83,18 @@ export default async function AppliedPage({
               .map((l) => (
                 <span key={l.kind} className={`badge t-${l.tone}`} title={l.title}>{l.text}</span>
               ))}
-            {" · applied "}{fmt(j.appliedAt)}
+            {/* How long you have been waiting, not just when you started.
+                "applied 2026-09-01" is a record; "17d" is the thing you
+                actually reason about when deciding whether silence has become
+                an answer. Same vocabulary the radar ages postings with, so a
+                day means the same thing on both pages. The exact date stays,
+                one hover away. */}
+            {" · applied "}
+            {j.appliedAt ? (
+              <span title={fmt(j.appliedAt)}>{sinceApplied(j.appliedAt, nowDate)}</span>
+            ) : (
+              "—"
+            )}
             {j.followUpAt && ` · follow-up ${fmt(j.followUpAt)}`}
             {" · "}
             <span className="src">{j.source}</span>

@@ -2,9 +2,9 @@ import { prisma } from "@/lib/db";
 import { saveNote, setFollowUp, setStatus } from "../actions";
 import { postingLabels } from "@/lib/view/labels";
 import { FitScore } from "@/lib/view/FitScore";
-import { isAwaitingReply, TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
+import { TRACKED_STATUSES, trackedWhere } from "@/lib/queue/pool";
 import { followUpDue, ghostSuggested } from "@/lib/queue/pursuit";
-import { ageLabel } from "@/lib/scoring/freshness";
+import { ageWords } from "@/lib/scoring/freshness";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +16,14 @@ export const dynamic = "force-dynamic";
 const GROUPS: Array<{ status: string; label: string }> = [
   { status: "applied", label: "Applied" },
   { status: "interview", label: "Interviewing" },
+  // Not a failure and not an outcome: the employer froze the req. It sits
+  // among the states you are still waiting in rather than beside the two
+  // endings, because it is one — on a slower clock.
+  { status: "stopped", label: "Hiring paused" },
   { status: "offer", label: "Offer" },
   { status: "rejected", label: "Rejected" },
   { status: "ghosted", label: "Ghosted" },
 ];
-// ageLabel answers "how old", and its shortest answer is the word "today" —
-// which does not take "ago" after it. Reading the page is what showed that:
-// every card said "applied today ago".
-function sinceApplied(appliedAt: Date, now: Date): string {
-  const age = ageLabel(appliedAt, now);
-  return age === "today" ? "today" : `${age} ago`;
-}
-
 function fmt(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : "—";
 }
@@ -54,7 +50,11 @@ export default async function AppliedPage({
   // rendering. The page asks; it does not decide.
   const dueToday = jobs.filter((j) => followUpDue(j, nowDate));
 
-  const card = (j: (typeof jobs)[number]) => {
+  // `nudges` is required rather than defaulted, so neither call site can be
+  // written as `list.map(card)` — map would hand the index in as the flag and
+  // the buttons would appear on every card but the first. A required boolean
+  // makes that a compile error instead of a rendering mystery.
+  const card = (j: (typeof jobs)[number], nudges: boolean) => {
     const ghostSuggest = ghostSuggested(j, nowDate);
     return (
       <article className="job trackrow" key={j.id}>
@@ -83,19 +83,6 @@ export default async function AppliedPage({
               .map((l) => (
                 <span key={l.kind} className={`badge t-${l.tone}`} title={l.title}>{l.text}</span>
               ))}
-            {/* How long you have been waiting, not just when you started.
-                "applied 2026-09-01" is a record; "17d" is the thing you
-                actually reason about when deciding whether silence has become
-                an answer. Same vocabulary the radar ages postings with, so a
-                day means the same thing on both pages. The exact date stays,
-                one hover away. */}
-            {" · applied "}
-            {j.appliedAt ? (
-              <span title={fmt(j.appliedAt)}>{sinceApplied(j.appliedAt, nowDate)}</span>
-            ) : (
-              "—"
-            )}
-            {j.followUpAt && ` · follow-up ${fmt(j.followUpAt)}`}
             {" · "}
             <span className="src">{j.source}</span>
           </div>
@@ -116,7 +103,19 @@ export default async function AppliedPage({
           </form>
         </div>
         <div className="actions">
-          <div className="status-pill">{j.status}</div>
+          {/* The corner is the pursuit clock: where this one stands, and how
+              long it has stood there. "applied 2026-08-21" is a record; the
+              number you actually reason about is how long the silence has
+              lasted, because that is what turns "waiting" into "they are not
+              going to answer". The exact date is one hover away. */}
+          <div className="status-pill">
+            {j.status}
+            {j.appliedAt && (
+              <span className="agechip" title={`Applied ${fmt(j.appliedAt)}`}>
+                {ageWords(j.appliedAt, nowDate)}
+              </span>
+            )}
+          </div>
           {TRACKED_STATUSES.filter((s) => s !== j.status).map((s) => (
             <form action={setStatus} key={s}>
               <input type="hidden" name="id" value={j.id} />
@@ -124,7 +123,15 @@ export default async function AppliedPage({
               <button className="btn" type="submit">{s}</button>
             </form>
           ))}
-          {isAwaitingReply(j.status) && (
+          {/* THE NUDGE CONTROLS BELONG TO THE NUDGE, NOT TO THE CARD.
+              They used to render on all 23 tracked cards, which asked a
+              question nobody was being asked: "+3d" on a card whose reminder
+              is nine days out defers a date the card no longer even shows.
+              They are the answer to being interrupted, so they live where the
+              interruption is. A card whose date has arrived appears twice on
+              this page, once in the nudge section with these and once in its
+              own group without them. */}
+          {nudges && (
             <>
               {["3", "7"].map((d) => (
                 <form action={setFollowUp} key={d}>
@@ -167,7 +174,7 @@ export default async function AppliedPage({
       {dueToday.length > 0 && (
         <section className="followups">
           <h2>🔔 Follow up today ({dueToday.length})</h2>
-          {dueToday.map(card)}
+          {dueToday.map((j) => card(j, true))}
         </section>
       )}
 
@@ -177,7 +184,7 @@ export default async function AppliedPage({
         return (
           <section key={status}>
             <h2 className="grouphead">{label} ({group.length})</h2>
-            {group.map(card)}
+            {group.map((j) => card(j, false))}
           </section>
         );
       })}

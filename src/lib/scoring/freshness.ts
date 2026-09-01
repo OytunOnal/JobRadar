@@ -72,11 +72,39 @@ export function tooOldToStore(
   return now.getTime() - postedAt.getTime() > AGGREGATOR_MAX_AGE_DAYS * DAY;
 }
 
+/** Whole days between then and now, floored, never negative. Both renderings
+ * below count from this, so they cannot disagree about where a day ends. */
+export function daysSince(anchor: Date, now: Date = new Date()): number {
+  return Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / DAY));
+}
+
 // Short human age for the dashboard ("3d", "2mo", "1y+").
 export function ageLabel(anchor: Date, now: Date = new Date()): string {
-  const days = Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / DAY));
+  const days = daysSince(anchor, now);
   if (days < 1) return "today";
   if (days < 30) return `${days}d`;
   if (days < 365) return `${Math.floor(days / 30)}mo`;
   return "1y+";
+}
+
+// THE SAME AGE, IN WORDS ("yesterday", "3 days ago", "2 months ago").
+//
+// A dense list scanned by the hundred wants "3d"; a single chip in a card's
+// corner can afford to speak. That is a difference of register, not of
+// meaning, so the two live on the same thresholds and count the same days.
+//
+// It renders the whole phrase rather than a stem callers add "ago" to. The
+// stem version already shipped once and said "applied today ago" on every
+// card written in the last day, because the shortest honest answer is a word
+// that takes no suffix — and "1y+ ago" was waiting behind it.
+export function ageWords(anchor: Date, now: Date = new Date()): string {
+  const days = daysSince(anchor, now);
+  if (days < 1) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  if (days < 365) {
+    const months = Math.floor(days / 30);
+    return months === 1 ? "1 month ago" : `${months} months ago`;
+  }
+  return "over a year ago";
 }

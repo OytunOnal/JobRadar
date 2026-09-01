@@ -41,7 +41,10 @@ test("status is the only axis the populations differ on", () => {
 // stays yours after its source drops it, and /applied shows the closure as a
 // warning rather than dropping the row.
 test("pursued and dismissed are status-only, on purpose", () => {
-  assert.deepEqual(pursuedWhere(), { status: { in: ["applied", "interview", "offer"] } });
+  // `stopped` is in here because a frozen req is a pursuit you still hold, not
+  // one that ended: the company you are waiting on still counts as a company
+  // you are talking to.
+  assert.deepEqual(pursuedWhere(), { status: { in: ["applied", "interview", "stopped", "offer"] } });
   assert.deepEqual(dismissedWhere(), { status: "ignored" });
 });
 

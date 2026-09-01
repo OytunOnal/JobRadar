@@ -17,10 +17,22 @@ import { DISMISSED_STATUS, TRACKED_STATUSES, isAwaitingReply, isConcluded } from
 
 /** First nudge, this many days after applying. Europe answers slowly. */
 export const FOLLOW_UP_DAYS = 10;
+/** A frozen req thaws on a budget cycle, not on a recruiter's inbox. */
+export const HIRING_PAUSED_DAYS = 30;
 /** A nudge this long overdue and still silent probably means ghosted. */
 export const GHOST_SUGGEST_DAYS = 14;
 
 const DAY = 86_400_000;
+
+/**
+ * How long to leave a pursuit alone before nudging, given what it is waiting
+ * for. Chasing a hiring freeze in ten days asks a question nobody at the
+ * company can answer yet; waiting thirty for a silent recruiter wastes a
+ * month. So the interval is a fact about the status, not a constant.
+ */
+export function followUpWindow(status: string): number {
+  return status === "stopped" ? HIRING_PAUSED_DAYS : FOLLOW_UP_DAYS;
+}
 
 export interface PursuitState {
   status: string;
@@ -63,14 +75,33 @@ export interface TransitionOptions {
  * - entering any tracked status stamps `appliedAt` if it was never set — a
  *   pursuit tracked late still gets its stamp, and so does one recorded only
  *   at its rejection;
- * - THE NUDGE RIDES THE STAMP: a follow-up date is born when the pursuit is
- *   first stamped into an awaiting status, dies at definitive ends (concluded,
- *   dismissed), and is otherwise the user's to keep — including deliberately
- *   empty. The first version of this rule filled every null on entering an
- *   awaiting status, and null carries two meanings here: "never scheduled"
- *   and "the user pressed no-nudge". Filling both re-armed an explicit
- *   opt-out and let an applied→new→applied undo silently defer the date —
- *   one field, two meanings, the same disease the GPU lock's child field had;
+ * - A FOLLOW-UP DATE IS ABSENT ONLY BECAUSE SOMEONE DECIDED SO. It is born
+ *   when the pursuit is first stamped into an awaiting status, born again
+ *   when a CONCLUDED or DISMISSED pursuit is re-opened into one, dies at
+ *   those definitive ends, and is otherwise the user's to keep — including
+ *   deliberately empty. Never absent by accident.
+ *
+ *   The re-opening clause is the part that took two tries. The first version
+ *   of this rule filled every null on entering an awaiting status, and null
+ *   carries two meanings here: "never scheduled" and "the user pressed
+ *   no-nudge". Filling both re-armed an explicit opt-out and let an
+ *   applied→new→applied undo silently defer the date. Narrowing it to "first
+ *   stamp only" fixed that and opened the opposite hole: applied→rejected
+ *   nulls the date, and coming back to applied could not restore it, so an
+ *   awaiting pursuit sat with no nudge forever and never appeared in the
+ *   section that would have offered one.
+ *
+ *   Re-opening is the precise word for the difference. `no nudge` silences a
+ *   pursuit WITHOUT changing its status, so it can never be mistaken for one;
+ *   `new` is not a conclusion, so the undo path is still protected. Only a
+ *   pursuit that ended and started again gets its clock back;
+ * - AND THE CLOCK RUNS AT THE SPEED OF WHAT IT IS WAITING FOR. A silent
+ *   recruiter is chased in ten days; a frozen req thaws on a budget cycle and
+ *   is left for thirty. So moving between awaiting statuses of different
+ *   windows resets the date instead of carrying it — applied→stopped is not a
+ *   deferral, it is a different question. applied→interview carries, because
+ *   the window did not change and re-arming would silently push back a date
+ *   the user chose;
  * - dismissing records the reason; every other entry clears it.
  */
 export function transitionFields(
@@ -87,6 +118,19 @@ export function transitionFields(
   const stamping = (TRACKED_STATUSES as readonly string[]).includes(to) && !current.appliedAt;
   const dismissed = to === DISMISSED_STATUS;
   const reason = dismissed ? (opts.reason || null) : null;
+  // A pursuit that ended and is starting again. Its date was cleared BY the
+  // ending, so restoring it re-opens the clock rather than overruling anyone.
+  const reopening = isConcluded(current.status) || current.status === DISMISSED_STATUS;
+  // Silenced: under way, and empty for the only reason that leaves it empty
+  // without an ending, which is the user pressing no-nudge.
+  const silenced = !stamping && !reopening && current.followUpAt === null;
+  // The wait itself changed length. applied→stopped is not a deferral of the
+  // old date, it is a different question with a different horizon, so the
+  // clock is reset rather than carried. applied→interview keeps its date:
+  // same window, and re-arming would quietly push back a nudge you had set.
+  const rewound = isAwaitingReply(current.status)
+    && followUpWindow(current.status) !== followUpWindow(to);
+  const arming = isAwaitingReply(to) && !silenced && (stamping || reopening || rewound);
 
   return {
     fields: {
@@ -94,8 +138,8 @@ export function transitionFields(
       ...(stamping ? { appliedAt: at } : {}),
       followUpAt: isConcluded(to) || dismissed
         ? null
-        : stamping && isAwaitingReply(to)
-          ? new Date(at.getTime() + FOLLOW_UP_DAYS * DAY)
+        : arming
+          ? new Date(at.getTime() + followUpWindow(to) * DAY)
           : current.followUpAt,
       dismissReason: reason,
     },

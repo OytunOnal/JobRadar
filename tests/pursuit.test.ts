@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   transitionFields, pursuitEvent, followUpDate, ghostSuggested, followUpDue,
-  FOLLOW_UP_DAYS, GHOST_SUGGEST_DAYS,
+  FOLLOW_UP_DAYS, GHOST_SUGGEST_DAYS, HIRING_PAUSED_DAYS,
 } from "../src/lib/queue/pursuit";
+import { isConcluded } from "../src/lib/queue/pool";
 
 // The write side of the pursuit lifecycle, tested for the first time. The read
 // side (pool.ts) always had tests; the rules that PRODUCE the statuses lived in
@@ -77,9 +78,10 @@ test("leaving dismissal clears the reason", () => {
 // entry into an awaiting status re-armed the nudge, overriding an explicit
 // opt-out, and an applied→new→applied undo silently deferred the date. Same
 // disease the GPU lock's child field had: one field, two writers of meaning.
-// The rule that untangles it: the nudge rides the STAMP. It is born when the
-// pursuit is first stamped, dies at definitive ends, and is otherwise the
-// user's to keep — including deliberately empty.
+// The rule that untangles it: a follow-up date is absent only because someone
+// decided so. Born at the first stamp and again when a finished pursuit is
+// re-opened, dead at definitive ends, otherwise the user's to keep — including
+// deliberately empty. Never absent by accident.
 
 test("a cleared nudge survives a stage move — no-nudge means no nudge", () => {
   const { fields } = transitionFields(
@@ -100,13 +102,99 @@ test("an undo round-trip keeps the original nudge date", () => {
   assert.deepEqual(back.fields.followUpAt, day10, "and coming back does not defer it");
 });
 
-test("reopening a concluded pursuit does not invent a nudge", () => {
+// This used to assert the opposite, and the justification it carried was "the
+// follow-up buttons exist for exactly this decision". They no longer do: the
+// nudge controls live in the nudge section, which a pursuit with no date can
+// never enter. Under the old rule a rejection you re-opened sat awaiting a
+// reply forever with nothing scheduled and no way to schedule it.
+test("re-opening a concluded pursuit restarts its clock", () => {
   const { fields } = transitionFields(
     { status: "rejected", appliedAt: new Date(NOW.getTime() - 30 * DAY), followUpAt: null },
     "applied", { at: NOW });
-  assert.equal(fields.appliedAt, undefined);
-  assert.equal(fields.followUpAt, null,
-    "the follow-up buttons exist for exactly this decision");
+  assert.equal(fields.appliedAt, undefined, "the original application date stands");
+  assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY),
+    "the ending cleared this date, so starting again restores it");
+});
+
+test("re-opening a dismissal restarts its clock too", () => {
+  const { fields } = transitionFields(
+    { status: "ignored", appliedAt: null, followUpAt: null }, "applied", { at: NOW });
+  assert.deepEqual(fields.appliedAt, NOW);
+  assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY));
+});
+
+// ── The employer's pause ─────────────────────────────────────────────────────
+
+test("a hiring freeze nudges on the slower clock", () => {
+  const soon = new Date(NOW.getTime() + 4 * DAY);
+  const { fields } = transitionFields(
+    { status: "applied", appliedAt: NOW, followUpAt: soon }, "stopped", { at: NOW });
+  assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + HIRING_PAUSED_DAYS * DAY),
+    "chasing a frozen req in four days asks a question nobody there can answer");
+});
+
+test("thawing puts the pursuit back on the fast clock", () => {
+  const { fields } = transitionFields(
+    { status: "stopped", appliedAt: NOW, followUpAt: new Date(NOW.getTime() + 30 * DAY) },
+    "applied", { at: NOW });
+  assert.deepEqual(fields.followUpAt, new Date(NOW.getTime() + FOLLOW_UP_DAYS * DAY),
+    "a re-opened req is a live application again, not a month of patience");
+});
+
+test("a stage move within the same window still carries its date", () => {
+  const chosen = new Date(NOW.getTime() + 2 * DAY);
+  const { fields } = transitionFields(
+    { status: "applied", appliedAt: NOW, followUpAt: chosen }, "interview", { at: NOW });
+  assert.deepEqual(fields.followUpAt, chosen,
+    "same window, so the date the user picked survives the move");
+});
+
+test("a silenced pursuit stays silent through a freeze", () => {
+  const { fields } = transitionFields(
+    { status: "applied", appliedAt: NOW, followUpAt: null }, "stopped", { at: NOW });
+  assert.equal(fields.followUpAt, null, "a changed window is not a reason to overrule no-nudge");
+});
+
+test("a freeze is not an ending — no ghost suggestion, and the pursuit counts", () => {
+  const longPast = new Date(NOW.getTime() - (GHOST_SUGGEST_DAYS + 5) * DAY);
+  assert.equal(ghostSuggested({ status: "stopped", followUpAt: longPast }, NOW), false,
+    "they did not go silent, they told you the req was frozen");
+  assert.equal(followUpDue({ status: "stopped", followUpAt: longPast }, NOW), true,
+    "and when the wait is up it is time to ask whether hiring resumed");
+});
+
+// THE INVARIANT, over every jump rather than the handful spelled out above.
+// A pursuit awaiting a reply has a date, and there is exactly one way for it
+// not to: it was already under way and someone silenced it. That is `no
+// nudge`, which never changes status, so the state it leaves behind is
+// recognisable — a stamped pursuit, no date, not coming from an ending.
+//
+// Every other arrival at an awaiting status schedules something. Without this
+// the failure is invisible: nothing throws, the card simply never appears in
+// the one section that could have offered it a date.
+test("no transition strands an awaiting pursuit without a date", () => {
+  const froms = ["new", "interested", "applied", "interview", "stopped", "offer", "rejected", "ghosted", "ignored"];
+  const stamps = [null, new Date(NOW.getTime() - 30 * DAY)];
+  const dates = [null, new Date(NOW.getTime() + 3 * DAY)];
+  let silences = 0;
+  for (const from of froms) {
+    for (const appliedAt of stamps) {
+      for (const followUpAt of dates) {
+        for (const to of ["applied", "interview", "stopped"]) {
+          const { fields } = transitionFields({ status: from, appliedAt, followUpAt }, to, { at: NOW });
+          const ended = isConcluded(from) || from === "ignored";
+          const where = `${from}→${to} (applied ${appliedAt ? "before" : "never"}, nudge ${followUpAt ? "set" : "none"})`;
+          if (!ended && appliedAt && followUpAt === null) {
+            silences++;
+            assert.equal(fields.followUpAt, null, `${where} re-armed a nudge the user switched off`);
+          } else {
+            assert.notEqual(fields.followUpAt, null, `${where} left nothing scheduled`);
+          }
+        }
+      }
+    }
+  }
+  assert.equal(silences, 15, "the silenced case must actually occur, or this proves nothing");
 });
 
 test("recording an outside rejection still stamps the pursuit", () => {

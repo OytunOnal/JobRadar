@@ -73,6 +73,14 @@ A pursued posting where the other side still owes an answer. The only state a
 follow-up nudge is for.
 _Avoid_: pending, open application, waiting
 
+**Hiring paused**:
+A pursuit the employer froze: the req was pulled or put on hold, and nobody
+was rejected. It is awaiting a reply rather than concluded, because the only
+thing that makes it worth distinguishing from a rejection is that it can come
+back — and nobody will write to say so. It nudges on a slower clock than a
+silent recruiter. The user giving up is dismissal, not this.
+_Avoid_: on hold, frozen, cancelled, withdrawn
+
 **Concluded**:
 A pursuit that ended — an offer, a rejection, or silence long past the
 follow-up date. Nothing is nudged after this.

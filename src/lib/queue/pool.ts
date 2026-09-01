@@ -41,7 +41,13 @@
 // rather than being spelled out at the call site.
 export const OPEN_STATUSES = ["new", "interested"] as const;
 export const DISCOVERABLE_STATUSES = ["new"] as const;
-export const PURSUED_STATUSES = ["applied", "interview", "offer"] as const;
+// `stopped` is the employer's pause, not yours: they froze the req, nobody
+// rejected you, and one day somebody will unfreeze it without telling you. It
+// is pursued rather than concluded for exactly that reason. Marked concluded
+// it would differ from `rejected` only in spelling, and the one fact worth
+// keeping — that it can come back — would be the fact thrown away. Giving up
+// on a pursuit is `ignored`; this is the other side giving up on the calendar.
+export const PURSUED_STATUSES = ["applied", "interview", "stopped", "offer"] as const;
 // Pursued, plus the two ways a pursuit ends. /applied groups by these, and it
 // used to keep its own hand-written copy of the list — twice in one file, once
 // for the query and once for the stage buttons.
@@ -49,7 +55,10 @@ export const TRACKED_STATUSES = [...PURSUED_STATUSES, "rejected", "ghosted"] as 
 // Pursued and still waiting on the other side. These are the ones a follow-up
 // nudge is FOR — /applied had this pair written out twice, once to pick the
 // "due today" list and once to decide which cards get the +3d/+7d buttons.
-export const AWAITING_STATUSES = ["applied", "interview"] as const;
+//
+// A frozen req is still something you are waiting on, so it nudges — just on a
+// slower clock than a silent recruiter. pursuit.ts owns how slow.
+export const AWAITING_STATUSES = ["applied", "interview", "stopped"] as const;
 // The three ways a pursuit is over. Nothing needs nudging after one of these.
 export const CONCLUDED_STATUSES = ["offer", "rejected", "ghosted"] as const;
 export const DISMISSED_STATUS = "ignored" as const;

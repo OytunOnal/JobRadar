@@ -18,6 +18,7 @@
   --strong: #3dd68c;        /* signal */
   --possible: #e5b84b;      /* maybe-signal */
   --weak: #5a6472;          /* noise fades, it doesn't shout */
+  --danger: #e0605e;        /* a hard stop — used sparingly, so it stays one */
 
   --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", monospace;
   --sans: system-ui, "Segoe UI", -apple-system, sans-serif;
@@ -131,6 +132,12 @@ header.top {
    the same idea wore different classes on different surfaces, and one badge
    (`.badge.ghost`) had no user at all. */
 .badge.t-risk { color: var(--weak, #b58900); border-color: currentColor; opacity: 0.85; }
+/* Risk is not one severity. A caution is something to weigh (amber); a hard
+   requirement you don't meet is a stop (red). Kind-level sharpening on top of
+   the tone default — the meaning is still the label's, only the colour of
+   attention is decided here. */
+.badge.b-freshness, .badge.b-ghost-risk { color: var(--possible); opacity: 1; }
+.badge.b-language { color: var(--danger); opacity: 1; }
 .badge.t-good { color: var(--strong); border-color: currentColor; }
 .badge.t-note { color: var(--muted); }
 .fitcomment { margin-top: 8px; font-size: 13px; color: var(--text); opacity: 0.92; }

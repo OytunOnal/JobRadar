@@ -24,12 +24,28 @@ export async function setStatus(formData: FormData) {
       select: { status: true, appliedAt: true, followUpAt: true },
     });
     if (!current) return;
-    const { fields, event } = transitionFields(current, status, {
-      reason: String(formData.get("reason") ?? "") || null,
-    });
+    const reason = String(formData.get("reason") ?? "") || null;
+    const { fields, event } = transitionFields(current, status, { reason });
+    // "Posting closed" is an observation about the pool wearing a dismissal's
+    // clothes: the user opened the posting and the source said it is gone.
+    // That is the evidence the liveness prober exists to collect, delivered by
+    // hand, so it is recorded the same way — delistedAt plus a listing event,
+    // deliberately OUTSIDE transitionFields, which owns the pursuit and not
+    // the pool. A wrong click self-heals: any re-sighting clears delistedAt
+    // on a posting its source still lists.
+    const closed = fields.status === "ignored" && reason === "closed";
     await tx.job.update({
       where: { id },
-      data: { ...fields, actions: { create: event } },
+      data: {
+        ...fields,
+        actions: { create: event },
+        ...(closed
+          ? {
+              delistedAt: new Date(),
+              listings: { create: { event: "delisted", source: "user", at: new Date() } },
+            }
+          : {}),
+      },
     });
   });
   revalidatePath("/");

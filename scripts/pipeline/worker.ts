@@ -181,36 +181,41 @@ async function runChild(script: string, extra: string[] = []): Promise<ChildOutc
 // exit code, and that is precisely what produced a 33-hour stall: the worker
 // read "there is nothing to do" as "I could not do it" and climbed the backoff
 // ladder over a lane that was simply finished.
-function readOutcome(out: ChildOutcome, label: string): { progressed: boolean; retryLater: boolean } {
+function readOutcome(out: ChildOutcome, label: string): { progressed: boolean; retryLater: boolean; deferred: number } {
   if (!out.result) {
     log(`  ${label}: makbuz yok, çıkış kodu ${out.code}${out.code === 3221225794 ? " (0xC0000142 — süreç başlayamadı, bellek dar)" : ""}`);
-    return { progressed: false, retryLater: true };
+    return { progressed: false, retryLater: true, deferred: 0 };
   }
   const r = out.result;
-  const tally = `${r.done} işlendi${r.failed ? `, ${r.failed} hata` : ""}`;
+  const tally = `${r.done} işlendi${r.failed ? `, ${r.failed} hata` : ""}${r.skipped ? `, ${r.skipped} ertelendi` : ""}`;
+  // "Drained" and "everything deferred" are different outcomes that used to
+  // wear one message. The visa lane proved it: 44 title-only rows, every one
+  // skipped for desc:fill, receipt said drained, worker heard "empty" and
+  // slept — while the lane blocked every lane below it, for a day.
+  const deferred = r.skipped ?? 0;
   switch (r.stopped) {
     case "drained":
-      log(`  ${label}: kuyruk boşaldı (${tally})`);
+      log(`  ${label}: ${r.done === 0 && deferred > 0 ? `kuyrukta iş yok ama ${deferred} ertelenmiş var` : `kuyruk boşaldı (${tally})`}`);
       // Not a failure. There was nothing left to do, and the ladder must not
       // treat that as an inability to work.
-      return { progressed: r.done > 0, retryLater: false };
+      return { progressed: r.done > 0, retryLater: false, deferred };
     case "budget":
       log(`  ${label}: bütçe doldu (${tally})`);
-      return { progressed: r.done > 0, retryLater: false };
+      return { progressed: r.done > 0, retryLater: false, deferred };
     case "gpu-busy":
       log(`  ${label}: GPU başkasında — bu turu atlıyorum`);
-      return { progressed: false, retryLater: true };
+      return { progressed: false, retryLater: true, deferred };
     case "stalled":
       // The runner only writes this when a queue could not consume itself.
       // Never pass over it quietly: it means a predicate and a write disagree.
       log(`  ${label}: KUYRUK İLERLEMEDİ (${tally}) — bir yüklem ile yazım ayrışmış olabilir`);
-      return { progressed: false, retryLater: true };
+      return { progressed: false, retryLater: true, deferred };
     case "failstreak":
       log(`  ${label}: üst üste hata (${tally}) — model cevap vermiyor olabilir`);
-      return { progressed: false, retryLater: true };
+      return { progressed: false, retryLater: true, deferred };
     case "error":
       log(`  ${label}: çöktü — ${r.error ?? "?"}`);
-      return { progressed: false, retryLater: true };
+      return { progressed: false, retryLater: true, deferred };
   }
 }
 
@@ -243,9 +248,22 @@ type Lane =
   | { kind: "visa"; n: number }
   | { kind: "chunk"; chunk: Chunk };
 
+// Lanes that proved unreadable: every row deferred for a body desc:fill could
+// not deliver (LinkedIn detail pages give nothing, for example). Passed over
+// until the window expires, so 44 bodyless rows can never again hold the
+// whole pipeline hostage. In-memory on purpose — a restart re-tests, which is
+// the cheapest correct invalidation, and desc:fill or a fresh ingest may have
+// fed them by then.
+const STARVED_MS = 6 * 60 * 60 * 1000;
+const starvedUntil = new Map<string, number>();
+const laneKey = (lane: Lane) => (lane.kind === "visa" ? "visa" : `chunk:${lane.chunk.lo}-${lane.chunk.hi}`);
+const isStarved = (key: string) => (starvedUntil.get(key) ?? 0) > Date.now();
+
 async function nextLane(now: Date): Promise<Lane | null> {
-  const visa = await prisma.job.count({ where: andWhere(judgeQueueWhere(true, now), VISA_MARKED) });
-  if (visa > 0) return { kind: "visa", n: visa };
+  if (!isStarved("visa")) {
+    const visa = await prisma.job.count({ where: andWhere(judgeQueueWhere(true, now), VISA_MARKED) });
+    if (visa > 0) return { kind: "visa", n: visa };
+  }
   // groupBy on judgeQueueWhere, NOT a hand-written SQL copy of it.
   //
   // The copy left out freshness-or-sponsor-marked and the country/remote test,
@@ -262,6 +280,7 @@ async function nextLane(now: Date): Promise<Lane | null> {
     where: judgeQueueWhere(true, now),
   });
   const chunk = chunkFromHistogram(hist.map((h) => ({ score: h.score, n: h._count._all })));
+  if (chunk && isStarved(`chunk:${chunk.lo}-${chunk.hi}`)) return null;
   return chunk ? { kind: "chunk", chunk } : null;
 }
 
@@ -285,7 +304,7 @@ async function pass(): Promise<boolean> {
       : `${chunkLabel(lane.chunk)} (${lane.chunk.n.toLocaleString("tr")})`;
 
     const before = await prisma.job.count({ where: laneWhere(lane, now) });
-    let judged: { progressed: boolean; retryLater: boolean } | null = null;
+    let judged: { progressed: boolean; retryLater: boolean; deferred: number } | null = null;
 
     // ONE acquire for the whole lane. Releasing between embedding and judging
     // let a manual script slip into the gap and start swapping models against
@@ -306,6 +325,28 @@ async function pass(): Promise<boolean> {
 
       log(`${label} — ${BATCH} ilan yargılanıyor`);
       judged = readOutcome(await runChild("scripts/backfill/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]), "fit:fill");
+
+      // A lane whose every row was deferred is not empty — it is waiting for
+      // bodies. Summon desc:fill for exactly this lane (same flags, so the
+      // child walks the same population), then ask the judge once more.
+      // Mirrors the embed step above: the lane gets its prerequisites the
+      // moment they are known to be missing, not on some other schedule.
+      if (judged.deferred > 0 && !judged.progressed && !judged.retryLater) {
+        log(`  ${judged.deferred} ilan gövde bekliyor — desc:fill bu şeride çağrılıyor`);
+        const fed = readOutcome(
+          await runChild("scripts/backfill/desc-fill.ts", ["--budget", String(Math.max(judged.deferred * 2, 50)), ...childArgs]),
+          "desc:fill",
+        );
+        if (fed.progressed) {
+          judged = readOutcome(await runChild("scripts/backfill/fit-fill.ts", ["--wide", "--limit", String(BATCH), ...childArgs]), "fit:fill");
+        }
+        if (!judged.progressed) {
+          // Fed or not, the lane still cannot be judged. Stand aside so the
+          // lanes below get the GPU; re-test after the window (or a restart).
+          starvedUntil.set(laneKey(lane), Date.now() + STARVED_MS);
+          log(`  şerit doyurulamadı — ${STARVED_MS / 3_600_000} saat pas geçilecek, sıra alttaki şeritlerde`);
+        }
+      }
     } finally { leaveGpu(); }
 
     // The receipt is the answer; this count is the CROSS-CHECK.

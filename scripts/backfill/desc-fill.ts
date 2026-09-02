@@ -20,6 +20,8 @@ import { labelledSections as labelled } from "../../src/lib/text/sections";
 import { TEXT_VERSION } from "../../src/lib/text/html-text";
 import { invalidateVector } from "../../src/lib/llm/embed";
 import { andWhere, openWhere } from "../../src/lib/queue/pool";
+import { chunkFromArgs, chunkWhere } from "../../src/lib/queue/chunks";
+import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { fetchDetail as baDetail } from "../../src/lib/sources/arbeitsagentur";
 import { fetchDetail as chDetail } from "../../src/lib/sources/switzerland";
 import { fetchDetailSections as manfredSections } from "../../src/lib/sources/manfred";
@@ -223,9 +225,15 @@ const rows = await prisma.job.findMany({
   // rows (a scorer fix re-enters them on the next run), and the status half
   // means never spending them on postings the user has dismissed — which this
   // queue used to do, because it constrained no status at all.
+  // Lane scoping, same flags fit-fill and embed-fill take from the worker.
+  // The worker summons this script when a judge lane defers title-only rows;
+  // unscoped, a 30k-row queue could spend its whole budget before reaching
+  // the 44 rows the lane is actually starving on.
   where: andWhere(
     openWhere(),
     { OR: PLATFORMS.map((p) => ({ source: { startsWith: p } })) },
+    process.argv.includes("--visa-marked") ? VISA_MARKED : null,
+    chunkWhere(chunkFromArgs(process.argv.slice(2))),
   ),
   orderBy: [{ sponsorReg: "desc" }, { score: "desc" }, { lastSeenAt: "desc" }],
   select: { id: true, source: true, externalId: true, url: true, title: true, company: true, location: true, remote: true, country: true, visa: true, visaBy: true, seniorityLevel: true, seniorityBy: true, workModeBy: true, sponsorReg: true, content: { select: { description: true, textVersion: true } } },

@@ -157,6 +157,11 @@ while (run.round()) {
     const desc = j.content?.description ?? "";
     if (desc.length < j.title.length + 60) {
       skipped.push(j.id);
+      // Into the receipt, not just the in-memory list. The worker reads the
+      // receipt, and "drained, 0 done" with an invisible deferral is how the
+      // visa lane starved the whole pipeline for a day: 44 title-only rows,
+      // every pass "empty", desc:fill never summoned.
+      run.skip();
       continue;
     }
     try {

@@ -45,3 +45,13 @@ crawlable. Scouted the three candidates:
 
 No stage 2. Board discovery at scale stays with the crawl-data route (#15),
 which finds board URLs in the wild instead of asking platforms for a list.
+
+## 2026-09-02 — dead-board verdicts hold (#7)
+
+Stratified re-probe of the 15,044 dead boards with today's prober (which has
+grown the HTML tier and honest-429 handling since most verdicts were
+written): 40 random per platform across the top eight platforms, 320 total.
+**Revived: 0** (319 still dead, 1 transient error). The "revive a few hundred
+for free" hypothesis is refuted; dead verdicts are trustworthy, and the
+existing 30-day recheck loop (runValidation, hand-run via
+`npm run discovery:validate`) is sufficient coverage for drift.

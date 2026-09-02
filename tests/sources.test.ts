@@ -119,3 +119,35 @@ test("huntuk: cards parse into role/company/rating, title metadata is split out"
   assert.equal(nurse.location, "United Kingdom");
   assert.match(nurse.description, /Sponsorship unlikely/);
 });
+
+// ── VisaJobs.ie ──────────────────────────────────────────────────────────────
+
+test("visajobsie: cards parse, company from link or span, via-source kept", async () => {
+  const { parseVisaJobsIeList, mapVisaJobsIeCard } = await import("../src/lib/sources/visajobsie");
+  const html = `
+    <a class="t" href="/jobs/48794">Lead Software Engineer - AI Tooling</a>
+    <div><span class="font-medium">JP Morgan</span><span class="x">|</span><span>Dublin, Co. Dublin</span></div>
+    <span>via <!-- -->IrishJobs.ie</span><p class="mt-2 line-clamp-2">Join a collaborative team.</p>
+    <a class="t" href="/jobs/48941">Corporate Finance Graduate</a>
+    <div><a class="c" href="/companies/crowe-ireland">Crowe Ireland</a><span class="x">|</span><span>Dublin</span></div>
+    <span>via <!-- -->Company Career Page</span>`;
+  const cards = parseVisaJobsIeList(html);
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0]!.company, "JP Morgan", "span fallback");
+  assert.equal(cards[1]!.company, "Crowe Ireland", "companies link wins");
+  const job = mapVisaJobsIeCard(cards[0]!);
+  assert.equal(job.source, "visajobsie");
+  assert.equal(job.location, "Dublin, Co. Dublin, Ireland");
+  assert.match(job.description, /Originally listed on IrishJobs\.ie/);
+});
+
+test("visajobsie: the scorecard survives as judge-readable text", async () => {
+  const { parseVisaJobsIeScorecard } = await import("../src/lib/sources/visajobsie");
+  const html = `<div>Sponsorship fit</div><div>57</div><div>/ 100</div><div>Worth a look</div>
+    <div>Employer sponsorship history</div><b>27</b><i>/</i><b>45</b><div>10 permits issued, most recent 2026</div>
+    <div>Role eligibility</div><b>18</b><i>/</i><b>30</b><div>Not on either government list</div>`;
+  const card = parseVisaJobsIeScorecard(html);
+  assert.match(card, /Sponsorship fit 57\/100 \(Worth a look\)/);
+  assert.match(card, /Employer sponsorship history: 27\/45 - 10 permits issued/);
+  assert.equal(parseVisaJobsIeScorecard("<html>no card</html>"), "", "absent card is empty, not garbage");
+});

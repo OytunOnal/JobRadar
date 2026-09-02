@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { liveWhere } from "../queue/pool";
 import { parseJoinState } from "../sources/ats/join";
 import { probeBoard } from "./validate";
 
@@ -78,6 +79,11 @@ export interface NameProbeHit {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Between candidate tokens, not between platforms. One request per host per
+// token, then a breath — so a single host sees roughly one request a second
+// during a long run, which is gentler than any board fetch we already do.
+const PROBE_PAUSE_MS = Number(process.env.PROBE_PAUSE_MS) || 400;
 
 // Greenhouse's validation probe hits the board ROOT (no job list), so the
 // live-posting requirement needs one extra call for greenhouse hits only.
@@ -171,10 +177,29 @@ export async function probeCompany(
 ): Promise<NameProbeHit | null> {
   const candidates = slugCandidates(companyName);
   for (const token of candidates) {
-    for (const platform of VERIFIABLE_PLATFORMS) {
-      const outcome = await probeFn(platform, token, "");
-      await sleep(250);
-      if (outcome.result !== "active" || !outcome.companyName) continue;
+    // ALL EIGHT PLATFORMS AT ONCE. They are eight different companies'
+    // servers — greenhouse, workable, recruitee, smartrecruiters, personio,
+    // ashby, join, teamtailor — and a pause between requests to DIFFERENT
+    // hosts buys nobody anything. Politeness is a per-host property, and each
+    // host still receives exactly one request per candidate token; only the
+    // dead time between them is gone.
+    //
+    // This is the difference between ~10s and ~1.5s per name, which is the
+    // difference between a probe budget of 8 per ingest and one that keeps up
+    // with the pool: the backlog was 6,621 unprobed companies, growing by
+    // ~1,250 a day, against 8 probed per run.
+    const [apiOutcomes, htmlOutcomes] = await Promise.all([
+      Promise.all(VERIFIABLE_PLATFORMS.map((p) => probeFn(p, token, "").catch(() => null))),
+      Promise.all(HTML_VERIFIABLE.map((p) => htmlVerify(p, token, htmlProbe).catch(() => null))),
+    ]);
+    await sleep(PROBE_PAUSE_MS);
+
+    // Verdicts are READ in the original order, so concurrency changed the
+    // schedule and not the answer: the cheap deterministic API tier still
+    // wins over the HTML tier whenever both would verify the same name.
+    for (const [i, platform] of VERIFIABLE_PLATFORMS.entries()) {
+      const outcome = apiOutcomes[i];
+      if (!outcome || outcome.result !== "active" || !outcome.companyName) continue;
       if (!namesMatch(companyName, outcome.companyName)) continue; // gh:peak guard
       // Empty boards are squatted/trial accounts, not hiring channels
       // (measured: "workable:jpmorgan" answers with a name and 0 jobs).
@@ -185,9 +210,8 @@ export async function probeCompany(
       if (!jobCount || jobCount < 1) continue;
       return { platform, token, companyName: outcome.companyName };
     }
-    for (const platform of HTML_VERIFIABLE) {
-      const verified = await htmlVerify(platform, token, htmlProbe);
-      await sleep(250);
+    for (const [i, platform] of HTML_VERIFIABLE.entries()) {
+      const verified = htmlOutcomes[i];
       if (!verified || !namesMatch(companyName, verified.companyName)) continue;
       let jobCount = verified.jobCount;
       if (platform === "ashby") {
@@ -209,6 +233,48 @@ export interface NameProbeReport {
 
 // Probe up to `budget` new company names; hits land in AtsBoard as ACTIVE
 // (we just probed them) and their whole board joins the next ingest.
+// THE POOL'S OWN BACKLOG: companies with live aggregator postings and no
+// first-party board of their own, best-scoring first.
+//
+// The ingest used to probe only the companies THAT RUN created, which at a
+// budget of 8 could never catch up — measured 2026-09-02, the pool held 6,621
+// unprobed companies and was gaining ~1,250 a day. This is a better list than
+// any external directory, too: every name is a company hiring right now whose
+// posting already passed our scoring gates, and every hit upgrades postings
+// the user is ALREADY being shown to first-party sourcing.
+//
+// Ordering by the company's best posting score is what makes a bounded budget
+// spend itself well: the boards worth finding first are the ones whose
+// postings the radar would rank highest.
+// Some "companies" are not companies. Reddit handles and pasted URLs arrive
+// as employer names from the discussion-sourced boards, and each one costs
+// eight probes to learn nothing: the backlog's best-scoring head held
+// "/u/Beginning-Scholar105 https://www.reddit.com/user/..." before this
+// guard. A name with a URL in it, or one long enough to be a sentence, is
+// not a company someone runs an ATS under.
+export function probeableName(name: string): boolean {
+  if (name.length > 60) return false;
+  if (/https?:\/\/|www\.|@|\/u\/|\/r\//i.test(name)) return false;
+  return slugCandidates(name).length > 0;
+}
+
+export async function backlogNames(limit: number): Promise<string[]> {
+  const [rows, probedRows] = await Promise.all([
+    prisma.job.groupBy({
+      by: ["company"],
+      where: { ...liveWhere(), NOT: { source: { contains: ":" } } },
+      _max: { score: true },
+    }),
+    prisma.companyProbe.findMany({ select: { name: true } }),
+  ]);
+  const probed = new Set(probedRows.map((p) => p.name));
+  return rows
+    .filter((r) => r.company && probeableName(r.company) && !probed.has(normalizeCompanyName(r.company)))
+    .sort((a, b) => (b._max.score ?? 0) - (a._max.score ?? 0))
+    .slice(0, limit)
+    .map((r) => r.company);
+}
+
 export async function runNameProbes(
   companyNames: Iterable<string>,
   budget: number,

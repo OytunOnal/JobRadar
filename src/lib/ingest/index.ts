@@ -39,7 +39,7 @@ import { llmEnabled } from "../llm/llm";
 import { harvest, type HarvestReport } from "../discovery/harvest";
 import { boardSources, parseBoardSourceName, recordBoardOutcome } from "../discovery/boardSources";
 import { findDuplicate } from "../scoring/dedup";
-import { runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
+import { backlogNames, runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "../discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "../liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "../visa/sponsors";
@@ -68,7 +68,11 @@ const AUTO_FIT_TOP_N = 25;
 const DEDUP_MAX_CHECKS = 60;
 
 // Companies name-guess-probed per ingest (harvest tier 4).
-const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 8;
+// Sized against the measured inflow: the pool gains ~1,250 unprobed companies
+// on a heavy ingest day, and the parallel probe costs ~1.5s a name, so this
+// budget covers a day's arrivals and eats into the backlog on quiet days.
+// It is the wall-clock cost the queue gauge exists to make visible.
+const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
 // Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
@@ -595,10 +599,12 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     // NAME slugifies into probeable ATS tokens. Verified hits join the board
     // pool as active — the whole company upgrades to first-party next ingest.
     report.nameProbe = await stage("name-probe", report.errors, async () => {
-      const names = newlyCreated
-        .filter((j) => !j.source.includes(":"))
-        .map((j) => j.company)
-        .filter(Boolean);
+      // The whole pool's backlog, not just this run's arrivals: a run that
+      // stores 7,869 postings can create hundreds of new companies, and the
+      // old this-run-only selection meant every one the budget missed was
+      // never revisited. backlogNames orders by best posting score, so a
+      // bounded budget spends itself on the boards worth finding first.
+      const names = await backlogNames(NAME_PROBE_MAX);
       return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
     });
 

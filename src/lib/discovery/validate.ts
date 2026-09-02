@@ -50,6 +50,18 @@ const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> 
   manatal: (b) => b?.name,
 };
 
+// Platforms that asked us to go away, and when we may ask again. In-memory:
+// a restart re-tests, which is the cheapest correct invalidation, and the
+// window is capped so a hostile header cannot retire a platform forever.
+const throttledUntil = new Map<string, number>();
+const MAX_THROTTLE_MS = 6 * 60 * 60 * 1_000;
+const DEFAULT_THROTTLE_MS = 10 * 60 * 1_000;
+
+/** Which platforms are standing down, for the report. */
+export function throttledPlatforms(now = Date.now()): string[] {
+  return [...throttledUntil.entries()].filter(([, t]) => t > now).map(([p]) => p);
+}
+
 export interface ProbeOutcome {
   result: "active" | "dead" | "error";
   companyName?: string | null;
@@ -71,6 +83,9 @@ export async function probeBoard(
   const url = platform.probeUrl(token, region);
   if (!url) return { result: "error" };
 
+  const until = throttledUntil.get(platformId);
+  if (until && until > Date.now()) return { result: "error" }; // asked to wait
+
   const makeInit = (): RequestInit => ({
     method: platform.probeRequest?.method ?? "GET",
     headers: { "User-Agent": UA, ...platform.probeRequest?.headers },
@@ -82,14 +97,24 @@ export async function probeBoard(
   let res: Response;
   try {
     res = await fetchImpl(url, makeInit());
-    if (res.status === 429) {
-      await new Promise((r) => setTimeout(r, 5_000));
-      res = await fetchImpl(url, makeInit());
-    }
   } catch {
     return { result: "error" };
   }
-  if (res.status === 429) return { result: "error" }; // still throttled — retry next run
+  if (res.status === 429) {
+    // BELIEVE THE HEADER. This used to sleep five seconds and ask again,
+    // which was both useless and expensive: measured 2026-09-02, Workable
+    // answers 429 with retry-after 52,362 SECONDS — fourteen hours — so the
+    // retry bought a second refusal, and inside a parallel probe batch that
+    // one throttled host set the pace for all eight (8.5s per name against
+    // ~300ms for every other platform). Stand down for as long as we were
+    // asked, and let the other platforms run at their own speed.
+    const after = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(after) && after > 0
+      ? Math.min(after * 1_000, MAX_THROTTLE_MS)
+      : DEFAULT_THROTTLE_MS;
+    throttledUntil.set(platformId, Date.now() + waitMs);
+    return { result: "error" }; // never "dead": a refusal is not an answer
+  }
 
   let body: unknown = null;
   if (res.status === 200) {

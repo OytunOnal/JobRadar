@@ -175,3 +175,31 @@ test("PROBE_SIGNATURE covers the HTML tier — old five-platform misses read sta
     true,
   );
 });
+
+// ── Concurrency changed the schedule, not the answer ─────────────────────────
+
+test("the cheap API tier still wins when the HTML tier would also verify", async () => {
+  // Both tiers can verify "Dream Games": recruitee by API, join by embedded
+  // state. Probed concurrently, the verdicts are read in the original order,
+  // so the deterministic tier keeps its priority.
+  const { fn, html } = scripted(
+    { "recruitee:dreamgames": { result: "active", companyName: "Dream Games", jobCount: 4 } },
+    {
+      "https://join.com/companies/dreamgames": {
+        status: 200,
+        text: `<script>{"company":{"name":"Dream Games"},"jobs":{"items":[{"id":1}]}}</script>`,
+      },
+    },
+  );
+  const hit = await probeCompany("Dream Games", fn, html);
+  assert.equal(hit?.platform, "recruitee", "API tier outranks the HTML tier");
+});
+
+test("every platform is asked once per token, and a thrower is not a verdict", async () => {
+  const { fn, calls, html } = scripted({});
+  const boom = (async () => { throw new Error("network"); }) as any;
+  assert.equal(await probeCompany("Nowhere Ltd", boom, html), null, "a throwing probe is a miss, not a crash");
+  await probeCompany("Nowhere Ltd", fn, html);
+  const apiCalls = calls.filter((c) => !c.startsWith("html:"));
+  assert.equal(new Set(apiCalls).size, apiCalls.length, "no host is asked twice for one token");
+});

@@ -28,6 +28,7 @@ import { huntukvisasponsors } from "../sources/huntukvisasponsors";
 import { visajobsie } from "../sources/visajobsie";
 import { englishjobsde } from "../sources/englishjobsde";
 import { spainjobsio } from "../sources/spainjobsio";
+import { nextleveljobs } from "../sources/nextleveljobs";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -127,6 +128,7 @@ export const aggregators: Source[] = [
   visajobsie,     // IE jobs from DETE-screened sponsors; re-serves Akamai-walled IrishJobs rows
   englishjobsde,  // DE visa-sponsorship facet, English-only; clickout apply links, never crawled
   spainjobsio,    // ES curated visa surface via its own ItemList JSON-LD; ai-input=yes robots
+  nextleveljobs,  // EU-wide sponsor-curated board; sitemap-fed, JSON-LD bodies at fetch time
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

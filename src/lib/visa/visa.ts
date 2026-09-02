@@ -91,7 +91,7 @@ export type VisaTier = (typeof VISA_TIERS)[number];
 // Sources whose every posting comes from a licensed sponsor by construction
 // (e.g. a board built solely from a government sponsor register). Declared
 // here rather than guessed per job.
-export const VISA_FOCUSED_SOURCES: ReadonlySet<string> = new Set(["huntukvisa", "visajobsie", "spainjobsio", "englishjobsde"]);
+export const VISA_FOCUSED_SOURCES: ReadonlySet<string> = new Set(["huntukvisa", "visajobsie", "spainjobsio", "englishjobsde", "nextleveljobs"]);
 
 // Evidence strength: a weaker layer must never overwrite a stronger one.
 const EVIDENCE_RANK: Record<string, number> = { regex: 1, source: 2, llm: 3 };

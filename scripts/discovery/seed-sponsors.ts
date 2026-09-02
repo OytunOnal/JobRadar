@@ -1,4 +1,5 @@
 import { prisma } from "../../src/lib/db";
+import { parseBound } from "../../src/lib/queue/backfill";
 import { runNameProbes } from "../../src/lib/discovery/nameprobe";
 
 // SEED DISCOVERY FROM THE VISA SPONSOR REGISTERS (#13).
@@ -29,12 +30,9 @@ import { runNameProbes } from "../../src/lib/discovery/nameprobe";
 const COUNTRY_ORDER = ["nl", "ie", "dk", "gb"] as const;
 
 const args = process.argv.slice(2);
-const flag = (name: string) => {
-  const i = args.indexOf(name);
-  return i !== -1 ? args[i + 1] : undefined;
-};
-const BUDGET = Number(flag("--budget")) || 200;
-const ONLY = flag("--country");
+const BUDGET = parseBound(args, 200);
+const onlyIdx = args.indexOf("--country");
+const ONLY = onlyIdx !== -1 ? args[onlyIdx + 1] : undefined;
 
 let remaining = BUDGET;
 for (const country of COUNTRY_ORDER) {

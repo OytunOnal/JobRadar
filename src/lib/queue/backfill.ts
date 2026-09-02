@@ -130,7 +130,10 @@ export function readRun(script: string): RunResult | null {
   }
 }
 
-function parseBound(argv: readonly string[], fallback: number): number {
+// Exported for the seeding scripts, which are not backfills (no GPU, no
+// queue to drain) but take the same --budget flag and had started growing
+// their own parsers — the exact disease this module was built to cure.
+export function parseBound(argv: readonly string[], fallback: number): number {
   for (const flag of ["--budget", "--limit"]) {
     const i = argv.indexOf(flag);
     // indexOf returns -1 when absent, and -1 + 1 is 0 — without this guard a

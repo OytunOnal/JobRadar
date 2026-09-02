@@ -318,6 +318,11 @@ test("nothing outside backfill.ts hand-writes the run scaffolding", async () => 
     // A one-shot importer: walks a fixed curated list once and creates boards.
     // No queue to drain, no GPU, nothing to resume — there is no run to own.
     "scripts/tools/import-sustainability.ts",
+    // Appends dated sections to a TRACKED REPORT (discovery-health.md), which
+    // is the embed-eval precedent — not a run log. The guard's proxy for
+    // "hand-rolled scaffolding" is appendFileSync, and this is the one use of
+    // it that is the deliverable itself rather than plumbing around a run.
+    "scripts/measure/discovery-health.ts",
   ]);
 
   for (const rel of readdirSync("scripts", { recursive: true }) as string[]) {

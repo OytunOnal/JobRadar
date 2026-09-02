@@ -71,7 +71,9 @@ console.log("=== VC seed: Y Combinator portfolio ===");
 const seeds = await fetchYc();
 console.log(`Fetched ${seeds.length} active companies (websites on ${seeds.filter((s) => s.website).length})`);
 
-const report = await runNameProbes(seeds.map((s) => s.name), BUDGET);
+// Provenance "vc-portfolio": boards from this pipe stay distinguishable, so
+// "what did VC seeding actually yield in postings" remains answerable.
+const report = await runNameProbes(seeds.map((s) => s.name), BUDGET, undefined, undefined, "vc-portfolio");
 console.log(`Name-probed ${report.checked} new names — ${report.found} boards found`);
 
 // Pre-fill websites on the misses so deep-probe skips its LLM step for them.

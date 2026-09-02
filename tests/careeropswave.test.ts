@@ -84,12 +84,33 @@ test("justjoin mapJustJoin: workplace mapping, skills folded into description", 
   assert.equal(mapJustJoin({ title: "no slug" }), null);
 });
 
+test("nofluffjobs mapNoFluff: country from the catalog, not a hardcoded Poland", () => {
+  // The full catalog spans six countries; the windowed-era mapper stamped
+  // ", Poland" onto all of them.
+  const hu = mapNoFluff({
+    title: "Backend Engineer",
+    name: "Acme",
+    url: "backend-engineer-acme-budapest",
+    location: { places: [{ city: "Budapest", country: { code: "HUN", name: "Hungary" } }] },
+  })!;
+  assert.equal(hu.location, "Budapest, Hungary");
+  assert.equal(hu.workMode, undefined, "not remote: the flag's resting state stays silent");
+});
+
+test("nofluffjobs mapNoFluff: a hidden salary stays hidden", () => {
+  const job = mapNoFluff({
+    title: "Dev", name: "X", url: "dev-x",
+    salary: { from: 100, to: 200, currency: "PLN", disclosedAt: "HIDDEN" },
+  })!;
+  assert.equal(job.salaryText, undefined);
+});
+
 test("nofluffjobs mapNoFluff: salary string, slug URL", () => {
   const job = mapNoFluff({
     title: "Architekt systemowy",
     name: "AVENGA",
     url: "architekt-systemowy-avenga-remote",
-    location: { places: [{ city: "Warszawa" }] },
+    location: { places: [{ city: "Warszawa", country: { code: "POL", name: "Poland" } }] },
     salary: { from: 20000, to: 26000, currency: "PLN", type: "month" },
     posted: 1_755_600_000_000,
   })!;

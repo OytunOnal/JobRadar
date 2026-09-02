@@ -25,6 +25,7 @@ import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { fetchDetail as baDetail } from "../../src/lib/sources/arbeitsagentur";
 import { fetchDetail as chDetail } from "../../src/lib/sources/switzerland";
 import { fetchDetailSections as manfredSections } from "../../src/lib/sources/manfred";
+import { fetchNoFluffDetail } from "../../src/lib/sources/poland";
 import { fetchDetail as linkedinDetail } from "../../src/lib/sources/linkedin";
 
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
@@ -196,12 +197,14 @@ export async function fetchDescription(source: string, externalId: string, url: 
       return labelled(await manfredSections(externalId));
     case "linkedin":
       return await linkedinDetail(externalId);
+    case "nofluffjobs":
+      return await fetchNoFluffDetail(externalId);
   }
 }
 
 // Prefixes, because an ATS source is "<platform>:<token>". The last four are
 // whole source names: aggregators whose detail fetching moved here.
-const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin"];
+const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin", "nofluffjobs"];
 
 // A body short enough that the source is still holding the real one.
 //

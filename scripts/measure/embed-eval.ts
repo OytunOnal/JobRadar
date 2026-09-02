@@ -257,7 +257,7 @@ async function main() {
     );
   }
   const report = lines.join("\n");
-  writeFileSync("embed-eval-results.md", report);
+  writeFileSync("docs/embed-eval-results.md", report);
   console.log("\n" + report);
   await prisma.$disconnect();
 }

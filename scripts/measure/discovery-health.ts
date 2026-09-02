@@ -23,7 +23,7 @@ import { PROBE_SIGNATURE, probeCompany } from "../../src/lib/discovery/nameprobe
 //                    tiny SMBs land here; presumed correct negatives
 //
 // False-negative rate = (probe-now-hits + board-elsewhere) / N. Track it over
-// time in discovery-health.md (dated sections, newest last) — a rising rate
+// time in docs/discovery-health.md (dated sections, newest last) — a rising rate
 // means the probe is falling behind the market's platform mix.
 //
 // Read-only against the DB (measure convention); the markdown file is the
@@ -138,7 +138,7 @@ async function main() {
       .map((v) => `- ${v.name}: ${v.category} (${v.evidence})`),
   ];
 
-  const file = "discovery-health.md";
+  const file = "docs/discovery-health.md";
   if (!existsSync(file)) {
     writeFileSync(file, "# Discovery health\n\nMonthly sampled false-negative rate of name-probe misses.\nRun: `npm run measure:discovery` (optionally `-- --n 30`).\n");
   }

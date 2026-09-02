@@ -25,7 +25,7 @@ desc-fill.log
 eliminated-sample.txt
 eliminated-v2.txt
 data/embed-cache/
-embed-eval-results.md
+docs/embed-eval-results.md
 migrate-layered.log
 embed-fill.log
 prisma/dev.db-shm

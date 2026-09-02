@@ -15,6 +15,10 @@ Two more live next to the code they describe:
 and [`docs/agents/`](agents/) holds the conventions an agent working in this
 repository is expected to follow.
 
+Measurement reports also land here as they accumulate:
+[`discovery-health.md`](discovery-health.md) tracks the sampled false-negative
+rate of ATS board discovery, month by month.
+
 ## Reading order
 
 If you are evaluating the project, the README and the diagrams in it are enough.

@@ -60,6 +60,10 @@ if (report.liveness) console.log(`Liveness:       ${report.liveness.boardsRefres
 if (report.sponsors) console.log(`Sponsor regs:   refreshed ${Object.entries(report.sponsors.perCountry).map(([c, n]) => `${c}:${n}`).join(" ")}${report.sponsors.errors.length ? ` (errors: ${report.sponsors.errors.length})` : ""}`);
 if (report.locations) console.log(`Locations:      ${report.locations.llmResolved}/${report.locations.llmAsked} unknown strings resolved by LLM (cached forever)`);
 console.log(`LLM fit-scored: ${report.fitAnalyzed}`);
+if (report.recrawl) {
+  const r = report.recrawl;
+  console.log(`Archive scan:   ${r.scanned.join(", ")} + wayback since ${r.waybackFrom} -> ${r.crawl.created} new candidate(s), ${r.crawl.known} known${r.crawl.errors.length ? ` (errors: ${r.crawl.errors.length})` : ""}`);
+}
 if (report.queues) {
   // The capacity gauge (#12): growth PRs quote these lines, before and
   // expected-after. Nothing that feeds these queues merges on numbers unseen.

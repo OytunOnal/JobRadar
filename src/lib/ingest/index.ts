@@ -48,6 +48,7 @@ import { invalidateVector } from "../llm/embed";
 import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields } from "../scoring/derive";
 import { readQueueGauges, type QueueGauge } from "../queue/capacity";
+import { recrawlIfDue, type RecrawlReport } from "../discovery/recrawl";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, selects, selectSources, wantsAnything, PER_HOST } from "./fetch";
@@ -277,6 +278,8 @@ export interface IngestReport {
   // The operator's gauge (see queue/capacity.ts): read at the end of the run,
   // printed with the report — the pressure and its dial in the same breath.
   queues?: QueueGauge[];
+  // Present only on the ~monthly runs where an unscanned archive index existed.
+  recrawl?: RecrawlReport;
   sponsors?: SponsorRefreshReport;
   locations?: LocResolveReport;
   errors: string[];
@@ -606,6 +609,16 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     // Liveness probing: aggregator jobs have no diffable feed, so aging ones
     // get their URLs probed for closure banners.
     report.liveness = await stage("liveness", report.errors, () => runLivenessSweep());
+
+    // The recurring archive scan (#15): about once a month this finds a
+    // Common Crawl index nobody has scanned and spends 10-20 minutes on it
+    // (plus an incremental Wayback cut); every other day it costs one row
+    // read and usually no network at all. Self-scheduling on purpose — the
+    // product's rhythm has exactly one timer, the daily ingest, and a missed
+    // month heals because the question is asked of the archives, not of a
+    // calendar.
+    report.recrawl = await stage("recrawl", report.errors, () =>
+      recrawlIfDue(new Date(), (m) => console.log("  " + m)).then((r) => r ?? undefined));
 
     // Batched LLM location resolution for strings the gazetteer+cache missed.
     if (llmEnabled() && unknownLocations.size > 0) {

@@ -24,6 +24,7 @@ import { netempregos } from "../sources/netempregos";
 import { wttj } from "../sources/wttj";
 import { greenjobsde } from "../sources/greenjobsde";
 import { germantechjobs } from "../sources/germantechjobs";
+import { huntukvisasponsors } from "../sources/huntukvisasponsors";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -115,6 +116,7 @@ export const aggregators: Source[] = [
   jobindexdk,     // Denmark's biggest private board, RSS per query
   greenjobsde,    // German sustainability board via Atom feed (awesome-sustainability-jobs)
   germantechjobs, // structured visa flags, SwissDevJobs engine — Germany focus
+  huntukvisasponsors, // UK jobs rated for sponsorship against the gov.uk register; JSON-LD bodies via desc:fill
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

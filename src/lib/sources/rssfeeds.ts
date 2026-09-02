@@ -19,7 +19,10 @@ interface FeedDef {
 
 export const FEEDS: FeedDef[] = [
   // ── Visa / country gap fillers ────────────────────────────────────────────
-  { id: "huntukvisa", label: "Hunt UK Visa Sponsors", url: "https://huntukvisasponsors.com/jobs/feed.xml", company: "at" },
+  // huntukvisa moved to its own adapter (huntukvisasponsors.ts): the HTML
+  // list carries the per-job sponsorship rating the feed omits, and walks
+  // deeper than the feed's window. Same source name and identity, so the
+  // feed-era rows re-sight seamlessly.
   { id: "solidjobs", label: "SOLID.Jobs", url: "https://solid.jobs/rss/job-offers", company: "dash" },
   { id: "impjieg", label: "Impjieg", url: "https://impjieg.work/api/jobs/rss", company: "at" },
   { id: "ziprecruiterie", label: "ZipRecruiter IE", url: "https://www.ziprecruiter.ie/jobs.rss", company: "at" },

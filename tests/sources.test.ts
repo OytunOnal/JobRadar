@@ -88,3 +88,34 @@ test("manatal: hash id, slug URL, HTML body stripped, agency location fallbacks"
   // prose is exactly what the work-mode measurement buried.
   assert.equal(job.remote, false);
 });
+
+// ── Hunt UK Visa Sponsors ────────────────────────────────────────────────────
+
+test("huntuk: cards parse into role/company/rating, title metadata is split out", async () => {
+  const { parseHuntUkList, mapHuntUkCard } = await import("../src/lib/sources/huntukvisasponsors");
+  const html = `
+    <a class="x" href="/job/senior-dev-london-at-acme-abc123"><div>
+      <img alt="ACME TRADING LIMITED" src="x.jpg"/>
+      <span class="truncate text-[13.5px] font-medium">Senior Dev | London, hybrid | up to £90k</span>
+      <span title="Sponsorship likely. This sponsor issues visas.">likely</span>
+    </div></a>
+    <a class="x" href="/job/nurse-at-nhs-def456"><div>
+      <img alt="NHS FOUNDATION TRUST" src="y.jpg"/>
+      <span class="truncate text-[13.5px] font-medium">Staff Nurse</span>
+      <span title="Sponsorship unlikely. Little sign.">unlikely</span>
+    </div></a>
+    <a rel="next" href="https://huntukvisasponsors.com/jobs?after=abc"/>`;
+  const { cards, nextUrl } = parseHuntUkList(html);
+  assert.equal(cards.length, 2);
+  assert.equal(nextUrl, "https://huntukvisasponsors.com/jobs?after=abc");
+  const job = mapHuntUkCard(cards[0]!);
+  assert.equal(job.title, "Senior Dev", "the site's pipe metadata is not the employer's title");
+  assert.equal(job.company, "ACME TRADING LIMITED", "legal register name, for the sponsorReg match");
+  assert.equal(job.location, "London, United Kingdom");
+  assert.equal(job.salaryText, "up to £90k");
+  assert.match(job.description, /Sponsorship likely/, "the rating travels as text, never as structured visa");
+  const nurse = mapHuntUkCard(cards[1]!);
+  assert.equal(nurse.title, "Staff Nurse");
+  assert.equal(nurse.location, "United Kingdom");
+  assert.match(nurse.description, /Sponsorship unlikely/);
+});

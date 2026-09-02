@@ -1,4 +1,5 @@
 import { chat } from "./llm";
+import { andWhere, openWhere } from "../queue/pool";
 import { detectLanguageRequirements } from "../scoring/langreq";
 import { detectSeniority } from "../scoring/seniority";
 import { signalExcerpts } from "../text/posting-text";
@@ -25,6 +26,20 @@ import { postingView } from "../text/sections";
 // version — deliberate and cheap here: 2,904 f4 rows against a ~72k queue
 // that had not been worked yet anyway.
 export const EXTRACTOR_VERSION = "f5";
+
+// THE FACTS QUEUE: open pool above the score gate, not yet extracted at the
+// current version. Lived inside facts-fill.ts until the capacity gauge needed
+// to read the same population — a script can import a lib, a lib cannot
+// import a script, so the predicate moves to the concept's home. The 40 here
+// and the 40 in judgeTargetWhere are two different questions sharing a
+// number, deliberately unmerged (see facts-fill's header for the measurement).
+export function factsQueueWhere() {
+  return andWhere(
+    openWhere(),
+    { score: { gte: 40 } },
+    { OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }] },
+  );
+}
 
 export interface PostingFactsResult {
   visaOffered: "yes" | "no" | null;

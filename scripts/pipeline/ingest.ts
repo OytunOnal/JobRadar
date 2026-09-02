@@ -1,4 +1,5 @@
 import { runIngest } from "../../src/lib/ingest";
+import { formatQueueGauges } from "../../src/lib/queue/capacity";
 import { generatedProfileStale } from "../../src/lib/user/profile";
 import { prisma } from "../../src/lib/db";
 
@@ -59,6 +60,12 @@ if (report.liveness) console.log(`Liveness:       ${report.liveness.boardsRefres
 if (report.sponsors) console.log(`Sponsor regs:   refreshed ${Object.entries(report.sponsors.perCountry).map(([c, n]) => `${c}:${n}`).join(" ")}${report.sponsors.errors.length ? ` (errors: ${report.sponsors.errors.length})` : ""}`);
 if (report.locations) console.log(`Locations:      ${report.locations.llmResolved}/${report.locations.llmAsked} unknown strings resolved by LLM (cached forever)`);
 console.log(`LLM fit-scored: ${report.fitAnalyzed}`);
+if (report.queues) {
+  // The capacity gauge (#12): growth PRs quote these lines, before and
+  // expected-after. Nothing that feeds these queues merges on numbers unseen.
+  console.log("Queues:");
+  for (const line of formatQueueGauges(report.queues)) console.log("  " + line);
+}
 if (report.harvest) {
   const h = report.harvest;
   console.log(

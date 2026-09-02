@@ -1,6 +1,6 @@
 import { prisma } from "../../src/lib/db";
 import { backfill } from "../../src/lib/queue/backfill";
-import { extractFacts, EXTRACTOR_VERSION } from "../../src/lib/llm/facts";
+import { extractFacts, factsQueueWhere, EXTRACTOR_VERSION } from "../../src/lib/llm/facts";
 import { applyFactsToJob } from "../../src/lib/visa/visa-write";
 import { andWhere, openWhere } from "../../src/lib/queue/pool";
 
@@ -34,13 +34,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // is deliberate: they are two different questions that happen to share a
 // number, and merging them is what would couple this queue to the judge's
 // policy.
+// The queue predicate lives with the concept (factsQueueWhere in llm/facts.ts
+// — version-aware, so improving the extractor re-runs only what it must);
+// this script adds only its own run-order option on top.
 export const factsWhere = andWhere(
-  openWhere(),
-  { score: { gte: 40 } },
-  // Queue = "no facts yet, or facts from an older extractor". Version-aware
-  // like the keyword rescore: improving the extractor re-runs only what it
-  // must, and the improvement reaches existing rows without a manual sweep.
-  { OR: [{ facts: { is: null } }, { facts: { extractorVersion: { not: EXTRACTOR_VERSION } } }] },
+  factsQueueWhere(),
   JUDGED_FIRST ? { fitScore: { not: null } } : null,
 );
 

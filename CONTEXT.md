@@ -102,6 +102,16 @@ _Avoid_: ignored, hidden, rejected (rejected is what an employer does)
 The disqualified part of the pool. Worked only when nothing else needs the GPU.
 _Avoid_: rejects, trash, cold storage
 
+**Drain time**:
+How many days a work queue needs to empty at the last week's daily pace —
+depth over throughput, the operator's capacity gauge. A ratio on purpose: it
+measures whatever hardware it runs on, so no threshold had to be chosen for
+machines we have not seen. Meaningful only for slow queues (judging,
+extraction); a fast queue's alarm is depth that does not fall between reports.
+Growth work quotes it before and after — nothing that feeds a queue merges on
+a number unseen.
+_Avoid_: backlog ETA, lag, capacity (the gauge measures it, the term is the time)
+
 **Radar**:
 The ranked reading surface for discoverable postings. Its defining rule is that
 it labels a posting's risks rather than hiding the posting.

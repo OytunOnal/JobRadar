@@ -47,6 +47,7 @@ import { TEXT_VERSION } from "../text/html-text";
 import { invalidateVector } from "../llm/embed";
 import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields } from "../scoring/derive";
+import { readQueueGauges, type QueueGauge } from "../queue/capacity";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, selects, selectSources, wantsAnything, PER_HOST } from "./fetch";
@@ -273,6 +274,9 @@ export interface IngestReport {
   nameProbe?: NameProbeReport;
   deepProbe?: DeepProbeReport;
   liveness?: LivenessReport;
+  // The operator's gauge (see queue/capacity.ts): read at the end of the run,
+  // printed with the report — the pressure and its dial in the same breath.
+  queues?: QueueGauge[];
   sponsors?: SponsorRefreshReport;
   locations?: LocResolveReport;
   errors: string[];
@@ -695,6 +699,8 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // a total, a status census and a VERDICT census. The fit stage writes
   // verdicts on postings this run never fetched, so an ingest whose sources
   // were all down could still change the strip and then decline to refresh it.
+  report.queues = await stage("queue-gauges", report.errors, () => readQueueGauges());
+
   if (report.stored + report.updated + report.delisted + report.fitAnalyzed > 0) {
     await stage("snapshot", report.errors, async () => {
       const [statusCounts, verdictCounts, total] = await Promise.all([

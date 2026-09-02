@@ -179,3 +179,23 @@ test("englishjobsde: a yearless date in the future belongs to last year", async 
   assert.equal(parseListedDate("January 10", now)?.getFullYear(), 2026);
   assert.equal(parseListedDate("no date here", now), undefined);
 });
+
+// ── SpainJobs.io ─────────────────────────────────────────────────────────────
+
+test("spainjobsio: jobs come from the page's own ItemList, split on the last ' at '", async () => {
+  const { parseSpainJobsList, mapSpainJobsItem } = await import("../src/lib/sources/spainjobsio");
+  const html = `<script type="application/ld+json">{"@type":"FAQPage"}</script>
+    <script type="application/ld+json">{"@type":"ItemList","itemListElement":[
+      {"@type":"ListItem","position":1,"name":"Engineer at Scale at Affirm","url":"https://www.spainjobs.io/companies/affirm/engineer--abc123"},
+      {"@type":"ListItem","position":2,"name":"No company here","url":"https://www.spainjobs.io/companies/x/y--def"},
+      {"@type":"ListItem","position":3,"name":"Dev at N26","url":"https://elsewhere.example/not-a-company-url"}
+    ]}</script>`;
+  const items = parseSpainJobsList(html);
+  assert.equal(items.length, 2, "non-company URLs are dropped");
+  assert.equal(items[0]!.title, "Engineer at Scale", "LAST ' at ' splits — the qualifier stays in the title");
+  assert.equal(items[0]!.company, "Affirm");
+  const job = mapSpainJobsItem(items[0]!)!;
+  assert.equal(job.source, "spainjobsio");
+  assert.equal(job.externalId, "affirm/engineer--abc123");
+  assert.equal(mapSpainJobsItem(items[1]!), null, "an item with no company is not a posting");
+});

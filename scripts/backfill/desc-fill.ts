@@ -175,7 +175,8 @@ export async function fetchDescription(source: string, externalId: string, url: 
     case "csod":
     case "phenom":
     case "personio":
-    case "huntukvisa": {
+    case "huntukvisa":
+    case "spainjobsio": {
       // HTML platforms: JSON-LD JobPosting first, og:description as fallback.
       const html = await getHtml(url);
       return jsonLdDescription(html) || ogDescription(html);
@@ -208,7 +209,7 @@ export async function fetchDescription(source: string, externalId: string, url: 
 
 // Prefixes, because an ATS source is "<platform>:<token>". The last four are
 // whole source names: aggregators whose detail fetching moved here.
-const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin", "nofluffjobs", "huntukvisa", "visajobsie"];
+const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin", "nofluffjobs", "huntukvisa", "visajobsie", "spainjobsio"];
 
 // A body short enough that the source is still holding the real one.
 //

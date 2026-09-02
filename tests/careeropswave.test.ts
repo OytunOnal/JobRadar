@@ -295,3 +295,29 @@ test("isOnCooldown: LinkedIn keeps weekly cadence, others always run", () => {
   assert.equal(isOnCooldown("linkedin", null, now), false);        // never fetched
   assert.equal(isOnCooldown("eures", twoDaysAgo, now), false);     // no cooldown entry
 });
+
+// ── IE permits register: counts survive the parse ────────────────────────────
+
+test("parseIe reads permit counts and the latest month, not just names", async () => {
+  const { zipSync, strToU8 } = await import("fflate");
+  const sheet = `<?xml version="1.0"?><worksheet><sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c><c r="D1" t="s"><v>3</v></c></row>
+    <row r="2"><c r="A2" t="s"><v>4</v></c><c r="B2"><v>3</v></c><c r="D2"><v>3</v></c></row>
+    <row r="3"><c r="A3" t="s"><v>5</v></c><c r="C3"><v>1</v></c><c r="D3"><v>1</v></c></row>
+    <row r="4"><c r="A4"><v>9999</v></c><c r="D4"><v>4</v></c></row>
+  </sheetData></worksheet>`;
+  const shared = `<?xml version="1.0"?><sst>
+    <si><t>Employer Name</t></si><si><t>Permits Issued Jan</t></si>
+    <si><t>Permits Issued Feb</t></si><si><t>Permits Issued Grand Total</t></si>
+    <si><t>Acme Clinical Ltd</t></si><si><t>Beta Robotics</t></si></sst>`;
+  const xlsx = zipSync({
+    "xl/worksheets/sheet1.xml": strToU8(sheet),
+    "xl/sharedStrings.xml": strToU8(shared),
+  });
+  const rows = parseIe(xlsx);
+  assert.equal(rows.length, 2, "the numeric-A footer row is not an employer");
+  assert.equal(rows[0].name, "Acme Clinical Ltd");
+  assert.equal(rows[0].detail, "IE permits issued this year: 3 (latest Jan)");
+  assert.equal(rows[1].detail, "IE permits issued this year: 1 (latest Feb)",
+    "grand total column wins; latest month is the last one with a count");
+});

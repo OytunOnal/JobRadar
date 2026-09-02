@@ -84,11 +84,57 @@ export function parseIe(xlsx: Uint8Array): SponsorRow[] {
   const sheet = strFromU8(files["xl/worksheets/sheet1.xml"] ?? new Uint8Array());
   if (!shared || !sheet) return [];
   const strings = [...shared.matchAll(/<t[^>]*>([^<]*)<\/t>/g)].map((m) => decodeXml(m[1]));
+
+  // The sheet is per-month: A = employer, then one "Permits Issued <Mon>"
+  // column per elapsed month, plus a Grand Total. The first parser read only
+  // column A and threw the counts away — the register's whole advantage over
+  // a bare licence list is that these permits were actually ISSUED, and how
+  // many is a strength signal ("40 this year" beats "appears on a list").
+  // Columns are mapped from the header row because the file grows a column
+  // every month; hardcoding letters would silently misread it from October.
+  const rows = [...sheet.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)];
+  if (rows.length === 0) return [];
+  const parseCells = (rowXml: string): Map<string, { shared: boolean; v: string }> => {
+    const cells = new Map<string, { shared: boolean; v: string }>();
+    for (const c of rowXml.matchAll(/<c r="([A-Z]+)\d+"([^>]*)><v>([^<]*)<\/v>/g)) {
+      cells.set(c[1], { shared: /t="s"/.test(c[2]), v: c[3] });
+    }
+    return cells;
+  };
+  const resolve = (cell: { shared: boolean; v: string } | undefined): string =>
+    cell ? (cell.shared ? (strings[Number(cell.v)] ?? "") : cell.v).trim() : "";
+
+  const header = parseCells(rows[0][1]);
+  const monthCols: Array<{ col: string; month: string }> = [];
+  let totalCol: string | null = null;
+  for (const [col, cell] of header) {
+    const label = resolve(cell);
+    const m = label.match(/^Permits Issued (\w{3})$/i);
+    if (m) monthCols.push({ col, month: m[1] });
+    else if (/grand total/i.test(label)) totalCol = col;
+  }
+
   const out: SponsorRow[] = [];
-  for (const m of sheet.matchAll(/<c r="A\d+"[^>]*t="s"[^>]*><v>(\d+)<\/v><\/c>/g)) {
-    const name = (strings[Number(m[1])] ?? "").trim();
+  for (const row of rows.slice(1)) {
+    const cells = parseCells(row[1]);
+    const nameCell = cells.get("A");
+    if (!nameCell?.shared) continue; // totals/footer rows carry numbers in A
+    const name = resolve(nameCell);
     if (!name || /^(employer name|total)$/i.test(name)) continue;
-    out.push({ name, detail: "IE employment permit issued this year" });
+    let total = totalCol ? Number(resolve(cells.get(totalCol))) : NaN;
+    let latest = "";
+    let summed = 0;
+    for (const { col, month } of monthCols) {
+      const n = Number(resolve(cells.get(col)));
+      if (Number.isFinite(n) && n > 0) { summed += n; latest = month; }
+    }
+    if (!Number.isFinite(total) || total <= 0) total = summed;
+    out.push({
+      name,
+      detail: total > 0
+        ? `IE permits issued this year: ${total}${latest ? ` (latest ${latest})` : ""}`
+        : "IE employment permit issued this year",
+    });
   }
   return out;
 }

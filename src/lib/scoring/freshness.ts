@@ -72,10 +72,17 @@ export function tooOldToStore(
   return now.getTime() - postedAt.getTime() > AGGREGATOR_MAX_AGE_DAYS * DAY;
 }
 
-/** Whole days between then and now, floored, never negative. Both renderings
- * below count from this, so they cannot disagree about where a day ends. */
+/** CALENDAR days between then and now, in local time, never negative. Both
+ * renderings below count from this, so they cannot disagree about where a day
+ * ends — and the day ends at midnight, not 24 hours after the event. The
+ * elapsed-time version shipped first and called yesterday's applications
+ * "today" until each one's own clock time came around again: apply at noon,
+ * and at breakfast the next day the card still says today. "Yesterday" is a
+ * date, not a duration. Rounded, not floored, so a DST-shortened day still
+ * counts as one. */
 export function daysSince(anchor: Date, now: Date = new Date()): number {
-  return Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / DAY));
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return Math.max(0, Math.round((midnight(now) - midnight(anchor)) / DAY));
 }
 
 // Short human age for the dashboard ("3d", "2mo", "1y+").

@@ -81,6 +81,12 @@ test("ageLabel renders compact ages", () => {
 test("ageWords renders the same ages in words", () => {
   assert.equal(ageWords(days(0), NOW), "today");
   assert.equal(ageWords(days(1), NOW), "yesterday");
+  // The day ends at midnight, not 24 hours after the event: applying at noon
+  // yesterday is "yesterday" at breakfast today, nine hours later. The
+  // elapsed-time version said "today" until each event's own clock time came
+  // around again, and every one of yesterday's applications wore it.
+  assert.equal(ageWords(new Date("2026-08-18T22:00:00"), new Date("2026-08-19T07:00:00")), "yesterday");
+  assert.equal(ageWords(new Date("2026-08-19T01:00:00"), new Date("2026-08-19T23:00:00")), "today");
   assert.equal(ageWords(days(3), NOW), "3 days ago");
   assert.equal(ageWords(days(35), NOW), "1 month ago");
   assert.equal(ageWords(days(90), NOW), "3 months ago");

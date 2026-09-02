@@ -18,3 +18,12 @@ Probe signature: `ashby,greenhouse,join,personio,recruitee,smartrecruiters,teamt
 **False-negative rate: 3.3%** (1/30)
 
 - Beglaubigt.de: probe-now-hits (join:beglaubigtde)
+
+## 2026-09-02 — custom career pages: JSON-LD coverage (#17 stage 1)
+
+Of 93 name-probe misses with a resolved website, a careers page was located
+for 47 (17 sites unreachable). JSON-LD JobPosting markup: **2/93 (2.2%)** —
+enersis.ch and soptim.de. The kill threshold was 10%; the "custom board"
+source kind is refuted by measurement. Caveat recorded: the locator found only
+half the careers pages (JS-rendered menus hide some), but even doubling the
+rate stays far under the bar.

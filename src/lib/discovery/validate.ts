@@ -47,6 +47,7 @@ const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> 
   smartrecruiters: (b) => b?.content?.[0]?.company?.name,
   personio: (b) =>
     typeof b === "string" ? b.match(/<subcompany>([^<]*)<\/subcompany>/)?.[1]?.trim() || null : null,
+  manatal: (b) => b?.name,
 };
 
 export interface ProbeOutcome {

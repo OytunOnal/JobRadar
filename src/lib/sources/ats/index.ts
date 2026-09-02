@@ -34,6 +34,7 @@ import { teamtailor } from "./teamtailor";
 import { bamboohr } from "./bamboohr";
 import { breezy } from "./breezy";
 import { join } from "./join";
+import { manatal } from "./manatal";
 import { pinpoint } from "./pinpoint";
 import { oracle } from "./oracle";
 import { beesite } from "./beesite";
@@ -69,6 +70,7 @@ export const atsFetchers = {
   bamboohr,
   breezy,
   join,
+  manatal,
   pinpoint,
   oracle,
   beesite,

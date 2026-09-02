@@ -1,0 +1,35 @@
+{
+ "count": 231,
+ "next": "https://www.careers-page.com/api/v1.0/c/elevus/jobs/?page=2&page_size=2",
+ "previous": null,
+ "results": [
+  {
+   "id": 4186104,
+   "hash": "Y65XY73V",
+   "position_name": "Account Manager",
+   "description": "<p>A Elevus encontra-se a recrutar um(a) <strong>Account Manager</strong> para integrar uma empresa portuguesa de engenharia de comunicações, especializada no desenvolvimento e implementação de soluções tecnológicas nas áreas de ICT, redes, conectividade e integração de sistemas.</p>\n<p>Procuramos u",
+   "country": "Portugal",
+   "state": "",
+   "city": "Lisbon",
+   "address": "",
+   "zipcode": "",
+   "location_display": "Lisbon, Portugal",
+   "is_salary_visible": false,
+   "is_pinned_in_career_page": false
+  },
+  {
+   "id": 3645156,
+   "hash": "63X4Y64W",
+   "position_name": "Account & Product Manager | Product & Sales",
+   "description": "<p>A Elevus está a recrutar um(a) <strong>Account &amp; Product Manager</strong> para reforçar a equipa de <strong>Product &amp; Sales</strong>, com foco na gestão de clientes, desenvolvimento de serviços e identificação de novas oportunidades de negócio.</p>\n<p>Procuramos um perfil dinâmico, com vi",
+   "country": "Portugal",
+   "state": "",
+   "city": "Lisboa",
+   "address": "",
+   "zipcode": "",
+   "location_display": "Lisboa, Portugal",
+   "is_salary_visible": false,
+   "is_pinned_in_career_page": false
+  }
+ ]
+}

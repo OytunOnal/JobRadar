@@ -390,6 +390,25 @@ const joinPlatform: AtsPlatform = {
   fetcher: "join",
 };
 
+const manatalPlatform: AtsPlatform = {
+  id: "manatal",
+  // Root-path tokened: www.careers-page.com/<slug>[/job/<hash>]. Probe
+  // verified live 2026-09: the company-meta API answers 200 JSON with the
+  // org's name, unknown slugs 404 cleanly. The jobs API is official and
+  // public (developers.manatal.com), and its list payload carries FULL
+  // descriptions - rare, and worth the registry slot on its own.
+  patterns: [
+    {
+      kind: "path",
+      hosts: ["careers-page.com", "www.careers-page.com"],
+      denySegments: new Set([...COMMON_DENY_SEGMENTS, "api", "job", "jobs", "static", "assets"]),
+    },
+  ],
+  crawlDomains: ["careers-page.com"],
+  probeUrl: (token) => `https://www.careers-page.com/api/v1.0/c/${token}/`,
+  fetcher: "manatal",
+};
+
 const pinpointPlatform: AtsPlatform = {
   id: "pinpoint",
   // <slug>.pinpointhq.com hosted boards (xeneta). Probe verified live
@@ -619,6 +638,7 @@ export const platforms: readonly AtsPlatform[] = [
   bamboohrPlatform,
   breezyPlatform,
   pinpointPlatform,
+  manatalPlatform,
   teamtailorPlatform,
   joinPlatform,
   oraclePlatform,

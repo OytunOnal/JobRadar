@@ -307,6 +307,19 @@ test("softgarden dedupes its anchors and ignores non-job links", () => {
   assert.equal(jobs[1].remote, true);
 });
 
+test("manatal maps the recorded page: hash ids, slug URLs, stripped bodies", async () => {
+  const { mapManatalJob } = await import("../src/lib/sources/ats/manatal");
+  const page = json("manatal");
+  const jobs = page.results.map((j: any) => mapManatalJob(j, "elevus", "Elevus")).filter(Boolean);
+  assert.equal(jobs.length, page.results.length);
+  for (const j of jobs) {
+    assertUsable(j, "manatal");
+    assert.match(j.externalId, /^[A-Z0-9]+$/);
+    assert.ok(j.url.includes("/elevus/job/"));
+    assert.ok(!j.description.includes("<"), "HTML stripped");
+  }
+});
+
 // ── The guards ───────────────────────────────────────────────────────────
 
 test("every registered platform has a fixture", () => {

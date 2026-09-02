@@ -49,3 +49,4 @@ needs nothing but a live board token.
 | `csod.json` | DERIVED | needs an anonymous JWT bootstrapped off the home page |
 | `jobvite.txt` | DERIVED | rate-limits hard; one feed call per run |
 | `softgarden.txt` | DERIVED | includes a duplicate anchor and a non-job link |
+| `manatal.json` | RECORDED | live GET careers-page.com/api/v1.0/c/elevus/jobs/ 2026-09-02, descriptions trimmed to 300 chars |

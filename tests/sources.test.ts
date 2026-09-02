@@ -64,3 +64,27 @@ test("apiboards: muse/germantech/duunitori/warp mappers", () => {
   const w = mapWarpJob({ title: "Inference Eng", url: "https://w/1", company: "Together", visa_sponsor: true })!;
   assert.equal(w.visa, "yes");
 });
+
+// ── Manatal (careers-page.com) ───────────────────────────────────────────────
+
+test("manatal: hash id, slug URL, HTML body stripped, agency location fallbacks", async () => {
+  const { mapManatalJob } = await import("../src/lib/sources/ats/manatal");
+  const job = mapManatalJob({
+    id: 4247112,
+    hash: "RY963356",
+    position_name: "Medical Information Specialist",
+    description: "<p><b>Job Title:</b> Specialist</p><p>Remote role.</p>",
+    country: "", state: "", city: "",
+    address: "London",
+    location_display: "",
+  }, "lifelancer", "Lifelancer")!;
+  assert.equal(job.source, "manatal:lifelancer");
+  assert.equal(job.externalId, "RY963356");
+  assert.ok(job.url.endsWith("/lifelancer/job/RY963356"));
+  assert.equal(job.location, "London", "location_display empty, city empty -> address");
+  assert.ok(!job.description.includes("<"), "HTML stripped");
+  // The body says "Remote role." and the flag stays false on purpose:
+  // remote is read from location+title only. Guessing it from description
+  // prose is exactly what the work-mode measurement buried.
+  assert.equal(job.remote, false);
+});

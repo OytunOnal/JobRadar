@@ -55,3 +55,20 @@ written): 40 random per platform across the top eight platforms, 320 total.
 for free" hypothesis is refuted; dead verdicts are trustworthy, and the
 existing 30-day recheck loop (runValidation, hand-run via
 `npm run discovery:validate`) is sufficient coverage for drift.
+
+## 2026-09-02 — company directories on every ingested board, swept
+
+Every ingested board probed for a company-directory door in one pass.
+Open doors, now harvested by seed-curated.ts: **TheMuse** public companies
+API (968 orgs, 49 pages, US-heavy — names only) and **Landing.jobs**
+companies API (13 orgs, website-bearing → pre-filled for deep-probe).
+Previously wired: thehub /startups (websites, seed-thehub.ts), SpainJobs.io
+sponsors and NextLevelJobs sitemap companies (seed-curated.ts), WTTJ org
+objects (closed: names already flow through the pool backlog, no website
+field). Closed doors, verified: himalayas /companies (403 Cloudflare),
+justjoin brands + nofluffjobs /api/companies + manfred /api/v2/companies +
+arbeitnow /api/companies (404/timeout), weworkremotely + workingnomads
+/companies (404), remoteok (3 links, no directory), swissdevjobs +
+germantechjobs /companies (5KB shells), duunitori employers (403 robots),
+visajobsie /companies + huntukvisa mirror our own DETE/Home-Office
+registers — redundant by construction.

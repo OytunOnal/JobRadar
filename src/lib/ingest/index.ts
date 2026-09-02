@@ -26,6 +26,7 @@ import { greenjobsde } from "../sources/greenjobsde";
 import { germantechjobs } from "../sources/germantechjobs";
 import { huntukvisasponsors } from "../sources/huntukvisasponsors";
 import { visajobsie } from "../sources/visajobsie";
+import { englishjobsde } from "../sources/englishjobsde";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -123,6 +124,7 @@ export const aggregators: Source[] = [
   germantechjobs, // structured visa flags, SwissDevJobs engine — Germany focus
   huntukvisasponsors, // UK jobs rated for sponsorship against the gov.uk register; JSON-LD bodies via desc:fill
   visajobsie,     // IE jobs from DETE-screened sponsors; re-serves Akamai-walled IrishJobs rows
+  englishjobsde,  // DE visa-sponsorship facet, English-only; clickout apply links, never crawled
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

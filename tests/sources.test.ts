@@ -151,3 +151,31 @@ test("visajobsie: the scorecard survives as judge-readable text", async () => {
   assert.match(card, /Employer sponsorship history: 27\/45 - 10 permits issued/);
   assert.equal(parseVisaJobsIeScorecard("<html>no card</html>"), "", "absent card is empty, not garbage");
 });
+
+// ── EnglishJobs.de ───────────────────────────────────────────────────────────
+
+test("englishjobsde: result blocks parse; clickout is stored, never a page URL", async () => {
+  const { parseEnglishJobsList, mapEnglishJobsCard } = await import("../src/lib/sources/englishjobsde");
+  const html = `<!-- result --><div id="e4e5f5ea8dc8b159" class="job">
+    <a href="/clickout/e4e5f5ea8dc8b159?ql=q&amp;sig=abc"><h3 itemprop="title">Voice AI Engineer</h3></a>
+    <li class="flex text-sm break-words"><svg></svg> WhyHireWrong?</li>
+    <li class="flex text-sm"><svg></svg> Berlin</li>
+    <li class="flex text-sm"><svg></svg> August 11</li>
+    <div class="mr-4 text-gray-400 x"><img src="logo.png">Relocation and visa sponsorship provided. Salary: 85k euro.</div></div>`;
+  const cards = parseEnglishJobsList(html);
+  assert.equal(cards.length, 1);
+  const job = mapEnglishJobsCard(cards[0]!, new Date("2026-09-02T12:00:00Z"))!;
+  assert.equal(job.company, "WhyHireWrong?");
+  assert.equal(job.location, "Berlin, Germany");
+  assert.ok(job.url.includes("/clickout/") && job.url.includes("sig=abc"), "the clickout IS the apply link");
+  assert.equal(job.postedAt?.toISOString().slice(0, 10), "2026-08-11");
+  assert.match(job.description, /Relocation and visa sponsorship/);
+});
+
+test("englishjobsde: a yearless date in the future belongs to last year", async () => {
+  const { parseListedDate } = await import("../src/lib/sources/englishjobsde");
+  const now = new Date("2026-01-15T12:00:00Z");
+  assert.equal(parseListedDate("December 20", now)?.getFullYear(), 2025);
+  assert.equal(parseListedDate("January 10", now)?.getFullYear(), 2026);
+  assert.equal(parseListedDate("no date here", now), undefined);
+});

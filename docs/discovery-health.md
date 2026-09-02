@@ -27,3 +27,21 @@ enersis.ch and soptim.de. The kill threshold was 10%; the "custom board"
 source kind is refuted by measurement. Caveat recorded: the locator found only
 half the careers pages (JS-rendered menus hide some), but even doubling the
 rate stays far under the bar.
+
+## 2026-09-02 — platform client directories: scouted and closed (#14)
+
+The premise was that ATS platforms list their own customers somewhere
+crawlable. Scouted the three candidates:
+
+- **Join**: `/companies` is 404; `/jobs` is a fully client-rendered SPA with
+  zero data in its HTML — harvesting would mean reverse-engineering an
+  undocumented internal API, which is a different posture than fetching
+  public pages (their robots.txt welcomes content fetchers; their API makes
+  no such offer). Individual board pages still work for the probe.
+- **Ashby**: no sitemap (the sitemap URL returns the app shell), no public
+  index of boards.
+- **Teamtailor**: marketing sitemap only — 2,616 pages, none of them customer
+  career sites; the customers pages are case-study showcases.
+
+No stage 2. Board discovery at scale stays with the crawl-data route (#15),
+which finds board URLs in the wild instead of asking platforms for a list.

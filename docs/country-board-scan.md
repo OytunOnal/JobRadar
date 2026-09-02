@@ -32,3 +32,74 @@ ingesting its jobs.
 **Checked, not worth it (France):** LesJeudis, HelloWork, Apec,
 ChooseYourBoss, Talent.io, Cadremploi (host unreachable, generalist),
 eurotoptech.com (blog, not a board).
+
+## 2026-09-02 — the other five countries
+
+Each country's full table, with every verified URL, lives in
+[`scan-parts/`](scan-parts/): [netherlands](scan-parts/netherlands.md),
+[germany](scan-parts/germany.md), [united-kingdom](scan-parts/united-kingdom.md),
+[ireland](scan-parts/ireland.md), [spain](scan-parts/spain.md). Headlines only
+here.
+
+**Netherlands.** Top find: the **IND public register of recognised sponsors** —
+monthly-refreshed, keyless, server-rendered HTML table of every employer
+allowed to sponsor a kennismigrant, with a KVK number per row as a join key.
+Runner-up: IamExpat Jobs (SSR, JSON-LD detail pages, robots permits).
+werk.nl has no vacancy API by UWV's own written answer; Tweakers/Intermediair/
+Nationale Vacaturebank all sit behind one Akamai WAF.
+
+**Germany.** Top find: **EnglishJobs.de** — keyless, server-rendered, with a
+first-class visa-sponsorship facet over English-only German postings (209 live
+at fetch). Caveat: job links are robots-disallowed clickouts, so an adapter
+reads the listing HTML and stores the clickout URL without crawling it.
+Runners-up: JobGlance (892 sponsored roles claimed, pagination needs
+discovery), IT-Treff (cleanest door — schema.org RSS, robots explicitly allows
+Claude — but German-language enterprise IT, no visa signal). StepStone, Xing,
+Honeypot, Make it in Germany: all walled.
+
+**United Kingdom.** Top find is not a board: the **GOV.UK Register of Licensed
+Sponsors** — keyless, daily-refreshed 10.9MB CSV behind a stable Content-API
+URL. It is the seed list of every company that CAN sponsor, the complement to
+huntukvisasponsors (which rates postings). Bonus: an open per-SOC salary-
+threshold CSV (myvisajobs.co.uk) that would feed src/lib/visa/ directly.
+Every UK private tech board is a dead end (CWJobs, Totaljobs, Technojobs,
+Haystack, Reed's keyed API); gov.uk Find a Job publishes no feed.
+
+**Ireland.** Top find: **VisaJobs.ie** — Ireland-only sponsorship board, open
+robots, 8,000 job pages in the sitemap, keyless SSR filtering, every posting
+scored against the government permit register; it also re-serves IrishJobs.ie
+rows that are otherwise Akamai-walled. And the **DETE permits-issued XLSX**
+beats what VisaSponsor holds: 7,095 employers with per-month permit counts
+(ours: 6,351 bare names). JobsIreland (DSP) is legally load-bearing for
+General Employment Permits but Critical Skills roles are exempt, so senior
+tech is under-represented there.
+
+**Spain.** Top find: **SpainJobs.io** — robots declares `ai-input=yes`, 40k
+job URLs in a daily sitemap, JSON-LD details, and a curated visa surface (16
+sponsor companies, 123 roles). Runner-up: JobsinBarcelona.es (10k jobs,
+English-working-language audience). Tecnoempleo and JobFluent — the two best
+content fits — both name ClaudeBot in a `Disallow: /`, respected. No official
+register exists to ingest: UGE-CE publishes no list, ENISA's is locked in a
+Power BI iframe.
+
+## Top recommendations across all six
+
+Ranked by visa-relevance × feasibility:
+
+1. **Sponsor registers as first-class sources** (UK CSV daily + IE XLSX with
+   permit counts + NL IND table with KVK numbers): richer than the bare-name
+   lists VisaSponsor holds today, and each feeds both the visa evidence layer
+   and the #13/#21 seeding lanes. One issue, three importers.
+2. **VisaJobs.ie adapter**: sponsorship-scored postings, open door, and a way
+   around IrishJobs' Akamai wall.
+3. **EnglishJobs.de adapter**: the German visa-facet board; listing-page-only
+   crawl per its robots.
+4. **SpainJobs.io adapter**: explicitly AI-open, JSON-LD, plus its curated
+   sponsor-company list as seed.
+5. **Next Level Jobs EU** (from the France section): EU-wide sponsor-curated
+   sitemap; harvest its company list as seed rather than ingesting jobs.
+
+Parked with recorded leads: IamExpat (NL), JobGlance + IT-Treff (DE),
+JobsInBarcelona (ES), JobsIreland (IE), visasponsor.jobs API (18 IE rows
+today), France Travail API (keyed), Free-Work (FR, low visa relevance),
+UK per-SOC salary CSV (for src/lib/visa/, not a source).

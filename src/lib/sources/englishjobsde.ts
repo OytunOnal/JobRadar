@@ -34,8 +34,11 @@ export function parseListedDate(text: string, now: Date = new Date()): Date | un
   if (!m) return undefined;
   const month = MONTHS[m[1]!.toLowerCase()];
   if (month === undefined) return undefined;
-  const d = new Date(now.getFullYear(), month, Number(m[2]));
-  if (d.getTime() > now.getTime()) d.setFullYear(d.getFullYear() - 1);
+  // UTC, like every other source's postedAt — the local-time constructor
+  // shipped first and shifted the day backwards for any reader east of
+  // Greenwich, which the test caught as August 11 rendering as the 10th.
+  const d = new Date(Date.UTC(now.getUTCFullYear(), month, Number(m[2])));
+  if (d.getTime() > now.getTime()) d.setUTCFullYear(d.getUTCFullYear() - 1);
   return d;
 }
 

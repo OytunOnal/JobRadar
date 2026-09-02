@@ -214,6 +214,10 @@ export async function runNameProbes(
   budget: number,
   probeFn: typeof probeBoard = probeBoard,
   htmlProbe: HtmlProbeFn = defaultHtmlProbe,
+  // Which pipe poured these names in. Distinct values let a later measurement
+  // ask "what did the sponsor-register seeding actually yield in postings" —
+  // the question every growth lane has to answer eventually.
+  discoveredVia = "name-probe",
 ): Promise<NameProbeReport> {
   const report: NameProbeReport = { checked: 0, found: 0 };
 
@@ -246,7 +250,7 @@ export async function runNameProbes(
     });
     if (hit) {
       report.found++;
-      await recordHit(hit);
+      await recordHit(hit, discoveredVia);
     }
   }
 
@@ -271,14 +275,14 @@ export async function runNameProbes(
       });
       if (hit) {
         report.found++;
-        await recordHit(hit);
+        await recordHit(hit, discoveredVia);
       }
     }
   }
   return report;
 }
 
-async function recordHit(hit: NameProbeHit): Promise<void> {
+async function recordHit(hit: NameProbeHit, discoveredVia: string): Promise<void> {
   await prisma.atsBoard.upsert({
     where: { platform_token_region: { platform: hit.platform, token: hit.token, region: "" } },
     update: {},
@@ -288,7 +292,7 @@ async function recordHit(hit: NameProbeHit): Promise<void> {
       region: "",
       companyName: hit.companyName,
       status: "active", // we just probed it live
-      discoveredVia: "name-probe",
+      discoveredVia,
       validatedAt: new Date(),
     },
   });

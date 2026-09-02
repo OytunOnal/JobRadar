@@ -203,13 +203,14 @@ test("spainjobsio: jobs come from the page's own ItemList, split on the last ' a
 // ── Next Level Jobs EU ───────────────────────────────────────────────────────
 
 test("nextleveljobs: sitemap sorts newest-first, companies harvest from URLs", async () => {
-  const { parseJobSitemap, companiesFromSitemap, mapJobPostingLd } = await import("../src/lib/sources/nextleveljobs");
+  const { companiesFromSitemap, mapJobPostingLd } = await import("../src/lib/sources/nextleveljobs");
+  const { parseJobSitemap } = await import("../src/lib/sources/jsonld");
   const xml = `<urlset>
     <url><loc>https://nextleveljobs.eu/companies/wise/jobs/aaa</loc><lastmod>2026-08-01</lastmod></url>
     <url><loc>https://nextleveljobs.eu/companies/chainalysis/jobs/bbb</loc><lastmod>2026-09-02</lastmod></url>
     <url><loc>https://nextleveljobs.eu/blog/some-post</loc><lastmod>2026-09-03</lastmod></url>
   </urlset>`;
-  const entries = parseJobSitemap(xml);
+  const entries = parseJobSitemap(xml, /\/jobs\//);
   assert.equal(entries.length, 2, "non-job URLs dropped");
   assert.ok(entries[0]!.url.includes("chainalysis"), "newest lastmod first");
   assert.deepEqual(companiesFromSitemap(xml).sort(), ["chainalysis", "wise"]);

@@ -1,4 +1,5 @@
 import { getText, type RawJob, type Source } from "./types";
+import { extractJobPostingLd, parseJobSitemap } from "./jsonld";
 
 // Next Level Jobs EU — sponsor-curated European tech board, verified across
 // three country scans (docs/country-board-scan.md): open robots, a job
@@ -20,19 +21,6 @@ import { getText, type RawJob, type Source } from "./types";
 const BASE = "https://nextleveljobs.eu";
 const MAX = Number(process.env.NEXTLEVEL_MAX) || 30;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export interface SitemapEntry {
-  url: string;
-  lastmod: string;
-}
-
-export function parseJobSitemap(xml: string): SitemapEntry[] {
-  const out: SitemapEntry[] = [];
-  for (const m of xml.matchAll(/<url>\s*<loc>([^<]+)<\/loc>(?:[\s\S]*?<lastmod>([^<]+)<\/lastmod>)?[\s\S]*?<\/url>/g)) {
-    if (m[1]!.includes("/jobs/")) out.push({ url: m[1]!, lastmod: m[2] ?? "" });
-  }
-  return out.sort((a, b) => b.lastmod.localeCompare(a.lastmod));
-}
 
 /** Distinct company slugs across the whole sitemap — the harvest half. */
 export function companiesFromSitemap(xml: string): string[] {
@@ -62,23 +50,11 @@ export function mapJobPostingLd(url: string, ld: any): RawJob | null {
   };
 }
 
-export function extractJobPostingLd(html: string): any | null {
-  for (const m of html.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)) {
-    try {
-      const data = JSON.parse(m[1]!);
-      for (const node of Array.isArray(data) ? data : [data]) {
-        if (node?.["@type"] === "JobPosting") return node;
-      }
-    } catch { /* next block */ }
-  }
-  return null;
-}
-
 export const nextleveljobs: Source = {
   name: "nextleveljobs",
   async fetch(): Promise<RawJob[]> {
     const xml = await getText(`${BASE}/jobs/sitemap.xml`);
-    const entries = parseJobSitemap(xml).slice(0, MAX);
+    const entries = parseJobSitemap(xml, /\/jobs\//).slice(0, MAX);
     const out: RawJob[] = [];
     for (const e of entries) {
       try {

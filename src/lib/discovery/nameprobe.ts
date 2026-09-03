@@ -287,6 +287,40 @@ export function probeableName(name: string): boolean {
   return slugCandidates(name).length > 0;
 }
 
+// The OTHER backlog: names from the government sponsor registers, which sit
+// in VisaSponsor rather than in the pool. These never reached the ingest lane
+// — seeding them was a hand-run script (#13), so the lane advanced only when
+// somebody remembered, and at 157,056 register names against ~1.9s each that
+// is 77 hours nobody was ever going to sit through by hand.
+//
+// ORDER MATTERS MORE HERE THAN IN THE POOL BACKLOG, because the registers are
+// wildly unequal in signal. The UK's licensed-sponsor list is 126,493 names
+// and includes every care home and restaurant that ever held a licence;
+// Czechia's 9,203 are employers who registered a vacancy open to a non-EU
+// national THIS MONTH. Alphabetical order — what the hand-run script used —
+// would spend the whole budget on the letter A of the largest and weakest
+// list. So registers are drained best-signal-first, and within a register the
+// order is arbitrary but stable.
+export const REGISTER_PRIORITY = ["cz", "pt", "dk", "ie", "nl", "gb"];
+
+export async function registerNames(limit: number): Promise<string[]> {
+  if (limit <= 0) return [];
+  const probedRows = await prisma.companyProbe.findMany({ select: { name: true } });
+  const probed = new Set(probedRows.map((p) => p.name));
+  const out: string[] = [];
+  for (const country of REGISTER_PRIORITY) {
+    if (out.length >= limit) break;
+    const rows = await prisma.visaSponsor.findMany({ where: { country }, select: { name: true } });
+    for (const r of rows) {
+      if (out.length >= limit) break;
+      if (!probeableName(r.name)) continue;
+      if (probed.has(normalizeCompanyName(r.name))) continue;
+      out.push(r.name);
+    }
+  }
+  return out;
+}
+
 export async function backlogNames(limit: number): Promise<string[]> {
   const [rows, probedRows] = await Promise.all([
     prisma.job.groupBy({

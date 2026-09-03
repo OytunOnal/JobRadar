@@ -369,3 +369,22 @@ test("parseCzEmployers keeps the visa-flagged employers and remembers which rout
   assert.match(rows.find((r) => r.name.startsWith("Alza"))!.detail!, /employee card/);
   assert.match(rows[0]!.detail!, /IČO \d+/);
 });
+
+test("every sponsor register is in the probe priority list", async () => {
+  // A seventh register added to REGISTER_COUNTRIES but forgotten here would
+  // be ingested and then never probed — its names would sit in VisaSponsor
+  // forever while the lane drained the six it knows about. Two lists that
+  // must agree, so make them say so out loud.
+  const { REGISTER_COUNTRIES } = await import("../src/lib/visa/sponsors");
+  const { REGISTER_PRIORITY } = await import("../src/lib/discovery/nameprobe");
+  assert.deepEqual(
+    [...REGISTER_COUNTRIES].sort(),
+    [...REGISTER_PRIORITY].sort(),
+    "REGISTER_PRIORITY must name exactly the registers we ingest",
+  );
+  // Order is the point of the list, not just membership: the UK's 126,493
+  // names include every care home that ever held a licence, while Czechia's
+  // are employers who registered a non-EU-open vacancy this month.
+  assert.equal(REGISTER_PRIORITY[0], "cz", "best-signal register first");
+  assert.equal(REGISTER_PRIORITY.at(-1), "gb", "largest and weakest last");
+});

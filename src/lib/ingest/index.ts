@@ -52,7 +52,7 @@ import { llmEnabled } from "../llm/llm";
 import { harvest, type HarvestReport } from "../discovery/harvest";
 import { boardSources, parseBoardSourceName, recordBoardOutcome } from "../discovery/boardSources";
 import { findDuplicate } from "../scoring/dedup";
-import { backlogNames, runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
+import { backlogNames, registerNames, runNameProbes, type NameProbeReport } from "../discovery/nameprobe";
 import { runDeepProbes, type DeepProbeReport } from "../discovery/deepprobe";
 import { runLivenessSweep, type LivenessReport } from "../liveness";
 import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefreshReport } from "../visa/sponsors";
@@ -86,6 +86,10 @@ const DEDUP_MAX_CHECKS = 60;
 // budget covers a day's arrivals and eats into the backlog on quiet days.
 // It is the wall-clock cost the queue gauge exists to make visible.
 const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
+// How much of that budget is reserved for the sponsor registers (#13). The
+// pool backlog gets the rest — and inherits anything the registers cannot
+// use, so a drained register never wastes budget.
+const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE) || 300;
 // Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
@@ -631,7 +635,20 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       // old this-run-only selection meant every one the budget missed was
       // never revisited. backlogNames orders by best posting score, so a
       // bounded budget spends itself on the boards worth finding first.
-      const names = await backlogNames(NAME_PROBE_MAX);
+      // Two backlogs feed this lane, and they are not interchangeable. The
+      // POOL backlog is companies whose postings we already hold — the
+      // highest-yield names we have (measured 9.3%), because every one is
+      // demonstrably hiring. The REGISTER backlog is government sponsor
+      // lists, where a hit is worth more per board (the company's
+      // sponsorship is a matter of public record) but the rate is lower
+      // (~3.8%). Seeding the registers used to be a hand-run script, so it
+      // advanced only when somebody remembered; a standing slice makes it a
+      // lane instead of a chore. Pool first, because rate beats provenance
+      // when the budget is the scarce thing.
+      const registerSlice = Math.min(REGISTER_PROBE_SLICE, NAME_PROBE_MAX);
+      const pool = await backlogNames(NAME_PROBE_MAX - registerSlice);
+      const registers = await registerNames(registerSlice + (NAME_PROBE_MAX - registerSlice - pool.length));
+      const names = [...pool, ...registers];
       return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
     });
 

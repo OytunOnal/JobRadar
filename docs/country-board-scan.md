@@ -142,3 +142,38 @@ our adapter uses still answers (502 jobs live) — the source is healthy.
 **Iceland.** Genuinely thin. **Alfreð** (alfred.is) embeds ~27 jobs + a
 totalCount in __NEXT_DATA__ on one keyless page; robots bans /api/ and
 pagination is client-side, so a page-1 poller is the ceiling.
+
+## 2026-09-03 — Southern Europe (#30)
+
+Full tables in [`scan-parts/`](scan-parts/): [italy](scan-parts/italy.md),
+[portugal](scan-parts/portugal.md), [greece](scan-parts/greece.md),
+[malta](scan-parts/malta.md), [cyprus](scan-parts/cyprus.md). Each file ends
+with a verification pass: every positive claim was re-fetched before being
+recorded, and two verdicts flipped as a result.
+
+**Portugal.** Find of the issue: **IAPMEI's Tech Visa certified-company
+register**, parsed rather than estimated — 556 companies, 373 certified
+today, each row carrying a NIF (join key) and a validity window. No other
+register we hold says *until when* a certification lasts. Needs a browser
+User-Agent to download. ITJobs.pt parked: its declared feed host does not
+resolve, but a sitemap index does answer.
+
+**Italy.** No adapter-worthy door — an evidenced closure, not an unexplored
+gap. Trovolavoro's robots is `Allow: /$` + `Disallow: /` (homepage only, no
+sitemap); ClicLavoro is up and bans AI crawlers; anpal.gov.it is a dead host;
+dati.gov.it's vacancy-shaped datasets are statistical, and the one live
+regional CSV is unreachable from two fetchers. No sponsorship register
+exists: decreto flussi nulla osta are per-permit acts, never a list.
+
+**Cyprus.** **Ergodotisi** — 5,166 job URLs in a permitted sitemap,
+server-rendered, no JSON-LD but a strict `Role at Company | Ergodotisi` title
+plus og:description, so a bespoke parse in the huntukvisa shape. Generalist
+rather than tech, but structurally valuable: an EU market whose working
+language is English. cyprusjobs.com names ClaudeBot — respected.
+
+**Greece and Malta.** Thin. jobfind.gr offers an RSS feed with no visa
+signal; kariera.gr and skywalker.gr answer 403. keepmeposted.com.mt is
+sitemap-crawlable but small; jobsplus.gov.mt has an expired certificate.
+Both register questions closed negative: **Malta's Key Employee Initiative
+and Cyprus's Companies of Foreign Interest publish no list**, which retires
+two of this issue's three highest-value hypotheses.

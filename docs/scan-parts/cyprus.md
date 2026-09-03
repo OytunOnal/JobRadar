@@ -82,3 +82,33 @@ filters most of this radar's pool.
 
 **No Companies of Foreign Interest register found**, matching the scan.
 Recorded as an evidenced negative rather than a lead to retry.
+
+## Deep verification pass, 2026-09-04
+
+**Verdict: CONFIRMED — no public list of Companies of Foreign Interest exists.** The register is explicitly held internally by the Business Facilitation Unit (BFU), not published. This settles the 2026-09-03 negative with a direct quote rather than an inference from unreachable URLs.
+
+```
+SOURCE: https://www.gov.cy/meci/en/business-facilitation-unit-bfu/ · read 2026-09-04 · fetched
+QUOTES: "The BFU accepts applications from companies wishing to be registered in the Register of Companies with Foreign Interests; held at the Unit. By registering in the Register, companies can take advantage of the incentives announced by the Government, regarding the employment of third country nationals." — text extracted verbatim from the fetched page HTML
+FOUND: HTTP 200 (curl, browser UA, 31,441-byte HTML). No link on the page to a list, register export, or search tool — the register is described as "held at the Unit," i.e. an internal administrative record, not a public dataset. Zero links matching list/register/foreign/.pdf/.xlsx/.csv found in the page's href attributes
+INFERRED: The register's existence is government-confirmed; its non-publication is also government-confirmed by omission — a public body describing its own register as "held at the Unit" with no companion "see the list here" link is affirmative evidence of non-publication, not just absence of a URL found
+
+SOURCE: https://www.businessincyprus.gov.cy/ · read 2026-09-04 · fetched
+FOUND: HTTP 200. This is the BFU's public-facing portal (the "official website for applications" per prior research). All 100 extracted links were enumerated; none reference a companies-of-foreign-interest list, register, or directory. Site structure is "operating permits" organized by business sector (agriculture, construction, tourism, etc.) — an application/guidance portal, not a registry
+INFERRED: Confirms businessincyprus.gov.cy is where a company applies for CFI status, not where an approved list would be published
+
+SOURCE: https://www.investcyprus.org.cy/ · read 2026-09-04 · fetched
+FOUND: HTTP 200. Homepage and its "publications" section link (`/publications/`, redirect confirmed) were checked for any company directory or list; none found in the extracted link set
+INFERRED: Invest Cyprus is a promotion/investor-relations body; it does not publish the CFI register either
+```
+
+**Cyprus Registrar of Companies — searchable-only interface, not a downloadable list. A different answer from "no list exists": a list of all Cyprus companies exists, but only as a per-record, one-at-a-time, fee-gated lookup, and it is a general company registry, not the visa-relevant CFI register.**
+
+```
+SOURCE: https://www.companies.gov.cy/en/21-eservices/esearch-in-business-entity-s-registry · read 2026-09-04 · fetched
+QUOTES: "eServices, eSearch in Business Entity's Registry | Companies Section, Department of Registrar of Companies and Intellectual Property" — page title extracted from fetched HTML; page presents "eSearch" as a lookup tool (search by name/registration number), not a bulk list or export
+FOUND: HTTP 200. Page structure is entirely a search-and-lifecycle portal (Starting/Running/Closing a Business Entity, Register of Beneficial Owners) with a name/number search box, no CSV/XLSX/API or "download full registry" affordance found in the fetched content
+INFERRED: Matches the €10-per-detailed-search model described in public secondary sources; confirms the registry is accessible only per-entity, not as a bulk dataset, and in any case is not the CFI scheme register
+```
+
+**Net for Cyprus:** both the primary negative (Companies of Foreign Interest — no public list, confirmed by the BFU's own "held at the Unit" language) and the two adjacent checks (Registrar of Companies: searchable-only, no bulk list; Invest Cyprus: no company directory published) hold up under direct verification. No AI-crawler bans were encountered on any of the three domains fetched this pass (gov.cy, businessincyprus.gov.cy, investcyprus.org.cy, companies.gov.cy all served content to a browser-UA curl without a Cloudflare/robots block).

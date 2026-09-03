@@ -120,3 +120,22 @@ test("EURES default sweep covers every member country", () => {
   assert.ok(c.length >= 29);
   assert.ok(!c.includes("gb")); // the UK left EURES post-Brexit
 });
+
+// ── NAV Norway feed ──────────────────────────────────────────────────────────
+
+test("nav-no: token is extracted from prose, items map, non-ACTIVE is skipped", async () => {
+  const { extractToken, mapFeedItem } = await import("../src/lib/sources/navno");
+  assert.ok(extractToken("Current public token for Nav Job Vacancy Feed:\neyJhbGc.abc-123.x_Y")?.startsWith("eyJ"));
+  assert.equal(extractToken("no jwt here"), null);
+  const job = mapFeedItem({
+    id: "e53bed6a", url: "/api/v1/feedentry/e53bed6a",
+    title: "outer title", date_modified: "2026-09-03T09:13:00+02:00",
+    _feed_entry: { uuid: "cd4c93ba", status: "ACTIVE", title: "Operasjonssykepleier", businessName: "Bærum sykehus", municipal: "NORDRE FOLLO" },
+  })!;
+  assert.equal(job.source, "nav-no");
+  assert.equal(job.externalId, "cd4c93ba");
+  assert.equal(job.location, "Nordre follo, Norway", "SHOUTED municipal is folded to a name");
+  assert.ok(job.url.includes("arbeidsplassen.nav.no/stillinger/stilling/cd4c93ba"));
+  assert.equal(mapFeedItem({ _feed_entry: { uuid: "x", status: "INACTIVE", title: "Gone" } }), null,
+    "an inactive entry is not a sighting");
+});

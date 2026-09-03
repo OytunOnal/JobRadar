@@ -30,6 +30,7 @@ import { englishjobsde } from "../sources/englishjobsde";
 import { spainjobsio } from "../sources/spainjobsio";
 import { nextleveljobs } from "../sources/nextleveljobs";
 import { freework } from "../sources/freework";
+import { navno } from "../sources/navno";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -131,6 +132,7 @@ export const aggregators: Source[] = [
   spainjobsio,    // ES curated visa surface via its own ItemList JSON-LD; ai-input=yes robots
   nextleveljobs,  // EU-wide sponsor-curated board; sitemap-fed, JSON-LD bodies at fetch time
   freework,       // FR IT board, EN-GB tech slice; sitemap-fed, JSON-LD bodies at fetch time
+  navno,          // NO national ad feed (NAV), cursor-resumed; bodies via desc:fill
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

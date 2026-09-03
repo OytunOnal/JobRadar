@@ -69,7 +69,7 @@ import { recrawlIfDue, type RecrawlReport } from "../discovery/recrawl";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, selects, selectSources, wantsAnything, PER_HOST } from "./fetch";
-import { pass, stage } from "./stage";
+import { pass, resetStageTimings, stage, stageTimings } from "./stage";
 import { intake, isAggregatorJob, readable } from "./intake";
 import { scoreJob } from "../scoring/score";
 import { rejectedBy } from "../scoring/derive";
@@ -370,6 +370,7 @@ export interface IngestOptions {
 }
 
 export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport> {
+  resetStageTimings();
   const report: IngestReport = {
     fetched: 0,
     scored: 0,

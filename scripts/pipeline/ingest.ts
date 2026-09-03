@@ -1,3 +1,4 @@
+import { stageTimings } from "../../src/lib/ingest/stage";
 import { runIngest } from "../../src/lib/ingest";
 import { formatQueueGauges } from "../../src/lib/queue/capacity";
 import { generatedProfileStale } from "../../src/lib/user/profile";
@@ -55,6 +56,16 @@ console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`Swept (closed): ${report.delisted}`);
 if (report.nameProbe) console.log(`Name probes:    ${report.nameProbe.found}/${report.nameProbe.checked} companies mapped to their ATS`);
 if (report.deepProbe) console.log(`Deep probes:    ${report.deepProbe.found}/${report.deepProbe.checked} misses rescued via careers-page scan (${report.deepProbe.sitesResolved} sites resolved)`);
+const timings = stageTimings();
+if (timings.length) {
+  const total = timings.reduce((n, [, ms]) => n + ms, 0);
+  const fmt = (ms: number) => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${(ms / 1000).toFixed(0)}s`);
+  // Slowest first, and only the stages worth a second of anyone's attention.
+  console.log(
+    `Stage time:     ${fmt(total)} total — ` +
+      timings.filter(([, ms]) => ms >= 1000).map(([n, ms]) => `${n} ${fmt(ms)}`).join(", "),
+  );
+}
 if (report.validation)
   console.log(
     `Validation:     ${report.validation.active} active, ${report.validation.dead} dead, ` +

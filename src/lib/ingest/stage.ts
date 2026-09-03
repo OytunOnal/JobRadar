@@ -33,6 +33,24 @@ export const ERR_MAX = 160;
 // examples plus a total says the same thing.
 const SHOWN_FAILURES = 5;
 
+// HOW LONG EACH STAGE TOOK, because a daily ingest is sized by wall clock and
+// nothing was measuring it. Every budget in this pipeline — name probes,
+// validation, deep probes — is a number per run, and without per-stage timing
+// those numbers get set the way VALIDATE_MAX first was: backwards from what
+// felt affordable. One shared collector is module state rather than another
+// parameter threaded through a dozen call sites; the ingest resets it at the
+// start of a run and prints it at the end.
+const timings = new Map<string, number>();
+
+export function resetStageTimings(): void {
+  timings.clear();
+}
+
+/** Stage name → milliseconds, slowest first. */
+export function stageTimings(): [string, number][] {
+  return [...timings].sort((a, b) => b[1] - a[1]);
+}
+
 export interface Pass {
   /**
    * One row failed — not the pass. The first few are reported with their
@@ -106,6 +124,7 @@ export async function stage<T>(
   errors: string[],
   body: (p: Pass) => Promise<T>,
 ): Promise<T | undefined> {
+  const started = Date.now();
   try {
     return await pass(name, errors, body);
   } catch (e) {
@@ -113,5 +132,9 @@ export async function stage<T>(
     // stage that stopped early is not a stage that failed.
     if (!(e instanceof RateLimitError)) errors.push(`${name}: ${message(e)}`);
     return undefined;
+  } finally {
+    // Recorded even when the stage failed: a stage that burned four minutes
+    // and then threw is exactly the one worth seeing in the timings.
+    timings.set(name, (timings.get(name) ?? 0) + (Date.now() - started));
   }
 }

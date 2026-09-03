@@ -103,3 +103,42 @@ Parked with recorded leads: IamExpat (NL), JobGlance + IT-Treff (DE),
 JobsInBarcelona (ES), JobsIreland (IE), visasponsor.jobs API (18 IE rows
 today), France Travail API (keyed), Free-Work (FR, low visa relevance),
 UK per-SOC salary CSV (for src/lib/visa/, not a source).
+
+## 2026-09-03 — the Nordics (#28)
+
+Full tables in [`scan-parts/`](scan-parts/): [sweden](scan-parts/sweden.md),
+[norway](scan-parts/norway.md), [finland](scan-parts/finland.md),
+[denmark](scan-parts/denmark.md), [iceland](scan-parts/iceland.md).
+
+**Norway.** Top find of the whole group: **NAV's pam-stilling-feed** —
+self-serve public token, JSON-Feed linked list (backfill once, resume
+incrementally), full bodies, robots fully open. The national ad pool behind
+a clean API. finn.no, the dominant private board, is fully client-rendered
+with zero extractable links — closed.
+
+**Sweden.** **JobTech JobStream** verified: a change-delta stream over the
+same national data our query-window source reads — an upgrade that closes
+the ads-no-query-matches gap and adds deltas for delisting. Best new board:
+**Demando** (tech-only, sitemap + JobPosting JSON-LD verified). Register
+re-verified negative: "certifierad arbetsgivare" has no published list.
+TheLocal.se and Jobbland ban ClaudeBot/anthropic-ai by name — respected.
+
+**Denmark.** **IT-Jobbank** — tech-only board on the same Jobindex stack we
+already ingest: RSS per query, JSON-LD detail pages, googleforjobs sitemap;
+a near-clone of the jobindexdk adapter. Nothing adds to the SIRI register we
+hold; Workindenmark IS jobnet+EURES, both already ingested. New HR-Manager
+fact: no central alias directory, but alias probing is free (200+CustomerName
+vs 400) — a name-probe platform candidate. Ofir and techjob.dk ban crawlers
+(the latter names ClaudeBot) — respected.
+
+**Finland.** Honestly thin: Oikotie shut down, Monster.fi is Cloudflare-
+walled, Työmarkkinatori's API needs applied-for credentials (the honest
+path if Finland matters). Register status contested between agents and
+UNVERIFIABLE by us — migri.fi/en/certified-employers answers 403 to every
+fetcher we have; the working verdict stays "no usable register", revisit
+from a real browser. Flag resolved: duunitori's robots.txt 403s but the API
+our adapter uses still answers (502 jobs live) — the source is healthy.
+
+**Iceland.** Genuinely thin. **Alfreð** (alfred.is) embeds ~27 jobs + a
+totalCount in __NEXT_DATA__ on one keyless page; robots bans /api/ and
+pagination is client-side, so a page-1 poller is the ceiling.

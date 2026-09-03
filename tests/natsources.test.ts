@@ -159,3 +159,32 @@ test("ergodotisi: the board suffix goes, the FIRST ' at ' splits role from compa
   const html = `<p class="nav">Jobs</p><p>${"x".repeat(60)}</p><p>short</p>`;
   assert.equal(extractParagraphBody(html), "x".repeat(60));
 });
+
+// ── jobs.ch: not everything wearing JobPosting markup is a job ───────────────
+
+test("jobs-ch: marketing pages borrowing the schema are refused", async () => {
+  const { mapJobsChLd } = await import("../src/lib/sources/jobsch");
+  const url = "https://www.jobs.ch/en/vacancies/detail/fe9f7fa0-114b-4e7d-b6ab-791a2ec35e64/";
+  const real = mapJobsChLd(url, {
+    title: "Civil Engineer",
+    hiringOrganization: { name: "Schnetzer Puskas Ingenieure AG" },
+    jobLocation: { address: { addressLocality: "Zürich" } },
+    datePosted: "2025-10-28T10:08:56+01:00",
+    description: "x".repeat(1900),
+  })!;
+  assert.equal(real.externalId, "fe9f7fa0-114b-4e7d-b6ab-791a2ec35e64", "the UUID is the cross-language identity");
+  assert.equal(real.location, "Zürich, Switzerland");
+
+  // Both guards, each from a real first-run miss: a site-furniture pipe in the
+  // title, and a body too short to be an advert.
+  assert.equal(mapJobsChLd(url, {
+    title: "Download Brochures and Price Lists | SIBIRGroup",
+    hiringOrganization: { name: "SIBIRGroup AG" },
+    description: "x".repeat(1900),
+  }), null);
+  assert.equal(mapJobsChLd(url, {
+    title: "Crew",
+    hiringOrganization: { name: "McDonald's" },
+    description: "too short to be an advert",
+  }), null);
+});

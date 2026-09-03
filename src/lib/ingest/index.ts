@@ -37,6 +37,7 @@ import { alfred } from "../sources/alfred";
 import { karriereat } from "../sources/karriereat";
 import { cercolavoro } from "../sources/cercolavoro";
 import { ergodotisi } from "../sources/ergodotisi";
+import { jobsch } from "../sources/jobsch";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -145,6 +146,7 @@ export const aggregators: Source[] = [
   karriereat,     // AT dominant board; declared sitemap + JobPosting JSON-LD
   cercolavoro,    // IT board that reopened the country; sitemap + JSON-LD
   ergodotisi,     // CY board, English-language EU market; title + <p> parse
+  jobsch,         // CH dominant board; declared EN sitemap + JobPosting JSON-LD
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

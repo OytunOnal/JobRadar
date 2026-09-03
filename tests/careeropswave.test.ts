@@ -346,3 +346,26 @@ test("parsePtRows keeps only the certifications that are live today", async () =
     ["A2ITwb - Tecnologia, S.A."]);
   assert.deepEqual(parsePtRows(text, new Date("2030-01-01")), []);
 });
+
+test("parseCzEmployers keeps the visa-flagged employers and remembers which route", async () => {
+  // The Czech feed is a vacancy register, not a licence list: we reduce it to
+  // the employers who declared at least one vacancy open to a non-EU national.
+  const { parseCzEmployers } = await import("../src/lib/visa/sponsors");
+  const feed = {
+    polozky: [
+      { zamestnaneckaKarta: true, zamestnavatel: { nazev: "Alza.cz a.s.", ico: "27082440" } },
+      { zamestnaneckaKarta: true, zamestnavatel: { nazev: "Alza.cz a.s.", ico: "27082440" } },
+      { modraKarta: true, zamestnaneckaKarta: true, zamestnavatel: { nazev: "SAP Services s.r.o.", ico: "27164297" } },
+      { zamestnaneckaKarta: false, modraKarta: false, zamestnavatel: { nazev: "Not Hiring Foreigners s.r.o.", ico: "111" } },
+      { zamestnaneckaKarta: true, zamestnavatel: { nazev: "" } },
+    ],
+  };
+  const rows = parseCzEmployers(feed);
+  assert.deepEqual(rows.map((r) => r.name).sort(), ["Alza.cz a.s.", "SAP Services s.r.o."],
+    "an unflagged employer is not a sponsor, and a nameless row is not a company");
+  // The Blue Card route is the skilled one; flattening it into "sponsor" would
+  // lose the distinction that matters most to this radar's user.
+  assert.match(rows.find((r) => r.name.startsWith("SAP"))!.detail!, /EU Blue Card/);
+  assert.match(rows.find((r) => r.name.startsWith("Alza"))!.detail!, /employee card/);
+  assert.match(rows[0]!.detail!, /IČO \d+/);
+});

@@ -17,7 +17,12 @@ import { normalizeCompanyName } from "../discovery/nameprobe";
 //       (permits actually issued this year: slightly different semantics,
 //       recorded in `detail`)
 //   pt  IAPMEI Tech Visa certified companies — PDF, 556 companies of which
-//       373 are certified today. The 2026-08 note that PT "needs no employer
+//       373 are certified today.
+//   cz  MPSV's national vacancy feed, reduced to employers — 9,215 companies
+//       who have registered at least one vacancy open to a non-EU national.
+//       Unlike every other register here this is not a licence list: it is
+//       derived from live vacancy registrations, so it names who is ACTUALLY
+//       hiring foreigners rather than who merely may. The 2026-08 note that PT "needs no employer
 //       licence" was WRONG and is corrected here: Tech Visa certifies the
 //       EMPLOYER, and the list is public.
 //
@@ -34,7 +39,7 @@ import { normalizeCompanyName } from "../discovery/nameprobe";
 // the honest tier.
 
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
-export const REGISTER_COUNTRIES = ["nl", "gb", "dk", "ie", "pt"] as const;
+export const REGISTER_COUNTRIES = ["nl", "gb", "dk", "ie", "pt", "cz"] as const;
 
 export function collapseName(name: string): string {
   return normalizeCompanyName(name).replace(/ /g, "");
@@ -197,6 +202,41 @@ export function parsePtRows(text: string, today = new Date()): SponsorRow[] {
   return [...seen.values()];
 }
 
+// Czechia — MPSV publishes the whole national vacancy register as open data
+// (robots allows everything, no key). Each posting carries employer name and
+// IČO plus three booleans the employer declared to the state:
+// zamestnaneckaKarta (fillable by an employee-card holder), modraKarta (EU
+// Blue Card) and cizinecMimoEu (suitable for a non-EU foreigner).
+//
+// WE TAKE THE EMPLOYERS, NOT THE POSTINGS, and that is a deliberate design
+// choice rather than a shortcut. Only 1,377 of the feed's 38,195 rows carry a
+// public URL, and the portal that renders the rest is a single-page app with
+// no per-vacancy address, so a posting a user cannot open is not a posting we
+// should show. Reduced to distinct employers the same file becomes something
+// we already know how to use, and something no licence register can give: a
+// list of companies with a live, declared willingness to hire from outside
+// the EU. Verified 2026-09-04: 18,188 flagged postings collapse to 9,215
+// employers, 9,208 of them carrying an IČO.
+export function parseCzEmployers(feed: any): SponsorRow[] {
+  const seen = new Map<string, SponsorRow>();
+  for (const row of feed?.polozky ?? []) {
+    if (row?.zamestnaneckaKarta !== true && row?.modraKarta !== true) continue;
+    const name = String(row?.zamestnavatel?.nazev ?? "").trim();
+    if (!name) continue;
+    const ico = String(row?.zamestnavatel?.ico ?? "").trim();
+    const key = ico || collapseName(name);
+    const prev = seen.get(key);
+    // The Blue Card route is the skilled one, so it is worth saying which
+    // claim a row rests on rather than flattening both into "sponsor".
+    const blue = row?.modraKarta === true || prev?.detail?.includes("Blue Card") === true;
+    seen.set(key, {
+      name,
+      detail: `CZ vacancy open to non-EU nationals${blue ? " (EU Blue Card)" : " (employee card)"}${ico ? ` (IČO ${ico})` : ""}`,
+    });
+  }
+  return [...seen.values()];
+}
+
 async function fetchRows(country: string): Promise<SponsorRow[]> {
   switch (country) {
     case "nl":
@@ -241,6 +281,24 @@ async function fetchRows(country: string): Promise<SponsorRow[]> {
       );
       if (!res.ok) throw new Error(`pt pdf -> HTTP ${res.status}`);
       return parsePt(new Uint8Array(await res.arrayBuffer()));
+    }
+    case "cz": {
+      // The gzipped copy is 15.6MB against 174MB raw — same file, a tenth of
+      // the wire. Decompressed in memory; the JSON is large but transient.
+      const res = await fetch("https://data.mpsv.cz/od/soubory/volna-mista/volna-mista.json.gz", {
+        headers: { "User-Agent": UA },
+        signal: AbortSignal.timeout(300_000),
+        redirect: "follow",
+      });
+      if (!res.ok) throw new Error(`cz feed -> HTTP ${res.status}`);
+      const { gunzipSync } = await import("node:zlib");
+      const buf = Buffer.from(await res.arrayBuffer());
+      // fetch transparently decompresses when the server sets
+      // Content-Encoding, so the bytes may already be plain JSON. Check the
+      // gzip magic rather than assuming either way — assuming cost a run.
+      const isGzip = buf[0] === 0x1f && buf[1] === 0x8b;
+      const json = (isGzip ? gunzipSync(buf) : buf).toString("utf8");
+      return parseCzEmployers(JSON.parse(json));
     }
     default:
       throw new Error(`unknown register country ${country}`);

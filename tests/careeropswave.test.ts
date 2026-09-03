@@ -321,3 +321,28 @@ test("parseIe reads permit counts and the latest month, not just names", async (
   assert.equal(rows[1].detail, "IE permits issued this year: 1 (latest Feb)",
     "grand total column wins; latest month is the last one with a count");
 });
+
+test("parsePtRows keeps only the certifications that are live today", async () => {
+  // Portugal is the only register whose rows EXPIRE, so the rule that drops
+  // lapsed ones is the part worth pinning: it separates "certified today"
+  // from "was certified once", and only the first is a sponsorship signal.
+  const { parsePtRows } = await import("../src/lib/visa/sponsors");
+  // The shape unpdf extracts: NIF, name, certified-from, certified-to.
+  const text = [
+    "509856462 2WINDSERVICE, LDA 06-12-2021 06-12-2026",
+    "515755370 ABP IMPEX UNIPESSOAL, LDA 29-09-2020 29-09-2025",
+    "510688268 A2ITwb - Tecnologia, S.A. 09-01-2023 09-01-2028",
+    "510688268 A2ITwb - Tecnologia, S.A. 09-01-2023 09-01-2028",
+  ].join(" ");
+
+  const rows = parsePtRows(text, new Date("2026-09-04"));
+  assert.deepEqual(rows.map((r) => r.name), ["2WINDSERVICE, LDA", "A2ITwb - Tecnologia, S.A."],
+    "the 2025 expiry is dropped, and the repeated row collapses");
+  assert.equal(rows[0]!.detail, "PT Tech Visa certified until 06-12-2026 (NIF 509856462)");
+
+  // Roll the clock past the first expiry and it must retire on its own — the
+  // property that lets a frozen file drain instead of going stale in silence.
+  assert.deepEqual(parsePtRows(text, new Date("2027-01-01")).map((r) => r.name),
+    ["A2ITwb - Tecnologia, S.A."]);
+  assert.deepEqual(parsePtRows(text, new Date("2030-01-01")), []);
+});

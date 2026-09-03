@@ -16,6 +16,17 @@ import { normalizeCompanyName } from "../discovery/nameprobe";
 //   ie  DETE employment permits issued to companies — XLSX, ~6k employers
 //       (permits actually issued this year: slightly different semantics,
 //       recorded in `detail`)
+//   pt  IAPMEI Tech Visa certified companies — PDF, 556 companies of which
+//       373 are certified today. The 2026-08 note that PT "needs no employer
+//       licence" was WRONG and is corrected here: Tech Visa certifies the
+//       EMPLOYER, and the list is public.
+//
+// Portugal is the only register that EXPIRES. Every other list answers "who
+// is certified now"; this one carries a validity window per row, so it can
+// answer "until when" — and the two claims must not be blurred. Only
+// currently-valid rows are stored, because a lapsed certification is not a
+// sponsorship signal; the expiry rides in `detail` so a reader can see which
+// claim they are looking at.
 //
 // Matching: normalized-and-collapsed EXACT name equality (plus the legal-
 // suffix stripping normalizeCompanyName already does). Containment over 143k
@@ -23,7 +34,7 @@ import { normalizeCompanyName } from "../discovery/nameprobe";
 // the honest tier.
 
 const UA = "Mozilla/5.0 (compatible; JobRadar/0.1; personal job search)";
-export const REGISTER_COUNTRIES = ["nl", "gb", "dk", "ie"] as const;
+export const REGISTER_COUNTRIES = ["nl", "gb", "dk", "ie", "pt"] as const;
 
 export function collapseName(name: string): string {
   return normalizeCompanyName(name).replace(/ /g, "");
@@ -147,6 +158,45 @@ async function fetchText(url: string): Promise<string> {
   return res.text();
 }
 
+// IAPMEI's PDF is a plain table: NIF, company, certified-from, certified-to.
+// unpdf (already a dependency) extracts it cleanly. Rows repeat across page
+// breaks, so dedupe on NIF+name.
+//
+// `today` is injectable so the expiry rule can be tested without waiting for
+// a certificate to lapse.
+export async function parsePt(pdf: Uint8Array, today = new Date()): Promise<SponsorRow[]> {
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const { text } = await extractText(await getDocumentProxy(pdf), { mergePages: true });
+  return parsePtRows(text, today);
+}
+
+// The row rule, split from the PDF so it can be tested without one: pdfjs
+// cannot run inside the test runner's worker (DataCloneError), and the part
+// worth pinning is the expiry rule anyway, not the text extraction.
+//
+// `today` is injectable so a lapse can be tested without waiting for one.
+export function parsePtRows(text: string, today = new Date()): SponsorRow[] {
+  const iso = (d: string) => {
+    const [dd, mm, yy] = d.split("-");
+    return `${yy}-${mm}-${dd}`;
+  };
+  const now = today.toISOString().slice(0, 10);
+  const seen = new Map<string, SponsorRow>();
+  for (const m of text.matchAll(/(\d{9})\s+(.+?)\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}-\d{2}-\d{4})/g)) {
+    const [, nif, rawName, , to] = m;
+    const name = rawName!.trim();
+    if (!name) continue;
+    // A lapsed certification is not a sponsorship signal. Dropping it here is
+    // the whole reason this register is worth more than the others.
+    if (iso(to!) < now) continue;
+    seen.set(`${nif}|${collapseName(name)}`, {
+      name,
+      detail: `PT Tech Visa certified until ${to} (NIF ${nif})`,
+    });
+  }
+  return [...seen.values()];
+}
+
 async function fetchRows(country: string): Promise<SponsorRow[]> {
   switch (country) {
     case "nl":
@@ -170,6 +220,27 @@ async function fetchRows(country: string): Promise<SponsorRow[]> {
       );
       if (!res.ok) throw new Error(`ie xlsx -> HTTP ${res.status}`);
       return parseIe(new Uint8Array(await res.arrayBuffer()));
+    }
+    case "pt": {
+      // DISCOVERY IS UNSOLVED, ON PURPOSE AND ON RECORD. The Tech Visa
+      // landing page links guides, notices and legislation but NOT the
+      // company list (checked 2026-09-04, plus three plausible sub-paths,
+      // all 404). So this URL is pinned — with the media hash that a deep
+      // pass found stable across three different render timestamps.
+      //
+      // The risk of pinning is silent rot: a refreshed list gets a new URL,
+      // the old one keeps answering 200, and we serve a stale register
+      // forever without noticing. The mitigation is that every row carries
+      // its own expiry, so a frozen file DRAINS — as certificates lapse the
+      // count falls, and a register that only ever shrinks is a register
+      // that stopped being refreshed. Watch the per-country count in the
+      // refresh report; that is the alarm.
+      const res = await fetch(
+        "https://www.iapmei.pt/media/9626a269/20260811-215122_EmpresasCertificadas_TechVisa_18022025.pdf",
+        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(60_000), redirect: "follow" },
+      );
+      if (!res.ok) throw new Error(`pt pdf -> HTTP ${res.status}`);
+      return parsePt(new Uint8Array(await res.arrayBuffer()));
     }
     default:
       throw new Error(`unknown register country ${country}`);

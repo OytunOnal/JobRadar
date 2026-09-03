@@ -188,3 +188,43 @@ test("jobs-ch: marketing pages borrowing the schema are refused", async () => {
     description: "too short to be an advert",
   }), null);
 });
+
+// ── The CEE batch: three quirks that each hid a whole board ──────────────────
+
+test("jsonld: control characters inside strings are escaped, not stripped", async () => {
+  const { escapeControlsInStrings, extractJobPostingLd } = await import("../src/lib/sources/jsonld");
+  // Optius ships literal newlines inside a string value. Invalid JSON, and it
+  // made the only JobPosting block on the page unparseable — the whole
+  // Slovenian board looked structure-less because of it.
+  const broken = '{"a":"line one\nline two","b":\n  "fine"}';
+  assert.throws(() => JSON.parse(broken));
+  const fixed = JSON.parse(escapeControlsInStrings(broken));
+  assert.equal(fixed.a, "line one\nline two", "the value survives, newline and all");
+  assert.equal(fixed.b, "fine", "whitespace BETWEEN tokens is untouched");
+  // A backslash-escaped quote must not flip the in-string state.
+  assert.equal(JSON.parse(escapeControlsInStrings('{"q":"a \\" b\tc"}')).q, 'a " b\tc');
+
+  const html = `<script type="application/ld+json">{"@type":"JobPosting","title":"X\nY","hiringOrganization":{"name":"Acme"}}</script>`;
+  assert.equal(extractJobPostingLd(html)?.hiringOrganization?.name, "Acme");
+});
+
+test("ldboards: the employer is taken from whichever field is not a URL", async () => {
+  const { mapLdPosting } = await import("../src/lib/sources/ldboards");
+  const board = { name: "dev-bg", sitemap: "", jobPath: /x/, country: "Bulgaria", max: 1 };
+  // dev.bg fills the schema backwards: name holds the URL, sameAs the name.
+  const inverted = mapLdPosting(board, "https://dev.bg/company/jobads/kirey-abc", {
+    title: "Engineer",
+    hiringOrganization: { name: "https://dev.bg/company/kirey/", sameAs: "Kirey" },
+    description: "x".repeat(200),
+  })!;
+  assert.equal(inverted.company, "Kirey");
+  // The ordinary shape still wins on `name`.
+  assert.equal(mapLdPosting(board, "https://dev.bg/company/jobads/acme-x", {
+    title: "Engineer", hiringOrganization: { name: "Acme", sameAs: "https://acme.example" }, description: "y",
+  })!.company, "Acme");
+  // No usable name anywhere is a dropped row, never a "?" company: company is
+  // half the dedupe key and the join to the sponsor registers.
+  assert.equal(mapLdPosting({ ...board, name: "x" }, "https://example.com/j/1", {
+    title: "Engineer", hiringOrganization: { "@id": "https://example.com/#/org/9" },
+  }), null);
+});

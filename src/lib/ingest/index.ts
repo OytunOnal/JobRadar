@@ -38,6 +38,8 @@ import { karriereat } from "../sources/karriereat";
 import { cercolavoro } from "../sources/cercolavoro";
 import { ergodotisi } from "../sources/ergodotisi";
 import { jobsch, jobupch } from "../sources/jobsch";
+import { startupjobscz, devbg, optius } from "../sources/ldboards";
+import { posaohr } from "../sources/posaohr";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -152,6 +154,10 @@ export const aggregators: Source[] = [
   ergodotisi,     // CY board, English-language EU market; title + <p> parse
   jobsch,         // CH dominant board; declared EN sitemap + JobPosting JSON-LD
   jobupch,        // CH Romandie sibling of jobs.ch; same platform, own fetch
+  startupjobscz,  // CZ startup board; sitemap + JSON-LD via the shared factory
+  devbg,          // BG tech-only board; sitemap + JSON-LD
+  optius,         // SI board; sitemap + JSON-LD
+  posaohr,        // HR category RSS; the employer is labelled in the item
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

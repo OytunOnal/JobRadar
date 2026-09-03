@@ -303,8 +303,24 @@ export async function runNameProbes(
   for (const raw of companyNames) {
     if (report.checked >= budget) break;
     const norm = normalizeCompanyName(raw);
-    if (!norm || seen.has(norm) || isKnown(norm)) continue;
+    if (!norm || seen.has(norm)) continue;
     seen.add(norm);
+    if (isKnown(norm)) {
+      // RECORD the skip, or it is not a skip — it is a treadmill. The first
+      // full backlog drain walked 6,410 names, silently passed 5,187 of them
+      // here (their boards are already in the table), and because nothing
+      // was written, backlogNames offered every one of them again next time:
+      // two predicates answering "is this company handled" differently, the
+      // exact drift pool.ts exists to prevent. A found=true row with no
+      // probeVersion says "covered via the board table, never actually
+      // probed", and keeps the cache honest about which it was.
+      await prisma.companyProbe.upsert({
+        where: { name: norm },
+        update: {},
+        create: { name: norm, displayName: raw, found: true },
+      });
+      continue;
+    }
     if (slugCandidates(raw).length === 0) continue;
     const cached = await prisma.companyProbe.findUnique({ where: { name: norm } });
     if (cached) continue;

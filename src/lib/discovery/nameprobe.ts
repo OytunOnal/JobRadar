@@ -14,7 +14,14 @@ import { probeBoard } from "./validate";
 // CompanyProbe — a name is probed once, ever.
 
 // Platforms whose probe body carries a company name (see validate.ts).
-const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecruiters", "personio"] as const;
+// manatal joined 2026-09-03: its registry probe hits the company-meta
+// endpoint (real org name, clean 404s), so it verifies like the others; the
+// live-posting count needs one follow-up call, like greenhouse. Pinpoint was
+// evaluated the same day and CANNOT join: postings.json carries no company
+// name, and a nameless 200 cannot tell a hit from a stranger (the gh:peak
+// lesson). Adding a platform here changes PROBE_SIGNATURE, which correctly
+// re-stales every cached miss — coverage grew, old "not found" answers aged.
+const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecruiters", "personio", "manatal"] as const;
 
 // Platforms whose probe body carries NO name, but whose public pages do:
 // Ashby's board page title ("Clera Jobs"), Teamtailor's RSS channel title,
@@ -87,6 +94,20 @@ const PROBE_PAUSE_MS = Number(process.env.PROBE_PAUSE_MS) || 400;
 
 // Greenhouse's validation probe hits the board ROOT (no job list), so the
 // live-posting requirement needs one extra call for greenhouse hits only.
+async function manatalJobCount(token: string): Promise<number> {
+  try {
+    const res = await fetch(
+      `https://www.careers-page.com/api/v1.0/c/${encodeURIComponent(token)}/jobs/?page=1&page_size=1`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (!res.ok) return 0;
+    const data = await res.json();
+    return typeof data?.count === "number" ? data.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function greenhouseJobCount(token: string): Promise<number> {
   try {
     const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${token}/jobs`, {
@@ -206,6 +227,9 @@ export async function probeCompany(
       let jobCount = outcome.jobCount;
       if (jobCount === undefined && platform === "greenhouse") {
         jobCount = await greenhouseJobCount(token);
+      }
+      if (jobCount === undefined && platform === "manatal") {
+        jobCount = await manatalJobCount(token);
       }
       if (!jobCount || jobCount < 1) continue;
       return { platform, token, companyName: outcome.companyName };

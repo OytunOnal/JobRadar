@@ -88,7 +88,20 @@ const DEDUP_MAX_CHECKS = 60;
 // on a heavy ingest day, and the parallel probe costs ~1.5s a name, so this
 // budget covers a day's arrivals and eats into the backlog on quiet days.
 // It is the wall-clock cost the queue gauge exists to make visible.
-const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
+// SIZED FOR A DAY ON A SERVER, NOT FOR A LAPTOP BURST.
+//
+// The pacing does not change and deliberately so: probes stay sequential with
+// PROBE_PAUSE_MS between names, which is what keeps each platform host at
+// roughly half a request a second. A 24-hour window does not need us to go
+// faster — it needs us to stop stopping early. At the measured 1.94s per name
+// a day holds about 44,500, so the old 1,500 was spending three percent of the
+// window and leaving #13's 143,539 register names on a 96-day schedule.
+//
+// 20,000 is about eleven hours: it drains that backlog inside a week, leaves
+// the rest of the day to the other stages, and still finishes well short of
+// the window if a run starts late. The stage writes CompanyProbe rows as it
+// goes, so a run killed at hour ten keeps every name it probed.
+const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 20_000;
 // Candidate boards probed per ingest. The first number here was 1,500,
 // reasoned backwards from "12 seconds for 60 boards, so 1,500 is about five
 // minutes" — which sized the budget by what felt affordable rather than by
@@ -109,11 +122,17 @@ const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
 // validated-boards ÷ RECHECK_DAYS, so it rises linearly with discovery. If
 // this budget starts binding again, the honest fix is to ask whether every
 // board needs re-probing monthly — not to keep raising the number.
-const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 4_000;
+//
+// Raised to 20,000 for the server's 24-hour window: at 0.2s per board that is
+// about 67 minutes, far above the ~2,280/day the jittered recheck actually
+// owes, so the cap goes back to being a circuit breaker rather than a
+// throttle. It exists for the day a migration nulls validatedAt, not for
+// ordinary Tuesdays.
+const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 20_000;
 // How much of that budget is reserved for the sponsor registers (#13). The
 // pool backlog gets the rest — and inherits anything the registers cannot
 // use, so a drained register never wastes budget.
-const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE) || 300;
+const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE) || 4_000;
 // Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;

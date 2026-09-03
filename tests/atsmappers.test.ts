@@ -356,3 +356,19 @@ test("every platform is its own module, and the registry is only a registry", ()
   const index = readFileSync(join("src", "lib", "sources", "ats", "index.ts"), "utf8");
   assert.equal(/https?:\/\//.test(index.replace(/\/\/.*$/gm, "")), false, "no URL belongs in the registry");
 });
+
+test("oracle liveness reads TotalJobsCount, the field the probe actually asks for", async () => {
+  const { getPlatform } = await import("../src/lib/discovery/platforms");
+  const oracle = getPlatform("oracle")!;
+  // The bug this pins: requisitionList only comes back when the caller sends
+  // &expand=requisitionList..., which the fetcher does and the probe does not.
+  // Testing for an unrequested field judged 1,193 live tenants dead — Honeywell
+  // among them, with 1,342 open jobs.
+  const withoutExpand = { items: [{ TotalJobsCount: 1342, SearchId: 1 }] };
+  assert.equal(oracle.probeAlive!(200, withoutExpand), true);
+  // An empty site is still dead, and a non-200 is never alive.
+  assert.equal(oracle.probeAlive!(200, { items: [{ TotalJobsCount: 0 }] }), false);
+  assert.equal(oracle.probeAlive!(404, withoutExpand), false);
+  // A caller that DID expand keeps working.
+  assert.equal(oracle.probeAlive!(200, { items: [{ requisitionList: [{ Id: 1 }] }] }), true);
+});

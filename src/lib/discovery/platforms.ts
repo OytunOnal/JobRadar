@@ -456,7 +456,7 @@ const oraclePlatform: AtsPlatform = {
   // Live-verified 2026-08-21 on Oracle's own board (2,136 postings): the CE
   // REST list API is public JSON, no auth. QUIRK: an unknown siteNumber does
   // NOT 404 — the API silently serves the tenant's default site — so
-  // probeAlive requires a non-empty requisitionList, and a wrong site token
+  // probeAlive requires a non-zero TotalJobsCount, and a wrong site token
   // yields duplicate (not wrong) jobs, which contentKey dedup absorbs.
   patterns: [
     {
@@ -486,6 +486,15 @@ const oraclePlatform: AtsPlatform = {
   probeAlive: (status, body) => {
     if (status !== 200 || typeof body !== "object" || body === null) return false;
     const item = (body as any).items?.[0];
+    // TotalJobsCount, not requisitionList. The list only comes back when the
+    // caller asks for it with &expand=requisitionList..., which the FETCHER
+    // does and this probe never did — so the probe was testing for a field it
+    // had not requested, judged every Oracle tenant dead, and left 1,193
+    // boards stuck as candidates. Honeywell was among them, with 1,342 live
+    // jobs. TotalJobsCount arrives unasked and is cheaper besides.
+    // requisitionList is still honoured when present, for callers that expand.
+    const total = Number(item?.TotalJobsCount ?? 0);
+    if (Number.isFinite(total) && total > 0) return true;
     return Array.isArray(item?.requisitionList) && item.requisitionList.length > 0;
   },
   fetcher: "oracle",

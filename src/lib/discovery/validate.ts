@@ -19,6 +19,20 @@ import { getPlatform } from "./platforms";
 const UA = "JobRadar/0.1 (personal job search)";
 const RECHECK_DAYS = 30;
 
+// COHORTS ARE THE REAL SCHEDULING PROBLEM, not the budget. Boards validated
+// together fall due together: 68,336 of ours were validated on 2026-08-19, so
+// under a flat 30-day cutoff every one of them would come due on the same
+// morning — a single ingest owing 68,000 probes, about four hours, against a
+// normal day's 2,400. Raising the per-run cap cannot fix that; it only spreads
+// one spike across a fortnight of ingests while new work piles up behind it.
+//
+// So each board gets its own recheck window, RECHECK_DAYS plus a deterministic
+// 0-29 day offset from its id. A bulk-validated cohort therefore comes due
+// evenly across the following month instead of all at once, which turns the
+// spike into the flat ~2,400/day the lane was sized for. Deterministic rather
+// than random so a board's due date does not wander between runs.
+const RECHECK_SPREAD_DAYS = 30;
+
 // "good-job-games" → "Good Job Games"; workday "gapinc@wd1/ext" → "Gapinc".
 export function titleizeToken(token: string): string {
   const base = token.includes("@") ? token.split("@")[0] : token;
@@ -152,18 +166,25 @@ export interface ValidationReport {
 export async function runValidation(
   opts: { concurrency?: number; fetchImpl?: typeof fetch; limit?: number } = {},
 ): Promise<ValidationReport> {
-  const cutoff = new Date(Date.now() - RECHECK_DAYS * 86_400_000);
-  const boards = await prisma.atsBoard.findMany({
-    where: {
-      OR: [
-        { status: "candidate" },
-        { validatedAt: null },
-        { validatedAt: { lt: cutoff } },
-      ],
-    },
-    orderBy: { id: "asc" },
-    ...(opts.limit ? { take: opts.limit } : {}),
-  });
+  // The per-board window makes this awkward for the query builder — it
+  // compares validatedAt against a cutoff that depends on the row's own id —
+  // so the selection is raw SQL. Prisma stores SQLite DateTime as epoch
+  // MILLISECONDS, not as a datetime string, so the comparison is arithmetic;
+  // a first attempt using datetime() silently matched every row in the table.
+  const dayMs = 86_400_000;
+  const baseCutoff = Date.now() - RECHECK_DAYS * dayMs;
+  const limit = opts.limit ?? 1_000_000;
+  const boards = await prisma.$queryRaw<
+    { id: number; platform: string; token: string; region: string; status: string; companyName: string | null }[]
+  >`
+    SELECT id, platform, token, region, status, companyName
+    FROM AtsBoard
+    WHERE status = 'candidate'
+       OR validatedAt IS NULL
+       OR validatedAt < (${baseCutoff} - (id % ${RECHECK_SPREAD_DAYS}) * ${dayMs})
+    ORDER BY id ASC
+    LIMIT ${limit}
+  `;
 
   const report: ValidationReport = { checked: 0, active: 0, dead: 0, revived: 0, errors: 0 };
   const queue = [...boards];

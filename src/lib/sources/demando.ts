@@ -17,13 +17,17 @@ const SITEMAP = "https://demando.io/sitemap/positions-sitemap.xml";
 const MAX = Number(process.env.DEMANDO_MAX) || 25;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// The sitemap's newest-first head carries the board's own demo tenant; a
+// "Demo" company (word-boundaried so a real "Demography Inc" survives) and a
+// "(Copy)" title are its fingerprints.
+const DEMO_COMPANY = /\bDemo\b/;
+const COPY_TITLE = /\(Copy\)/i;
+
 export function mapDemandoLd(url: string, ld: any): RawJob | null {
   const title = String(ld?.title ?? "").trim();
   const company = String(ld?.hiringOrganization?.name ?? "").trim();
   if (!title || !company) return null;
-  // The sitemap's newest-first head carries the board's own demo tenant; a
-  // "(Copy)" title and a "Demo" company are its fingerprints.
-  if (/Demo/.test(company) || /\(Copy\)/i.test(title)) return null;
+  if (DEMO_COMPANY.test(company) || COPY_TITLE.test(title)) return null;
   const loc = ld?.jobLocation?.address?.addressLocality;
   const slug = url.split("/company/")[1] ?? url;
   return {

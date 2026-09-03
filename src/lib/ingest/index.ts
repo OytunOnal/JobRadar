@@ -31,6 +31,9 @@ import { spainjobsio } from "../sources/spainjobsio";
 import { nextleveljobs } from "../sources/nextleveljobs";
 import { freework } from "../sources/freework";
 import { navno } from "../sources/navno";
+import { itjobbank } from "../sources/itjobbank";
+import { demando } from "../sources/demando";
+import { alfred } from "../sources/alfred";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -133,6 +136,9 @@ export const aggregators: Source[] = [
   nextleveljobs,  // EU-wide sponsor-curated board; sitemap-fed, JSON-LD bodies at fetch time
   freework,       // FR IT board, EN-GB tech slice; sitemap-fed, JSON-LD bodies at fetch time
   navno,          // NO national ad feed (NAV), cursor-resumed; bodies via desc:fill
+  itjobbank,      // DK tech-only board on the Jobindex stack; shared parser, no query matrix
+  demando,        // SE tech board; sitemap + JobPosting JSON-LD
+  alfred,         // IS dominant board; page-1 __NEXT_DATA__ poller (robots bans deeper)
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

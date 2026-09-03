@@ -320,6 +320,24 @@ test("manatal maps the recorded page: hash ids, slug URLs, stripped bodies", asy
   }
 });
 
+test("hrmanager: the title is Name, the date is .NET, the body is the ad", async () => {
+  const { mapHrManagerJob, parseDotNetDate } = await import("../src/lib/sources/ats/hrmanager");
+  const page = json("hrmanager");
+  assert.equal(page.CustomerName, "Energinet");
+  const jobs = page.Items.map((p: any) => mapHrManagerJob(p, "energinet", page.CustomerName)).filter(Boolean);
+  assert.equal(jobs.length, page.Items.length);
+  for (const j of jobs) {
+    assertUsable(j, "hrmanager");
+    assert.ok(!j.description.includes("<"), "ad HTML stripped");
+    // Department objects carry Name too; the mapper must read the POSITION's.
+    assert.notEqual(j.title, "Energinet", "the company name is not a job title");
+  }
+  // .NET dates: the epoch millis decide the instant, the offset is decoration.
+  assert.equal(parseDotNetDate("/Date(1787911491000+0200)/")?.toISOString(), new Date(1787911491000).toISOString());
+  assert.equal(parseDotNetDate("2026-08-28"), undefined, "an ISO string is not a .NET date");
+  assert.equal(parseDotNetDate(null), undefined);
+});
+
 // ── The guards ───────────────────────────────────────────────────────────
 
 test("every registered platform has a fixture", () => {

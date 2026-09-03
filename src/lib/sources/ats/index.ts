@@ -35,6 +35,7 @@ import { bamboohr } from "./bamboohr";
 import { breezy } from "./breezy";
 import { join } from "./join";
 import { manatal } from "./manatal";
+import { hrmanager } from "./hrmanager";
 import { pinpoint } from "./pinpoint";
 import { oracle } from "./oracle";
 import { beesite } from "./beesite";
@@ -71,6 +72,7 @@ export const atsFetchers = {
   breezy,
   join,
   manatal,
+  hrmanager,
   pinpoint,
   oracle,
   beesite,

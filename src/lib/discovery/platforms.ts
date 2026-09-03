@@ -409,6 +409,27 @@ const manatalPlatform: AtsPlatform = {
   fetcher: "manatal",
 };
 
+const hrmanagerPlatform: AtsPlatform = {
+  id: "hrmanager",
+  // HR-Manager (Talentech), the Nordic ATS family. Boards are addressed by
+  // tenant alias on ONE api host, so there is no per-tenant domain to crawl
+  // for: the pattern that matters is the candidate-facing apply host, which
+  // is where ads link from. Probe verified live 2026-09: a real alias
+  // answers 200 with CustomerName, a non-tenant answers HTTP 400 (a clean
+  // negative, not a soft 200) - see sources/ats/hrmanager.ts for the full
+  // field notes and the measured 3.6% tenant rate.
+  patterns: [
+    {
+      kind: "path",
+      hosts: ["api.hr-manager.net"],
+      denySegments: new Set([...COMMON_DENY_SEGMENTS, "jobportal.svc", "positionlist"]),
+    },
+  ],
+  crawlDomains: ["hr-manager.net"],
+  probeUrl: (token) => `https://api.hr-manager.net/jobportal.svc/${token}/positionlist/json/?take=1`,
+  fetcher: "hrmanager",
+};
+
 const pinpointPlatform: AtsPlatform = {
   id: "pinpoint",
   // <slug>.pinpointhq.com hosted boards (xeneta). Probe verified live
@@ -639,6 +660,7 @@ export const platforms: readonly AtsPlatform[] = [
   breezyPlatform,
   pinpointPlatform,
   manatalPlatform,
+  hrmanagerPlatform,
   teamtailorPlatform,
   joinPlatform,
   oraclePlatform,

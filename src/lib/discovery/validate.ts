@@ -38,6 +38,11 @@ const JOB_COUNTERS: Record<string, (body: any) => number | undefined> = {
   smartrecruiters: (b) => (typeof b?.totalFound === "number" ? b.totalFound : undefined),
   personio: (b) =>
     typeof b === "string" ? (b.match(/<position>/g) ?? []).length : undefined,
+  // PositionCountCustomer is the tenant's whole board, not the page: the
+  // probe asks for take=1, so counting Items would report 1 for every live
+  // board and 0 for none.
+  hrmanager: (b) =>
+    typeof b?.PositionCountCustomer === "number" ? b.PositionCountCustomer : undefined,
 };
 
 const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> = {
@@ -48,6 +53,7 @@ const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> 
   personio: (b) =>
     typeof b === "string" ? b.match(/<subcompany>([^<]*)<\/subcompany>/)?.[1]?.trim() || null : null,
   manatal: (b) => b?.name,
+  hrmanager: (b) => b?.CustomerName,
 };
 
 // Platforms that asked us to go away, and when we may ask again. In-memory:

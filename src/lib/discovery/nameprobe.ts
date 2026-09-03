@@ -21,7 +21,12 @@ import { probeBoard } from "./validate";
 // name, and a nameless 200 cannot tell a hit from a stranger (the gh:peak
 // lesson). Adding a platform here changes PROBE_SIGNATURE, which correctly
 // re-stales every cached miss — coverage grew, old "not found" answers aged.
-const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecruiters", "personio", "manatal"] as const;
+// hrmanager joined 2026-09-03 (#40): one unauthenticated call returns both
+// the tenant's real name and its whole-board count, and a non-tenant answers
+// HTTP 400 rather than a soft 200 - the cleanest negative of any platform
+// here. Measured on 223 real Nordic companies from our own pool: 8 tenants
+// (3.6%), matching the sponsor-register lane's rate.
+const VERIFIABLE_PLATFORMS = ["greenhouse", "workable", "recruitee", "smartrecruiters", "personio", "manatal", "hrmanager"] as const;
 
 // Platforms whose probe body carries NO name, but whose public pages do:
 // Ashby's board page title ("Clera Jobs"), Teamtailor's RSS channel title,

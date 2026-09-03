@@ -50,3 +50,4 @@ needs nothing but a live board token.
 | `jobvite.txt` | DERIVED | rate-limits hard; one feed call per run |
 | `softgarden.txt` | DERIVED | includes a duplicate anchor and a non-job link |
 | `manatal.json` | RECORDED | live GET careers-page.com/api/v1.0/c/elevus/jobs/ 2026-09-02, descriptions trimmed to 300 chars |
+| `hrmanager.json` | RECORDED | live GET api.hr-manager.net/jobportal.svc/energinet/positionlist/json/ 2026-09-03, trimmed to 3 of 43 positions |

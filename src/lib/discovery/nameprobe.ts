@@ -334,6 +334,12 @@ export async function runNameProbes(
       report.found++;
       await recordHit(hit, discoveredVia);
     }
+    // A probe run is minutes-to-hours of silence otherwise; the seeds' logs
+    // are watched by monitors that can only relay what gets printed. A line
+    // per hundred makes progress observable without making the log a firehose.
+    if (report.checked % 100 === 0) {
+      console.log(`  ...${report.checked} probed, ${report.found} found`);
+    }
   }
 
   // Leftover budget goes to stale misses: verdicts recorded under a smaller

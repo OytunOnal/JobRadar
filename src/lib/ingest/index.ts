@@ -34,6 +34,9 @@ import { navno } from "../sources/navno";
 import { itjobbank } from "../sources/itjobbank";
 import { demando } from "../sources/demando";
 import { alfred } from "../sources/alfred";
+import { karriereat } from "../sources/karriereat";
+import { cercolavoro } from "../sources/cercolavoro";
+import { ergodotisi } from "../sources/ergodotisi";
 import { themuse, duunitori, warpjobs, aidevjobs, wejob } from "../sources/apiboards";
 import { rssSources } from "../sources/rssfeeds";
 import { vdab } from "../sources/vdab";
@@ -139,6 +142,9 @@ export const aggregators: Source[] = [
   itjobbank,      // DK tech-only board on the Jobindex stack; shared parser, no query matrix
   demando,        // SE tech board; sitemap + JobPosting JSON-LD
   alfred,         // IS dominant board; page-1 __NEXT_DATA__ poller (robots bans deeper)
+  karriereat,     // AT dominant board; declared sitemap + JobPosting JSON-LD
+  cercolavoro,    // IT board that reopened the country; sitemap + JSON-LD
+  ergodotisi,     // CY board, English-language EU market; title + <p> parse
   themuse,        // The Muse public API — recency-walked, category-filtered
   duunitori,      // Finland's biggest board, keyless search API
   warpjobs,       // LLM inference / ML-systems niche, visa flag

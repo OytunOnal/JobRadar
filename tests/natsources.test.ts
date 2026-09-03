@@ -139,3 +139,23 @@ test("nav-no: token is extracted from prose, items map, non-ACTIVE is skipped", 
   assert.equal(mapFeedItem({ _feed_entry: { uuid: "x", status: "INACTIVE", title: "Gone" } }), null,
     "an inactive entry is not a sighting");
 });
+
+// ── Ergodotisi (Cyprus): title shape and paragraph body ──────────────────────
+
+test("ergodotisi: the board suffix goes, the FIRST ' at ' splits role from company", async () => {
+  const { parseErgodotisiTitle, extractParagraphBody } = await import("../src/lib/sources/ergodotisi");
+  const a = parseErgodotisiTitle("Store Manager at The Biscuit Corner - MyCookieDough | Ergodotisi")!;
+  assert.equal(a.title, "Store Manager");
+  assert.equal(a.company, "The Biscuit Corner - MyCookieDough");
+  // A company name may itself contain " at "; splitting on the FIRST one keeps
+  // the role whole, which is the field the scorer reads.
+  const b = parseErgodotisiTitle("Barista at Coffee at Home Ltd | Ergodotisi")!;
+  assert.equal(b.title, "Barista");
+  assert.equal(b.company, "Coffee at Home Ltd");
+  assert.equal(parseErgodotisiTitle(" | Ergodotisi"), null);
+
+  // Nav and chrome do not write long paragraphs; the length gate is what
+  // separates the ad from the furniture without pinning a class name.
+  const html = `<p class="nav">Jobs</p><p>${"x".repeat(60)}</p><p>short</p>`;
+  assert.equal(extractParagraphBody(html), "x".repeat(60));
+});

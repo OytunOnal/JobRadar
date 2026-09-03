@@ -212,3 +212,45 @@ jobs.lu are bot-walled, and no permit-sponsor register exists.
 74,094 postings and Le Forem's 25,917 — are deliberately unused because their
 operators said not to, and two more are parked because they omit the employer
 name. Reach is not the constraint here; permission and provenance are.
+
+## 2026-09-04 — Central/Eastern EU + Baltics (#31)
+
+Ten countries, three deep passes. Files in [`scan-parts/`](scan-parts/):
+czechia, slovakia, hungary, romania, bulgaria, croatia, slovenia, estonia,
+latvia, lithuania. Each carries a main-session audit; three headline claims
+changed on re-fetching.
+
+**Czechia — the find of the group, and now our sixth register.** MPSV's
+national vacancy feed is open data with an allow-all robots: 38,195 postings,
+38,170 with employer name and IČO, and three employer-declared booleans
+including EU Blue Card and employee-card eligibility. Shipped as a REGISTER
+rather than a source, because only 1,377 rows carry a public URL: 9,203
+employers now in VisaSponsor. Unlike the five licence lists before it, this
+one names who is actually hiring from outside the EU rather than who may.
+
+**Hungary.** A real register exists — kormany.hu's list of preferential
+employers and qualified labour-hire agencies, 35 entries / 29 active, naming
+manufacturers NoFluffJobs never reaches. Caveat recorded: Decree 92/2026 froze
+new guest-worker permits on this route in June 2026, so it is a sponsor and
+dedupe signal rather than a live channel.
+
+**Latvia — a real register we deliberately did not ingest.** LIAA's Startup
+Law XLSX holds 353 companies, but its support-programme column splits them:
+212 on tax relief, 63 on the highly-qualified-employee subsidy. A wage subsidy
+is not a statement about sponsorship, and `sponsor?` means registered sponsor.
+Kept as a discovery seed list instead.
+
+**Romania — the group's biggest unclaimed prize.** The scan's headline, an
+open ANOFM JSON feed of 7,628 postings, did not reproduce: four fetch methods
+all returned an 11KB HTML SPA shell. Recorded unverified. Its new
+workinromania.gov.ro permit registers list 7 companies today with two employer
+registers still empty — a monthly re-check, not an importer.
+
+**Slovakia, Bulgaria, Croatia, Slovenia, Estonia, Lithuania.** No employer
+register anywhere. Board leads worth a batch: StartupJobs.cz (412, JSON-LD),
+dev.bg (1,485, tech-only), CV Keskus (244 IT, JSON-LD), Optius (1,230,
+JSON-LD), Posao.hr (IT RSS with employer names). Estonia's Startup Visa
+publishes only a 17-company fast-track exemption list, not an approvals
+register. Profesia.sk, jobs.bg, MojeDelo and CVbankas are WAF-walled;
+unicorns.lt, CV.ee, CV.lv and CVonline.lt name ClaudeBot and were skipped
+untouched.

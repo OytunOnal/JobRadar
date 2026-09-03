@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSearchUrl as seUrl, mapHit } from "../src/lib/sources/sweden";
+import { mapHit } from "../src/lib/sources/sweden";
 import { buildSearchUrl as dkUrl, mapAd } from "../src/lib/sources/denmark";
 import { parseAd, cardToRawJob } from "../src/lib/sources/switzerland";
 
@@ -27,10 +27,12 @@ test("sweden mapHit: employer channel beats Platsbanken page, live-verified shap
   assert.equal(mapHit({ headline: "no id" }), null);
 });
 
-test("sweden search URL: server-side window + offset paging", () => {
-  const u = new URL(seUrl("llm engineer", 2, "2026-08-13T00:00:00"));
-  assert.equal(u.searchParams.get("offset"), "200");
-  assert.equal(u.searchParams.get("published-after"), "2026-08-13T00:00:00");
+test("sweden: the stream reads everything, so no query builder exists to test", () => {
+  // The query-window fetch (and its buildSearchUrl) was replaced by the
+  // JobStream delta walk: an ad matching none of the profile's phrases used
+  // to be invisible by construction. mapHit is unchanged — same ad object,
+  // same identities — and stays covered below.
+  assert.ok(mapHit({ id: 1, headline: "x" }));
 });
 
 // ── Denmark (Jobnet) ─────────────────────────────────────────────────────────

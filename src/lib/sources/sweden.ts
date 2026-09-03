@@ -1,30 +1,33 @@
-import { profileSearchGroups } from "../user/profile";
 import { stripHtml, type RawJob, type Source } from "./types";
 
-// Sweden — Arbetsförmedlingen's JobTech "JobSearch" API (jobsearch.api.
-// jobtechdev.se): the national job board, keyless, clean JSON, server-side
-// date filter (published-after) and offset pagination. Swedish tech postings
-// are largely English-titled, so the EN leads carry most of the load; sv
-// variants join when the profile has them.
+// Sweden — Arbetsförmedlingen's JobTech data, now via the JOBSTREAM
+// change-delta API rather than query-window search. The Nordics scan (#28)
+// verified the stream and the switch closes the old adapter's structural
+// blind spot: a query-based fetch can only see ads that match one of the
+// profile's search phrases, so an ad no query matched was never seen at all.
+// The stream carries EVERY change since a timestamp — full ad objects with
+// complete bodies — and the keyword scorer does the filtering where it
+// belongs. Removal deltas arrive too; they are skipped for now (sources have
+// no removal channel to ingest yet) and the pool clock handles aging.
 //
-// Config: SWEDEN_WINDOW_DAYS (7)  SWEDEN_MAX_PAGES (3, x100/page)
+// Operational shape, measured before writing: a 30-minute slice was 463 ads
+// / 3.7MB and answered instantly; a 3-hour slice answered 502. So the walk
+// is hour-sized slices with one patient retry each, cursored in SourceState
+// (name "sweden-jobstream", lastFetchedAt IS the cursor — the one consumer
+// of that table whose value fits the column as designed).
+//
+// The ad object is the same shape JobSearch served, so mapHit — and every
+// stored row's identity — carries over unchanged.
+//
+// Config: SWEDEN_STREAM_MAX_HOURS (26) per run, catching up a missed day.
 
-const SEARCH_URL = "https://jobsearch.api.jobtechdev.se/search";
+const STREAM_URL = "https://jobstream.api.jobtechdev.se/stream";
 const UA = "JobRadar/0.1 (personal job search)";
-const WINDOW_DAYS = Number(process.env.SWEDEN_WINDOW_DAYS) || 7;
-const MAX_PAGES = Number(process.env.SWEDEN_MAX_PAGES) || 3;
-const LIMIT = 100;
+const MAX_HOURS = Number(process.env.SWEDEN_STREAM_MAX_HOURS) || 26;
+const SLICE_MS = 60 * 60 * 1_000;
+const CURSOR = "sweden-jobstream";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export function buildSearchUrl(query: string, page: number, cutoffIso: string): string {
-  const p = new URLSearchParams();
-  p.set("q", query);
-  p.set("limit", String(LIMIT));
-  p.set("offset", String(page * LIMIT));
-  p.set("published-after", cutoffIso);
-  return `${SEARCH_URL}?${p.toString()}`;
-}
 
 export function mapHit(h: any): RawJob | null {
   if (!h?.id || !h?.headline) return null;
@@ -45,38 +48,54 @@ export function mapHit(h: any): RawJob | null {
 }
 
 export async function fetchSweden(fetchImpl: typeof fetch = fetch): Promise<RawJob[]> {
-  const cutoffIso = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString().slice(0, 19);
+  const { prisma } = await import("../db");
+  const state = await prisma.sourceState.findUnique({ where: { name: CURSOR } });
+  const now = Date.now();
+  // First run reaches back one day; afterwards, from wherever we left off,
+  // capped so a long outage catches up over several runs instead of one
+  // giant request the API answers with a 502.
+  let from = state ? state.lastFetchedAt.getTime() : now - 24 * 3_600_000;
+  from = Math.max(from, now - MAX_HOURS * 3_600_000);
+
   const out: RawJob[] = [];
   const seen = new Set<string>();
-  const titles = new Set<string>();
-  for (const g of profileSearchGroups(4)) {
-    titles.add(g.en[0]);
-    if (g.sv?.[0]) titles.add(g.sv[0]);
+  let cursorEnd = from;
+  for (let t = from; t < now; t += SLICE_MS) {
+    const sliceIso = new Date(t).toISOString().slice(0, 19);
+    let ok = false;
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      try {
+        const res = await fetchImpl(`${STREAM_URL}?date=${encodeURIComponent(sliceIso)}&updated-before-date=${encodeURIComponent(new Date(Math.min(t + SLICE_MS, now)).toISOString().slice(0, 19))}`, {
+          headers: { "User-Agent": UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(90_000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const ads: any[] = await res.json();
+        for (const ad of ads) {
+          if (ad?.removed) continue; // no removal channel yet — see header
+          const job = mapHit(ad);
+          if (!job || !job.url || seen.has(job.externalId)) continue;
+          seen.add(job.externalId);
+          out.push(job);
+        }
+        ok = true;
+      } catch {
+        if (attempt === 0) await sleep(10_000); // index under load — one patient retry
+      }
+    }
+    // The cursor only advances past slices that were actually read: a failed
+    // hour is retried next run rather than silently skipped.
+    if (!ok) break;
+    cursorEnd = Math.min(t + SLICE_MS, now);
+    await sleep(500);
   }
 
-  for (const q of titles) {
-    for (let page = 0; page < MAX_PAGES; page++) {
-      let data: any;
-      try {
-        const res = await fetchImpl(buildSearchUrl(q, page, cutoffIso), {
-          headers: { "User-Agent": UA, Accept: "application/json" },
-          signal: AbortSignal.timeout(20_000),
-        });
-        if (!res.ok) break;
-        data = await res.json();
-      } catch {
-        break; // partial result beats none
-      }
-      const hits: any[] = data?.hits ?? [];
-      for (const h of hits) {
-        const job = mapHit(h);
-        if (!job || !job.url || seen.has(job.externalId)) continue;
-        seen.add(job.externalId);
-        out.push(job);
-      }
-      await sleep(300);
-      if (hits.length < LIMIT) break; // short page = window exhausted
-    }
+  if (cursorEnd > from) {
+    await prisma.sourceState.upsert({
+      where: { name: CURSOR },
+      update: { lastFetchedAt: new Date(cursorEnd) },
+      create: { name: CURSOR, lastFetchedAt: new Date(cursorEnd) },
+    });
   }
   return out;
 }

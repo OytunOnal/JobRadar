@@ -89,13 +89,27 @@ const DEDUP_MAX_CHECKS = 60;
 // budget covers a day's arrivals and eats into the backlog on quiet days.
 // It is the wall-clock cost the queue gauge exists to make visible.
 const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
-// Candidate boards probed per ingest. Measured live: 60 boards in 12 seconds
-// at concurrency 10, so 1,500 is about five minutes — and each board is a
-// different company's ATS tenant, so the concurrency lands on 1,500 different
-// hosts rather than hammering one. The first runs face a 12,160-deep backlog
-// built up while this lane did not exist; after that it only sees new
-// discoveries plus the 30-day recheck.
-const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 1_500;
+// Candidate boards probed per ingest. The first number here was 1,500,
+// reasoned backwards from "12 seconds for 60 boards, so 1,500 is about five
+// minutes" — which sized the budget by what felt affordable rather than by
+// what the lane actually owes, and 1,500 turned out to be less than half of
+// it. A cap below the standing workload does not throttle a queue, it makes
+// the queue grow forever.
+//
+// What the lane owes, measured: 72,007 boards carry a validatedAt and
+// RECHECK_DAYS is 30, so 2,400 come due every day no matter what discovery
+// does. New boards arrive on top — 1,757/day over the last week, though that
+// week included bulk archive scanning, so treat it as a burst rather than the
+// floor. 4,000 covers the unavoidable recheck plus ordinary discovery with
+// room to spare, and costs about thirteen minutes at the measured 0.2s per
+// board. Each board is a different company's tenant, so concurrency 10 lands
+// on 4,000 different hosts rather than hammering one.
+//
+// One thing to watch as the board table grows: the recheck cost is
+// validated-boards ÷ RECHECK_DAYS, so it rises linearly with discovery. If
+// this budget starts binding again, the honest fix is to ask whether every
+// board needs re-probing monthly — not to keep raising the number.
+const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 4_000;
 // How much of that budget is reserved for the sponsor registers (#13). The
 // pool backlog gets the rest — and inherits anything the registers cannot
 // use, so a drained register never wastes budget.

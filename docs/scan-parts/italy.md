@@ -200,3 +200,115 @@ sponsorship register is published (decreto flussi nulla osta are per-permit
 administrative acts, never a list). Italian postings still reach the pool
 indirectly through the ATS discovery adapters and the aggregators. That is a
 result, not a gap in the search.
+
+## Deep verification pass, 2026-09-04
+
+Re-tested every claim above by reading full robots.txt files (not guessed
+sitemap paths) and following their declared `Sitemap:` lines, per the
+karriere.at lesson: a board can look shut at a guessed path and be wide open
+at the declared one. **The closed verdict does NOT survive** — one Italian
+board is genuinely adapter-worthy, found by doing exactly that.
+
+### Headline overturn: cercolavoro.com — adapter-worthy, previously unscanned
+
+The original scan checked **cercolavoro.it** (SSL certificate expired,
+correctly marked skip) but never reached **cercolavoro.com** — a distinct
+domain, named explicitly in this pass's target list. It is wide open.
+
+- `https://www.cercolavoro.com/robots.txt` · read 2026-09-03 · fetched (200, 1210 bytes)
+  QUOTE: `"User-agent: *\nDisallow: /whoare/"` — the only disallow in the entire file; every other path, including all job listings, is permitted to a generic crawler (no AI-crawler ban of any kind).
+  QUOTE: `"Sitemap: https://www.cercolavoro.com/sitemap/offerte_lavoro_elenco_proposte.xml"` — one of 12 declared `Sitemap:` lines, found by reading the file, not guessed.
+
+- `https://www.cercolavoro.com/sitemap/offerte_lavoro_elenco_proposte.xml` · read 2026-09-03 · fetched (200, 212,861 bytes)
+  FOUND: **988** `<loc>` entries, counted directly from the fetched XML (`(text.match(/<loc>/g)||[]).length` = 988). Each `<url>` carries `<changefreq>hourly</changefreq>` and `<lastmod>2026-09-03</lastmod>` — today's date, i.e. a live, hourly-refreshed feed, not a stale dump.
+  QUOTE: `"<url><loc>https://www.cercolavoro.com/offerta-lavoro-assistente-studio-odontoiatrico-aso-pieve-emanuele-mi-studio-dentistico-mancini-551074826</loc><lastmod>2026-09-03</lastmod><changefreq>hourly</changefreq><priority>0.9</priority></url>"`
+
+- `https://www.cercolavoro.com/offerta-lavoro-assistente-studio-odontoiatrico-aso-pieve-emanuele-mi-studio-dentistico-mancini-551074826` · read 2026-09-03 · fetched (200, 106,565 bytes)
+  FOUND: one `application/ld+json` block present, `"@type": "JobPosting"`, `"@context": "https://schema.org"`, with `title`, `datePosted`, `baseSalary` (structured `MonetaryAmount`/`QuantitativeValue`), `jobLocation` (structured `PostalAddress`), `employmentType`, `hiringOrganization`, `validThrough`, `identifier.propertyID: "jobid"`. This is exactly the karriere.at pattern: full schema.org JobPosting JSON-LD on every detail page.
+  QUOTE: `"@type\": \"JobPosting\", ... \"title\": \"Assistente studio odontoiatrico ASO\" ... \"jobLocation\": {\"@type\": \"Place\", \"address\": {\"@type\": \"PostalAddress\", \"postalCode\": \"20072\", \"addressRegion\": \"Milano\", \"addressCountry\": \"IT\", \"addressLocality\": \"Pieve Emanuele\"}}"`
+
+Cross-checked the other 9 declared sitemaps to make sure `offerte_lavoro_elenco_proposte.xml` (988) is the correct one to adapt against, not an undercount: `offerte_lavoro_comune_01.xml` (4,500 `<loc>`) and `_02.xml` (3,416 `<loc>`) are city-level *search* pages (`/offerte-di-lavoro-<comune>`), not postings; `offerte_lavoro_comune_mansione_01/02/03.xml` (30,000 `<loc>` each, capped at the sitemap-protocol limit) are city+role search pages; `ricerca_personale_comune.xml` (7,912 `<loc>`) and `ricerca_personale_mansioni.xml` (755 `<loc>`) are employer-side search pages; `ricerca_personale_cv_elenco_proposte.xml` (2,014 `<loc>`) is job-**seeker** CV listings — confirmed by fetching `https://www.cercolavoro.com/it/annuncio-di-lavoro-811888708.html` (200, title `"Cerco lavoro Addetta alle Vendite..."`, zero JSON-LD blocks) — these are candidates advertising themselves, not vacancies, correctly excluded from the count. So **988** is the counted, verified number of individual employer job postings, general (not tech-specific) but crawlable, structured, and live.
+
+Verdict: **cercolavoro.com is adapter-worthy.** Robots-permitted, sitemap-declared, JobPosting JSON-LD confirmed on a sampled detail page, 988 live postings counted directly.
+
+### Claim 1 — trovolavoro.it robots.txt: CONFIRMED
+
+`https://www.trovolavoro.it/robots.txt` and `https://trovolavoro.it/robots.txt` · read 2026-09-03 · fetched (both 200, 36 bytes, identical body):
+
+```
+User-agent: *
+Allow: /$
+Disallow: /
+```
+
+FOUND: this is the entire file — one group only, no second or third `User-agent:` group (unlike karriere.at's three groups). No `Sitemap:` line anywhere in the file. `/$` anchors to the homepage exactly; every other path, including all listing paths, is disallowed for a generic crawler.
+Followed up by fetching the guessed sitemap paths anyway, to close the loop the karriere.at lesson opened: `https://www.trovolavoro.it/sitemap.xml` and `.../sitemap_index.xml` both return 200 but serve the **homepage HTML** (238,106 bytes, `<!DOCTYPE html>`, WordPress/Divi markup), not XML — 0 `<loc>` elements in either. There is no sitemap to follow because none exists at any path tried, guessed or robots-declared (robots declares none).
+**CONFIRMED**: no listing path is permitted for a generic crawler; trovolavoro is correctly skip, robots-disallowed.
+
+### Claim 2 — cliclavoro.gov.it robots.txt: CONFIRMED, with a nuance
+
+`https://www.cliclavoro.gov.it/robots.txt` · read 2026-09-03 · fetched (200, 3,863 bytes — matches the byte count in the prior finding exactly).
+
+FOUND, full content in two parts:
+1. A Cloudflare-managed "Content Signals" block:
+   QUOTE: `"User-agent: *\nContent-Signal: search=yes,ai-train=no,use=reference\nAllow: /"`
+   then, individually, `"User-agent: Amazonbot\nDisallow: /"`, and the same `Disallow: /` for **Applebot-Extended, Bytespider, CCBot, ClaudeBot, CloudflareBrowserRenderingCrawler, Google-Extended, GPTBot, meta-externalagent**.
+2. A second, older Drupal-standard block (`User-agent: *`, disallowing `/admin/`, `/user/login`, `/search/`, etc. — ordinary CMS hygiene, not crawler-hostile).
+
+FOUND: `ClaudeBot` is named explicitly and disallowed from `/` in its own group.
+INFERRED: the site is *not* a blanket ban on every crawler — the wildcard `User-agent: *` group allows `/` with a stated `Content-Signal: ai-train=no, use=reference` (i.e. it welcomes being indexed/referenced but withholds AI-training consent). It only bans nine specifically named AI/scraper agents by name, ClaudeBot among them. Since we are that agent, the ban applies to us and must be respected regardless of what an unnamed generic crawler could technically do.
+**CONFIRMED**: cliclavoro.gov.it is up and reachable (not "offline" as the very first scan said), and it names ClaudeBot specifically in a `Disallow: /` group. Verdict stands: **skip, respected ban** — not routed around.
+
+### Claim 3 — dati.gov.it, paged in full, plus four regional portals: CONFIRMED (no live vacancy feed found), with one real but narrow exception
+
+Paged the CKAN API completely rather than reading only the first page:
+- `https://dati.gov.it/opendata/api/3/action/package_search?q=offerte%20di%20lavoro&rows=1000&start=0` · read 2026-09-03 · fetched (200) — `"count": 1911`, 1000 results returned.
+- `https://dati.gov.it/opendata/api/3/action/package_search?q=offerte%20di%20lavoro&rows=1000&start=1000` · read 2026-09-03 · fetched (200) — 911 more results returned.
+- **1,911 titles fetched and counted in full** (1000 + 911 = 1911, matching the reported `count` exactly — no sampling).
+- Filtered all 1,911 titles for `/offert|vacan|annunci di lavoro|posizioni aperte/i`: **7 matches**, counted directly. Five are false positives on the word "offerte" (WiFi-area availability, MEPA procurement tenders, a services catalog). Two are real row-level datasets:
+
+  1. Regione Siciliana, **"Offerte di Lavoro"** (`package_show?id=offerte-di-lavoro`, fetched 200) — resources point to `https://dati.regione.sicilia.it/download/dataset/offerte-lavoro/filesystem/offerte-lavoro_json.json` and `..._csv.csv`. Fetched both directly this pass: both return `fetch failed` (connection failure, not a CKAN artifact — the underlying host itself is down). This **independently confirms** the prior scan's negative finding on a second, direct attempt at the true resource URL (not the CKAN wrapper).
+
+  2. Università di Torino, **"Gli annunci di lavoro per studenti e laureati/e"** (`package_show`, fetched 200) — resource `https://www.dati.gov.it/sites/default/files/unito_gli-annunci-di-lavoro-per-studenti-e-laureati-e-dell-universita-di-torino.json` · read 2026-09-03 · fetched (200, 3,427,813 bytes). FOUND and counted: **8,288** row-level entries (`j.data.length` = 8288), each with company name, sector, contract type, location, start date and posting deadline — genuinely row-level, not aggregate. QUOTE: `"RAGIONE SOCIALE":"Synergie Italia S.P.A.","SETTORE AZIENDALE":"attività di organizzazioni economiche...","RAPPORTO DI LAVORO":"lavoro a tempo determinato"`. Dates range from 2013 through January 2026 (most recent `SCADENZA DELL'ANNUNCIO` values: `02-JAN-26`, `07-JAN-26`, `14-DEC-25`). INFERRED: this is a periodic archive dump from the university's job-placement office for its own students/graduates, not a general tech-market job board — narrow audience, no visa-sponsorship framing, and its sibling CSV resource (`https://www.unito.it/sites/default/files/open_data_annunci_unijob.csv`) is blocked by a Cloudflare challenge page (403, "Just a moment...") when fetched directly, so even this dataset is only half-reachable. Does not change the adapter verdict for the general market; noted for completeness because it is a real, row-level exception to the "all statistics" pattern.
+
+- Checked four regional open-data portals directly, as instructed:
+  - Lombardia (Socrata): `https://dati.lombardia.it/api/catalog/v1?q=offerte%20di%20lavoro&limit=20` · read 2026-09-03 · fetched (200) — `"results": [], "resultSetSize": 0"` — zero matches.
+  - Emilia-Romagna (CKAN): `https://dati.emilia-romagna.it/api/3/action/package_search?q=offerte+di+lavoro` · read 2026-09-03 · fetched (200) — `"count": 152`, top-ranked result is `"Aree WiFi - Comuni"` (WiFi hotspot locations), confirming the same statistical/off-topic pattern already documented for this portal.
+  - Veneto: `https://dati.veneto.it/api/3/action/package_search?q=offerte+di+lavoro` · read 2026-09-03 · fetched (404) — this portal does not expose a standard CKAN `package_search` path at this URL; returned the region's generic 404 page. Not resolved to a working API path within this pass's budget.
+  - Piemonte: `https://www.dati.piemonte.it/api/3/action/package_search?q=offerte+di+lavoro` · read 2026-09-03 · fetched (404) — Slim-framework 404 (`"Message": "Not found."`); same situation, non-standard/undiscovered API path.
+  INFERRED: no live vacancy feed found in any of the four regional portals within this pass; Veneto and Piemonte's actual API shapes remain unconfirmed (neither a positive nor a negative — genuinely unresolved, flagged rather than guessed).
+
+**CONFIRMED**: dati.gov.it's 1,911 matches are overwhelmingly statistical/administrative, as the first pass judged — verified now by reading every single one of the 1,911 titles rather than a sample. The one genuinely row-level vacancy-shaped dataset that is actually reachable (Torino's student job-placement archive) is real but too narrow in audience and too stale in scope to change the adapter verdict; Sicilia's is still down; three of four regional portals checked show no live feed and one (Veneto/Piemonte's exact path) remains unresolved rather than falsely marked closed.
+
+### Verdict
+
+Italy **does** have an adapter-worthy door: **cercolavoro.com** — robots-permitted, sitemap-declared, 988 live job postings counted directly, schema.org/JobPosting JSON-LD confirmed on a sampled detail page. The closed verdict does not survive.
+
+### Main-session audit of the deep pass, 2026-09-04
+
+Every number above was re-fetched and agreed exactly: robots.txt is 1,210
+bytes disallowing only `/whoare/` with no AI-crawler ban, 12 `Sitemap:` lines
+declared, and `https://www.cercolavoro.com/sitemap/offerte_lavoro_elenco_
+proposte.xml` holds **988** `<loc>` entries with a `lastmod` from the day of
+the audit. A sampled detail page carries complete `JobPosting` JSON-LD
+(title, hiringOrganization, addressLocality, datePosted, description).
+
+One measurement the deep pass did not take, added here so the adapter is
+built with its eyes open: **the board is generalist, and its tech slice is
+small.** Counting the sitemap's slugs against the usual Italian tech words
+(svilupp*, programmat*, informatic*, software, develop*, data, cloud, devops,
+sistemi) gives **33 tech-ish URLs of 988 — 3.3%**; the first listing in the
+file is a dental assistant. So the honest verdict is neither "Italy is
+closed" (that was wrong) nor "a major find": it is a real, clean, small door,
+and the keyword scorer will discard most of what comes through it.
+
+That still changes the country's verdict, because a small open door beats a
+closed market: 988 hourly-refreshed postings with structured bodies cost one
+sitemap fetch, and the rest is the scorer's ordinary work.
+
+**Correction to the earlier ClicLavoro note.** This file previously said the
+national service "names AI crawlers in its disallow set", which was right in
+effect but imprecise: its wildcard `User-agent: *` group permits crawling,
+and nine *named* AI bots are banned in their own groups — ClaudeBot among
+them. So the ban applies to us specifically, and is honoured, but a reader
+should not conclude the site is closed to everyone.

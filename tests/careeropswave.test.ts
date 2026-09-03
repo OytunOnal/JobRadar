@@ -370,21 +370,21 @@ test("parseCzEmployers keeps the visa-flagged employers and remembers which rout
   assert.match(rows[0]!.detail!, /IČO \d+/);
 });
 
-test("every sponsor register is in the probe priority list", async () => {
-  // A seventh register added to REGISTER_COUNTRIES but forgotten here would
-  // be ingested and then never probed — its names would sit in VisaSponsor
-  // forever while the lane drained the six it knows about. Two lists that
-  // must agree, so make them say so out loud.
+test("every sponsor register is in the probe priority list, best-hit-rate first", async () => {
+  // A seventh register added to REGISTER_COUNTRIES but forgotten here would be
+  // ingested and then never probed — its names would sit in VisaSponsor while
+  // the lane drained the six it knows about. Two lists that must agree.
   const { REGISTER_COUNTRIES } = await import("../src/lib/visa/sponsors");
-  const { REGISTER_PRIORITY } = await import("../src/lib/discovery/nameprobe");
-  assert.deepEqual(
-    [...REGISTER_COUNTRIES].sort(),
-    [...REGISTER_PRIORITY].sort(),
-    "REGISTER_PRIORITY must name exactly the registers we ingest",
-  );
-  // Order is the point of the list, not just membership: the UK's 126,493
-  // names include every care home that ever held a licence, while Czechia's
-  // are employers who registered a non-EU-open vacancy this month.
-  assert.equal(REGISTER_PRIORITY[0], "cz", "best-signal register first");
-  assert.equal(REGISTER_PRIORITY.at(-1), "gb", "largest and weakest last");
+  const { REGISTER_ORDER } = await import("../src/lib/discovery/nameprobe");
+  assert.deepEqual([...REGISTER_COUNTRIES].sort(), [...REGISTER_ORDER].sort(),
+    "REGISTER_ORDER must name exactly the registers we ingest");
+
+  // Order is ranked by how likely a name is to HAVE an ATS board, which is not
+  // the same axis as sponsorship strength — the first version ranked Czechia
+  // first for having the strongest sponsorship signal and then probed 200
+  // Czech village firms for zero hits. NL's kennismigrant list measured 3.8%.
+  assert.equal(REGISTER_ORDER[0], "nl", "the measured-best register leads");
+  assert.equal(REGISTER_ORDER.at(-1), "gb", "126,493 licensed sponsors, mostly not tech, last");
+  assert.ok(REGISTER_ORDER.indexOf("cz") > REGISTER_ORDER.indexOf("nl"),
+    "Czechia's bulk trails NL: strong sponsors, few ATS boards");
 });

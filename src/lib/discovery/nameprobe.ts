@@ -293,29 +293,64 @@ export function probeableName(name: string): boolean {
 // somebody remembered, and at 157,056 register names against ~1.9s each that
 // is 77 hours nobody was ever going to sit through by hand.
 //
-// ORDER MATTERS MORE HERE THAN IN THE POOL BACKLOG, because the registers are
-// wildly unequal in signal. The UK's licensed-sponsor list is 126,493 names
-// and includes every care home and restaurant that ever held a licence;
-// Czechia's 9,203 are employers who registered a vacancy open to a non-EU
-// national THIS MONTH. Alphabetical order — what the hand-run script used —
-// would spend the whole budget on the letter A of the largest and weakest
-// list. So registers are drained best-signal-first, and within a register the
-// order is arbitrary but stable.
-export const REGISTER_PRIORITY = ["cz", "pt", "dk", "ie", "nl", "gb"];
+// ORDER IS THE WHOLE DESIGN HERE, and the first version got the axis wrong.
+// It ranked registers by SPONSORSHIP SIGNAL — Czechia first, because those
+// employers had registered a non-EU-open vacancy this month. Then the lane
+// ran and probed 200 Czech names for zero hits: PUTZUNG s.r.o., EKANT s.r.o.,
+// KHUSTEC s.r.o. A Czech micro-company hiring one Ukrainian welder is a
+// genuine sponsor and will never have a Greenhouse board. This lane's job is
+// finding ATS BOARDS, and board-likelihood is a different axis from
+// sponsorship strength: it tracks company size and tech-ness.
+//
+// So names are ranked by how likely they are to HAVE a board, in two tiers.
+//
+// Tier 1 is the marked subset: Czechia's register records which route each
+// employer used, and the 356 EU Blue Card employers are the skilled-migrant
+// ones — DHL Information Services, SAP Services, Teradata, Siemens Industry
+// Software, IKEA Purchasing. Exactly the companies that run a real ATS, and
+// they were sitting unread behind nine thousand village firms.
+//
+// Tier 2 is everything else, by register, ordered by what we have measured:
+// the Netherlands' kennismigrant list hit 3.8%, and Czechia's bulk is
+// measuring near zero, so NL leads and CZ's remainder trails. The UK's
+// 126,493 names stay last — it is every licensed sponsor including every care
+// home that ever held one.
+const REGISTER_PRIORITY = ["nl", "pt", "dk", "ie", "cz", "gb"];
+
+// Rows whose detail marks them as the skilled-migrant route jump the queue.
+const HIGH_SIGNAL_DETAIL = /Blue Card/i;
+
+export const REGISTER_ORDER = REGISTER_PRIORITY;
 
 export async function registerNames(limit: number): Promise<string[]> {
   if (limit <= 0) return [];
   const probedRows = await prisma.companyProbe.findMany({ select: { name: true } });
   const probed = new Set(probedRows.map((p) => p.name));
+  const usable = (name: string) =>
+    probeableName(name) && !probed.has(normalizeCompanyName(name));
+
   const out: string[] = [];
+  const taken = new Set<string>();
+  const push = (name: string) => {
+    if (out.length >= limit || taken.has(name) || !usable(name)) return;
+    taken.add(name);
+    out.push(name);
+  };
+
+  // Tier 1: the marked skilled-migrant rows, wherever they live.
+  for (const row of await prisma.visaSponsor.findMany({
+    where: { detail: { contains: "Blue Card" } },
+    select: { name: true, detail: true },
+  })) {
+    if (HIGH_SIGNAL_DETAIL.test(row.detail ?? "")) push(row.name);
+  }
+
+  // Tier 2: the rest, register by register.
   for (const country of REGISTER_PRIORITY) {
     if (out.length >= limit) break;
-    const rows = await prisma.visaSponsor.findMany({ where: { country }, select: { name: true } });
-    for (const r of rows) {
+    for (const r of await prisma.visaSponsor.findMany({ where: { country }, select: { name: true } })) {
       if (out.length >= limit) break;
-      if (!probeableName(r.name)) continue;
-      if (probed.has(normalizeCompanyName(r.name))) continue;
-      out.push(r.name);
+      push(r.name);
     }
   }
   return out;

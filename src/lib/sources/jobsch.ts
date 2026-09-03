@@ -29,7 +29,36 @@ import { extractJobPostingLd } from "./jsonld";
 //
 // Config: JOBSCH_MAX (default 40 detail fetches per ingest).
 
-const SITEMAP = "https://www.jobs.ch/sitemaps/jobs/en/sitemap.xml";
+// Two brands, one platform. jobup.ch is the same operator's Romandie site:
+// identical sitemap layout and JSON-LD, differing only in the host, the
+// sitemap prefix and one path segment (vacancies/ vs jobs/). Same shared
+// mapper, one fetch contract each — the itjobbank/jobindexdk pattern, not a
+// copied file. Counted 2026-09-04: jobs.ch 42,695 EN detail URLs, jobup.ch
+// 35,647. They share an operator, so some postings appear on both; the
+// cross-source dedupe collapses those on title+company as it already does
+// for EURES and the national boards.
+interface ChSite {
+  name: string;
+  sitemap: string;
+  detailPath: RegExp;
+  country: string;
+}
+
+const SITES: Record<string, ChSite> = {
+  "jobs-ch": {
+    name: "jobs-ch",
+    sitemap: "https://www.jobs.ch/sitemaps/jobs/en/sitemap.xml",
+    detailPath: /\/vacancies\/detail\//,
+    country: "Switzerland",
+  },
+  "jobup-ch": {
+    name: "jobup-ch",
+    sitemap: "https://www.jobup.ch/sitemaps/jobup/en/sitemap.xml",
+    detailPath: /\/jobs\/detail\//,
+    country: "Switzerland",
+  },
+};
+
 const MAX = Number(process.env.JOBSCH_MAX) || 40;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,7 +81,7 @@ async function sitemapEntries(url: string): Promise<{ url: string; lastmod: stri
   return out.sort((a, b) => b.lastmod.localeCompare(a.lastmod));
 }
 
-export function mapJobsChLd(url: string, ld: any): RawJob | null {
+export function mapJobsChLd(url: string, ld: any, source = "jobs-ch"): RawJob | null {
   const title = String(ld?.title ?? "").trim();
   const company = String(ld?.hiringOrganization?.name ?? "").trim();
   if (!title || !company) return null;
@@ -64,7 +93,7 @@ export function mapJobsChLd(url: string, ld: any): RawJob | null {
   const site = Array.isArray(ld?.jobLocation) ? ld.jobLocation[0] : ld?.jobLocation;
   const city = String(site?.address?.addressLocality ?? "").trim();
   return {
-    source: "jobs-ch",
+    source,
     // The UUID in the detail path is the posting's identity across languages.
     externalId: url.match(/detail\/([0-9a-f-]{36})/)?.[1] ?? url,
     url,
@@ -81,30 +110,37 @@ export function mapJobsChLd(url: string, ld: any): RawJob | null {
   };
 }
 
+async function fetchSite(site: ChSite): Promise<RawJob[]> {
+  const children = await sitemapEntries(site.sitemap);
+  const urls: string[] = [];
+  for (const child of children) {
+    if (urls.length >= MAX) break;
+    try {
+      for (const e of await sitemapEntries(child.url)) {
+        if (site.detailPath.test(e.url)) urls.push(e.url);
+        if (urls.length >= MAX) break;
+      }
+    } catch { /* one unreadable child is not a run failure */ }
+  }
+
+  const out: RawJob[] = [];
+  for (const url of urls) {
+    try {
+      const ld = extractJobPostingLd(await getText(url));
+      const job = ld && mapJobsChLd(url, ld, site.name);
+      if (job) out.push(job);
+    } catch { /* one dead posting is not a run failure */ }
+    await sleep(700);
+  }
+  return out;
+}
+
 export const jobsch: Source = {
   name: "jobs-ch",
-  async fetch(): Promise<RawJob[]> {
-    const children = await sitemapEntries(SITEMAP);
-    const urls: string[] = [];
-    for (const child of children) {
-      if (urls.length >= MAX) break;
-      try {
-        for (const e of await sitemapEntries(child.url)) {
-          if (/\/vacancies\/detail\//.test(e.url)) urls.push(e.url);
-          if (urls.length >= MAX) break;
-        }
-      } catch { /* one unreadable child is not a run failure */ }
-    }
+  fetch: () => fetchSite(SITES["jobs-ch"]!),
+};
 
-    const out: RawJob[] = [];
-    for (const url of urls) {
-      try {
-        const ld = extractJobPostingLd(await getText(url));
-        const job = ld && mapJobsChLd(url, ld);
-        if (job) out.push(job);
-      } catch { /* one dead posting is not a run failure */ }
-      await sleep(700);
-    }
-    return out;
-  },
+export const jobupch: Source = {
+  name: "jobup-ch",
+  fetch: () => fetchSite(SITES["jobup-ch"]!),
 };

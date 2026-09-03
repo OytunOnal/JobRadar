@@ -177,3 +177,38 @@ sitemap-crawlable but small; jobsplus.gov.mt has an expired certificate.
 Both register questions closed negative: **Malta's Key Employee Initiative
 and Cyprus's Companies of Foreign Interest publish no list**, which retires
 two of this issue's three highest-value hypotheses.
+
+## 2026-09-04 — DACH + Benelux remainder (#29)
+
+Full tables in [`scan-parts/`](scan-parts/): [austria](scan-parts/austria.md),
+[switzerland](scan-parts/switzerland.md), [belgium](scan-parts/belgium.md),
+[luxembourg](scan-parts/luxembourg.md).
+
+**Austria.** **karriere.at** — 12,749 postings in the sitemap its robots.txt
+declares, full JobPosting JSON-LD per detail page. Adapter shipped. The find
+also produced this project's most-repeated method note: the same board answers
+404 at the guessed sitemap path and 200 with all 12,749 at the declared one.
+
+**Switzerland.** **jobs.ch** (42,695 EN detail URLs) and **jobup.ch** (35,647)
+ship as one module — same operator, same layout, one path segment apart.
+Both declare their sitemaps and disallow `/api/`, so the adapter reads what
+they offer. No employer-level permit data exists anywhere; SEM publishes
+aggregates only.
+
+**Belgium.** Nothing shipped, and both reasons are worth knowing. **Le Forem**
+publishes 25,917 postings through an open-data API, but leforem.be names
+ClaudeBot with `Disallow:/` while allowing LinkedInBot — a deliberate choice —
+and the API's own host disallows `/api/`. **Actiris** is genuinely open
+(robots.txt is nothing but Sitemap lines; 9,643 same-day offer URLs) but
+publishes no employer name, because applications route through the agency.
+VDAB stays our only Belgian source, covering Flanders alone.
+
+**Luxembourg.** Nothing adapter-worthy. Silicon Luxembourg's keyless WordPress
+API serves 392 counted tech postings with full bodies and an allow-all robots,
+but carries no employer name either. ADEM publishes no live feed, Moovijob and
+jobs.lu are bot-walled, and no permit-sponsor register exists.
+
+**The pattern this group taught.** Two of the largest doors found — Job-Room's
+74,094 postings and Le Forem's 25,917 — are deliberately unused because their
+operators said not to, and two more are parked because they omit the employer
+name. Reach is not the constraint here; permission and provenance are.

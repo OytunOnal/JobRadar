@@ -55,6 +55,12 @@ console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`Swept (closed): ${report.delisted}`);
 if (report.nameProbe) console.log(`Name probes:    ${report.nameProbe.found}/${report.nameProbe.checked} companies mapped to their ATS`);
 if (report.deepProbe) console.log(`Deep probes:    ${report.deepProbe.found}/${report.deepProbe.checked} misses rescued via careers-page scan (${report.deepProbe.sitesResolved} sites resolved)`);
+if (report.validation)
+  console.log(
+    `Validation:     ${report.validation.active} active, ${report.validation.dead} dead, ` +
+      `${report.validation.revived} revived of ${report.validation.checked} candidate boards probed` +
+      (report.validation.errors ? ` (${report.validation.errors} errored, retried next run)` : ""),
+  );
 if (Object.keys(report.eliminated ?? {}).length > 0) console.log("Eliminated:     ", report.eliminated);
 if (report.liveness) console.log(`Liveness:       ${report.liveness.boardsRefreshed} stale boards re-diffed + ${report.liveness.checked} aggregator URLs probed — ${report.liveness.expired} expired, ${report.liveness.refreshed} confirmed listed`);
 if (report.sponsors) console.log(`Sponsor regs:   refreshed ${Object.entries(report.sponsors.perCountry).map(([c, n]) => `${c}:${n}`).join(" ")}${report.sponsors.errors.length ? ` (errors: ${report.sponsors.errors.length})` : ""}`);

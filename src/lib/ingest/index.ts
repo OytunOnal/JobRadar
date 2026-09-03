@@ -61,6 +61,7 @@ import { isRegisteredSponsor, refreshSponsors, sponsorsStale, type SponsorRefres
 import { safeSlice, type RawJob, type Source } from "../sources/types";
 import { TEXT_VERSION } from "../text/html-text";
 import { invalidateVector } from "../llm/embed";
+import { runValidation, type ValidationReport } from "../discovery/validate";
 import { andWhere, openWhere } from "../queue/pool";
 import { derivedFields, statedFields } from "../scoring/derive";
 import { readQueueGauges, type QueueGauge } from "../queue/capacity";
@@ -88,6 +89,13 @@ const DEDUP_MAX_CHECKS = 60;
 // budget covers a day's arrivals and eats into the backlog on quiet days.
 // It is the wall-clock cost the queue gauge exists to make visible.
 const NAME_PROBE_MAX = Number(process.env.NAME_PROBE_MAX) || 1_500;
+// Candidate boards probed per ingest. Measured live: 60 boards in 12 seconds
+// at concurrency 10, so 1,500 is about five minutes — and each board is a
+// different company's ATS tenant, so the concurrency lands on 1,500 different
+// hosts rather than hammering one. The first runs face a 12,160-deep backlog
+// built up while this lane did not exist; after that it only sees new
+// discoveries plus the 30-day recheck.
+const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 1_500;
 // How much of that budget is reserved for the sponsor registers (#13). The
 // pool backlog gets the rest — and inherits anything the registers cannot
 // use, so a drained register never wastes budget.
@@ -317,6 +325,7 @@ export interface IngestReport {
   delisted: number;
   nameProbe?: NameProbeReport;
   deepProbe?: DeepProbeReport;
+  validation?: ValidationReport;
   liveness?: LivenessReport;
   // The operator's gauge (see queue/capacity.ts): read at the end of the run,
   // printed with the report — the pressure and its dial in the same breath.
@@ -663,6 +672,25 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     if (llmEnabled()) {
       report.deepProbe = await stage("deep-probe", report.errors, () => runDeepProbes(DEEP_PROBE_MAX));
     }
+
+    // Board validation: discovery finds CANDIDATES, and only ACTIVE boards are
+    // ever fetched (boardSources filters on status). Until now nothing in the
+    // ingest closed that gap — runValidation existed only as a hand-run
+    // script, so 12,160 discovered boards sat as candidates indefinitely,
+    // including 1,783 enterprise Oracle/Cornerstone/Eightfold tenants the
+    // archive lane had already found and nobody had ever probed (#6 assumed
+    // crawl had not reached them; crawl had, validation had not).
+    //
+    // Workday's own history sets the expectation: 7,329 validated, 3,940
+    // active — 54% of candidates turn out alive. The lane is cheap (one HTTP
+    // probe per board, ten at a time) and monotonic: a validated board leaves
+    // the queue for RECHECK_DAYS, so a bounded budget drains the backlog
+    // rather than re-walking its head. The one exception is a board whose
+    // probe ERRORS, which is deliberately left untouched to be retried — if
+    // a block of those ever accumulates it will show as a rising `errors`
+    // count in this stage's report rather than as silent starvation.
+    report.validation = await stage("validate", report.errors, () =>
+      runValidation({ limit: VALIDATE_MAX }));
 
     // Liveness probing: aggregator jobs have no diffable feed, so aging ones
     // get their URLs probed for closure banners.

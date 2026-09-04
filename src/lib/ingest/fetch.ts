@@ -1,3 +1,4 @@
+import { freemem } from "node:os";
 import type { Source } from "../sources/types";
 
 // ONE PUMP, AND THE HOST RULE IT SCHEDULES BY.
@@ -86,6 +87,20 @@ export const PER_HOST: Readonly<Record<string, number>> = { join: 2, workable: 2
 const HEAP_CRITICAL_MB = 1200;
 const HEAP_HIGH_MB = 800;
 
+// SYSTEM memory, not just ours. The heap thresholds above have never once
+// fired on the machine this runs on, and measurement says why: with the
+// ingest mid-run, process heap was 4MB while the box had 0.97GB free of 32GB.
+// The pressure is real and it is not ours — Ollama holds an 18.5GB model
+// resident — so a control that only watches its own heap reports calm while
+// the machine is one allocation from swapping.
+//
+// This does not free that memory and does not pretend to. What it prevents is
+// OUR spikes landing on an already-full machine: the sponsor register lane
+// parses a 174MB JSON document, and doing that with under a gigabyte free is
+// how a run dies rather than slows.
+const SYS_FREE_CRITICAL_MB = 400;
+const SYS_FREE_LOW_MB = 1200;
+
 export interface PumpOptions {
   /** Upper bound on simultaneous work, before heap pressure lowers it. */
   concurrency: number;
@@ -100,6 +115,8 @@ export interface PumpOptions {
   shuffle?: boolean;
   /** Heap reading in MB. Injectable so a test can prove the pump reacts. */
   heapMB?: () => number;
+  /** Free SYSTEM memory in MB. Injectable for the same reason. */
+  sysFreeMB?: () => number;
 }
 
 /**
@@ -124,6 +141,15 @@ export async function pump(
   const conc = Math.max(1, opts.concurrency);
   const perHost = opts.perHost ?? {};
   const heapMB = opts.heapMB ?? (() => process.memoryUsage().heapUsed / 1_048_576);
+  // A caller simulating memory must not silently inherit the OTHER reading
+  // from the real machine: a test that injects a healthy heap started failing
+  // the moment this signal arrived, because the box it runs on genuinely had
+  // 0.97GB free. Injecting either signal means the caller is describing the
+  // memory situation, so the uninjected one reports "fine" rather than
+  // reaching for os.freemem().
+  const simulated = opts.heapMB !== undefined || opts.sysFreeMB !== undefined;
+  const sysFreeMB =
+    opts.sysFreeMB ?? (simulated ? () => Number.MAX_SAFE_INTEGER : () => freemem() / 1_048_576);
   // A cap of zero would leave its sources permanently unschedulable and the
   // pump waiting on work it can never start, so the floor is structural.
   const capOf = (host: string): number => Math.max(1, perHost[host] ?? conc);
@@ -134,8 +160,14 @@ export async function pump(
   // doubled the parallelism on the one path this branch exists to protect.
   const limitNow = (): number => {
     const mb = heapMB();
-    if (mb > HEAP_CRITICAL_MB) return 1;
-    if (mb > HEAP_HIGH_MB) return Math.max(1, Math.min(conc, Math.floor(conc / 2)));
+    const freeMB = sysFreeMB();
+    // Either signal can throttle; neither can raise the caller's bound. The
+    // system reading is checked first because it is the one that has ever
+    // been true here.
+    if (freeMB < SYS_FREE_CRITICAL_MB || mb > HEAP_CRITICAL_MB) return 1;
+    if (freeMB < SYS_FREE_LOW_MB || mb > HEAP_HIGH_MB) {
+      return Math.max(1, Math.min(conc, Math.floor(conc / 2)));
+    }
     return conc;
   };
 

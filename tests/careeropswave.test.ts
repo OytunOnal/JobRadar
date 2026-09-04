@@ -494,3 +494,28 @@ test("worker counts are derived from the host budget, not chosen", async () => {
   assert.equal(workersForHosts(100), 24);
   assert.equal(workersForHosts(100, 8), 8);
 });
+
+test("the pump backs off on SYSTEM memory, not only its own heap", async () => {
+  const { pump } = await import("../src/lib/ingest/fetch");
+  // Measured on the real machine mid-run: process heap 4MB, system free
+  // 0.97GB of 32GB. A control that watches only its own heap reports calm
+  // while the box is one allocation from swapping — Ollama holds an 18.5GB
+  // model resident, and the pressure is real even though it is not ours.
+  const sources = Array.from({ length: 6 }, (_, i) => ({ name: `s${i}`, fetch: async () => [] })) as any;
+  let peak = 0, live = 0;
+  const work = async () => {
+    live++; peak = Math.max(peak, live);
+    await new Promise((r) => setTimeout(r, 20));
+    live--;
+  };
+  await pump(sources, work, {
+    concurrency: 6,
+    heapMB: () => 4,            // our heap is fine
+    sysFreeMB: () => 300,       // the machine is not
+  });
+  assert.equal(peak, 1, `critical system memory must collapse to one, saw ${peak}`);
+
+  peak = 0;
+  await pump(sources, work, { concurrency: 6, heapMB: () => 4, sysFreeMB: () => 32_000 });
+  assert.ok(peak > 1, "a healthy machine keeps the caller's concurrency");
+});

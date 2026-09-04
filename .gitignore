@@ -34,4 +34,9 @@ prisma/dev.db.pre-layered-backup
 migrate-layered.log
 embed-fill.log
 config/settings.json
+# ...and any backup of it. A settings.json.bak slipped into a commit because
+# the pattern named one exact file: the app writes .bak beside its config, so
+# the ignore has to cover what the app actually produces, not one filename.
+config/settings.json.*
+config/*.bak
 .run/

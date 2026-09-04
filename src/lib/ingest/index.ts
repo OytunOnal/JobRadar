@@ -132,7 +132,17 @@ const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 20_000;
 // How much of that budget is reserved for the sponsor registers (#13). The
 // pool backlog gets the rest — and inherits anything the registers cannot
 // use, so a drained register never wastes budget.
-const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE) || 4_000;
+// PARKED AT ZERO pending review, and the measurement is why. The lane's first
+// full run probed 8,649 register names in 5.2 hours and found 28 boards —
+// 0.32%, against 9.3% for the pool backlog, or about eleven minutes of ingest
+// per board. It was 88% of a six-hour run for the least productive stage.
+//
+// The registers are not being demoted; they are already doing their real job.
+// 157,056 names drive isRegisteredSponsor, which is what puts sponsor? on a
+// posting — that is what they are for. #13's idea was to ALSO mine them for
+// ATS boards, and the number says that secondary use does not pay at this
+// price. Set REGISTER_PROBE_SLICE to reopen the lane.
+const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE ?? 0);
 // Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
@@ -696,7 +706,14 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
       // when the budget is the scarce thing.
       const registerSlice = Math.min(REGISTER_PROBE_SLICE, NAME_PROBE_MAX);
       const pool = await backlogNames(NAME_PROBE_MAX - registerSlice);
-      const registers = await registerNames(registerSlice + (NAME_PROBE_MAX - registerSlice - pool.length));
+      // The registers inherit whatever the pool could not use — but only when
+      // the slice is open at all. A zero slice means zero, otherwise turning
+      // the lane off would have handed it the ENTIRE budget the moment the
+      // pool backlog ran dry, which is exactly the state it is in tonight.
+      const registers =
+        registerSlice > 0
+          ? await registerNames(registerSlice + (NAME_PROBE_MAX - registerSlice - pool.length))
+          : [];
       const names = [...pool, ...registers];
       return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
     });

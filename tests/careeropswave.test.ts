@@ -388,3 +388,25 @@ test("every sponsor register is in the probe priority list, best-hit-rate first"
   assert.ok(REGISTER_ORDER.indexOf("cz") > REGISTER_ORDER.indexOf("nl"),
     "Czechia's bulk trails NL: strong sponsors, few ATS boards");
 });
+
+test("the validation queue round-robins across platforms", async () => {
+  // Boards are discovered in bulk, so the table clusters by platform: a real
+  // queue opened teamtailor, breezy, teamtailor, then 117 consecutive Workable
+  // boards out of 907. At concurrency 10 that is ten simultaneous requests to
+  // one host — the shape that earned a 429 with a fourteen-hour retry-after.
+  const { interleaveByPlatform } = await import("../src/lib/discovery/validate");
+  const clustered = [
+    { platform: "teamtailor", id: 1 },
+    { platform: "breezy", id: 2 },
+    ...Array.from({ length: 6 }, (_, i) => ({ platform: "workable", id: 10 + i })),
+  ];
+  const spread = interleaveByPlatform(clustered);
+  assert.equal(spread.length, clustered.length, "nothing is dropped");
+  // No two consecutive entries share a platform while another lane still has
+  // work — the burst only reappears once the shorter lanes are exhausted.
+  assert.deepEqual(spread.slice(0, 3).map((b) => b.platform), ["teamtailor", "breezy", "workable"]);
+  // Order WITHIN a platform is preserved, so the id-ascending walk still makes
+  // monotonic progress through each lane.
+  assert.deepEqual(spread.filter((b) => b.platform === "workable").map((b) => b.id), [10, 11, 12, 13, 14, 15]);
+  assert.deepEqual(interleaveByPlatform([]), []);
+});

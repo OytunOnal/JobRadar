@@ -75,6 +75,48 @@ const NAME_EXTRACTORS: Record<string, (body: any) => string | null | undefined> 
 // window is capped so a hostile header cannot retire a platform forever.
 const throttledUntil = new Map<string, number>();
 const MAX_THROTTLE_MS = 6 * 60 * 60 * 1_000;
+
+// THE THROTTLE WE KEPT HITTING WAS ONE WE EARNED.
+//
+// Boards are discovered in bulk, so the table clusters by platform: the first
+// 120 rows of a real validation queue read teamtailor, breezy, teamtailor,
+// then 117 consecutive Workable boards — out of 907 waiting. At concurrency
+// 10 that is ten simultaneous requests to a single host, sustained for the
+// length of the run, which is exactly the shape that earns a 429. Workable
+// answered one with retry-after 52,362 seconds — fourteen hours — and every
+// Workable board then sat unvalidated behind our own breaker.
+//
+// Honouring a 429 is right and stays. Provoking it was the bug. Two
+// corrections: the queue is interleaved so consecutive requests round-robin
+// across platforms, and no platform may have more than two probes in flight
+// however deep its share of the queue runs. Global concurrency is unchanged —
+// it now spreads across hosts instead of piling onto one.
+const PER_PLATFORM_INFLIGHT = 2;
+
+/** Round-robin the queue across platforms so bulk-discovered blocks do not
+ *  arrive at one host as a burst. Order within a platform is preserved. */
+export function interleaveByPlatform<T extends { platform: string }>(boards: T[]): T[] {
+  const lanes = new Map<string, T[]>();
+  for (const b of boards) {
+    const lane = lanes.get(b.platform);
+    if (lane) lane.push(b);
+    else lanes.set(b.platform, [b]);
+  }
+  const out: T[] = [];
+  const queues = [...lanes.values()];
+  let live = true;
+  while (live) {
+    live = false;
+    for (const q of queues) {
+      const next = q.shift();
+      if (next) {
+        out.push(next);
+        live = true;
+      }
+    }
+  }
+  return out;
+}
 const DEFAULT_THROTTLE_MS = 10 * 60 * 1_000;
 
 /** Which platforms are standing down, for the report. */
@@ -187,13 +229,26 @@ export async function runValidation(
   `;
 
   const report: ValidationReport = { checked: 0, active: 0, dead: 0, revived: 0, errors: 0 };
-  const queue = [...boards];
+  const queue = interleaveByPlatform(boards);
+  // In flight per platform, because the throttle we kept hitting was one we
+  // earned. See PER_PLATFORM_INFLIGHT.
+  const inFlight = new Map<string, number>();
 
   const workers = Array.from(
     { length: Math.min(opts.concurrency ?? 10, queue.length) },
     async () => {
       while (queue.length > 0) {
-        const b = queue.shift()!;
+        // Take the first board whose platform is under the per-host cap. If
+        // every waiting board belongs to a saturated platform, yield rather
+        // than spin — the queue is one host deep and the others are done.
+        const i = queue.findIndex((b) => (inFlight.get(b.platform) ?? 0) < PER_PLATFORM_INFLIGHT);
+        if (i === -1) {
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
+        }
+        const b = queue.splice(i, 1)[0]!;
+        inFlight.set(b.platform, (inFlight.get(b.platform) ?? 0) + 1);
+        try {
         const outcome = await probeBoard(b.platform, b.token, b.region, opts.fetchImpl ?? fetch);
         report.checked++;
         if (outcome.result === "error") {
@@ -216,6 +271,9 @@ export async function runValidation(
             companyName: outcome.companyName ?? b.companyName ?? titleizeToken(b.token),
           },
         });
+        } finally {
+          inFlight.set(b.platform, (inFlight.get(b.platform) ?? 1) - 1);
+        }
       }
     },
   );

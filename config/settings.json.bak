@@ -1,0 +1,519 @@
+{
+  "llm": {
+    "order": [
+      "ollama"
+    ],
+    "localModel": "qwen3.8:27b",
+    "disabled": []
+  },
+  "tracks": [
+    {
+      "key": "llm-agent-engineer",
+      "label": "LLM / AI Engineer",
+      "titleKeywords": [
+        "ai engineer",
+        "llm engineer",
+        "machine learning engineer",
+        "ml engineer",
+        "agent engineer",
+        "genai engineer",
+        "generative ai",
+        "applied ai",
+        "prompt engineer",
+        "ai developer"
+      ],
+      "bodyKeywords": [
+        "langgraph",
+        "langchain",
+        "multi-agent",
+        "agents",
+        "rag",
+        "tool use",
+        "function calling",
+        "prompt engineering",
+        "fine-tuning",
+        "distillation",
+        "ollama",
+        "quantization",
+        "inference",
+        "llm-as-judge",
+        "structured output",
+        "human-in-the-loop",
+        "fastapi",
+        "python"
+      ],
+      "searchVariants": {
+        "en": [
+          "ai engineer",
+          "llm engineer",
+          "machine learning engineer"
+        ],
+        "de": [
+          "ki engineer",
+          "ki-entwickler",
+          "machine learning engineer"
+        ],
+        "fr": [
+          "ingénieur ia",
+          "ingénieur machine learning"
+        ],
+        "es": [
+          "ingeniero de ia",
+          "ingeniero de machine learning"
+        ],
+        "it": [
+          "ingegnere ia",
+          "ai engineer"
+        ],
+        "pl": [
+          "inżynier ai",
+          "inżynier uczenia maszynowego"
+        ]
+      },
+      "seniority": {
+        "boost": [
+          "senior"
+        ],
+        "avoid": [
+          "staff",
+          "principal",
+          "head of",
+          "engineering manager",
+          "director",
+          "vp of"
+        ]
+      }
+    },
+    {
+      "key": "unity-game-developer",
+      "label": "Unity / Game Developer",
+      "titleKeywords": [
+        "unity developer",
+        "game developer",
+        "gameplay engineer",
+        "game programmer",
+        "unity engineer",
+        "mobile game",
+        "gameplay programmer",
+        "game engineer"
+      ],
+      "bodyKeywords": [
+        "unity",
+        "c#",
+        "gameplay",
+        "mobile",
+        "ios",
+        "android",
+        "webgl",
+        "shader",
+        "ui implementation",
+        "performance optimization",
+        "playable ads",
+        "live ops",
+        "casual games",
+        "game feel",
+        "multiplayer",
+        "console"
+      ],
+      "searchVariants": {
+        "en": [
+          "unity developer",
+          "game developer",
+          "gameplay programmer"
+        ],
+        "de": [
+          "unity entwickler",
+          "spieleentwickler"
+        ],
+        "fr": [
+          "développeur unity",
+          "développeur de jeux"
+        ],
+        "es": [
+          "desarrollador de juegos",
+          "programador unity"
+        ],
+        "it": [
+          "sviluppatore di giochi",
+          "sviluppatore unity"
+        ],
+        "pl": [
+          "programista gier",
+          "programista unity"
+        ]
+      },
+      "seniority": {
+        "boost": [
+          "senior",
+          "lead"
+        ],
+        "avoid": [
+          "principal",
+          "head of",
+          "engineering manager",
+          "director"
+        ]
+      }
+    },
+    {
+      "key": "fullstack-typescript-engineer",
+      "label": "Full-Stack / Backend (TS+Python)",
+      "titleKeywords": [
+        "full stack",
+        "fullstack",
+        "full-stack",
+        "backend engineer",
+        "backend developer",
+        "typescript developer",
+        "node.js developer",
+        "react developer",
+        "next.js",
+        "python developer",
+        "web engineer"
+      ],
+      "bodyKeywords": [
+        "typescript",
+        "react",
+        "next.js",
+        "node.js",
+        "express",
+        "fastapi",
+        "python",
+        "postgresql",
+        "prisma",
+        "supabase",
+        "redis",
+        "docker",
+        "ci/cd",
+        "rest api",
+        "websockets",
+        "serverless",
+        "sqlite",
+        "github actions"
+      ],
+      "searchVariants": {
+        "en": [
+          "full stack engineer",
+          "full stack developer",
+          "backend engineer"
+        ],
+        "de": [
+          "full-stack entwickler",
+          "softwareentwickler",
+          "backend entwickler"
+        ],
+        "fr": [
+          "développeur full-stack",
+          "développeur backend"
+        ],
+        "es": [
+          "desarrollador full stack",
+          "desarrollador backend"
+        ],
+        "it": [
+          "sviluppatore full stack",
+          "sviluppatore backend"
+        ],
+        "pl": [
+          "programista full stack",
+          "programista backend"
+        ]
+      },
+      "seniority": {
+        "boost": [
+          "senior"
+        ],
+        "avoid": [
+          "staff",
+          "principal",
+          "head of",
+          "engineering manager",
+          "director",
+          "vp of"
+        ]
+      }
+    },
+    {
+      "key": "technical-product-manager",
+      "label": "Technical PM / Producer",
+      "titleKeywords": [
+        "technical project manager",
+        "technical product manager",
+        "game producer",
+        "producer",
+        "project lead",
+        "technical program manager",
+        "product engineer"
+      ],
+      "bodyKeywords": [
+        "agile",
+        "scrum",
+        "roadmap",
+        "stakeholder",
+        "cross-functional",
+        "jira",
+        "milestone",
+        "coordination",
+        "release management",
+        "qa process",
+        "sprint planning",
+        "risk management",
+        "delivery"
+      ],
+      "searchVariants": {
+        "en": [
+          "technical project manager",
+          "technical product manager",
+          "game producer"
+        ],
+        "de": [
+          "technischer projektmanager",
+          "projektleiter"
+        ],
+        "fr": [
+          "chef de projet technique"
+        ],
+        "es": [
+          "jefe de proyecto técnico"
+        ],
+        "it": [
+          "project manager tecnico"
+        ],
+        "pl": [
+          "kierownik projektu technicznego"
+        ]
+      },
+      "seniority": {
+        "boost": [],
+        "avoid": [
+          "senior",
+          "staff",
+          "principal",
+          "head of",
+          "director",
+          "vp of"
+        ]
+      }
+    },
+    {
+      "key": "ai-evaluation-engineer",
+      "label": "AI Evaluation / Model QA",
+      "titleKeywords": [
+        "ai evaluation",
+        "model evaluation",
+        "evals engineer",
+        "evaluation engineer",
+        "model validation",
+        "benchmark engineer",
+        "ai quality",
+        "red team",
+        "llm qa",
+        "ai qa",
+        "model qa"
+      ],
+      "bodyKeywords": [
+        "evaluation harness",
+        "golden set",
+        "llm-as-judge",
+        "benchmark",
+        "held-out",
+        "a/b testing",
+        "regression testing",
+        "seeded defects",
+        "metrics",
+        "human-in-the-loop",
+        "annotation",
+        "walk-forward validation",
+        "confidence intervals"
+      ],
+      "searchVariants": {
+        "en": [
+          "ai evaluation engineer",
+          "model evaluation engineer",
+          "evals engineer"
+        ]
+      },
+      "seniority": {
+        "boost": [
+          "senior"
+        ],
+        "avoid": [
+          "staff",
+          "principal",
+          "head of",
+          "engineering manager",
+          "director",
+          "vp of"
+        ]
+      }
+    },
+    {
+      "key": "general-data",
+      "label": "General Data / ML Science",
+      "titleKeywords": [
+        "data scientist",
+        "data analyst",
+        "data engineer",
+        "machine learning",
+        "ml scientist",
+        "research scientist",
+        "analytics engineer",
+        "bi analyst",
+        "business intelligence",
+        "statistician",
+        "researcher",
+        "scientist",
+        "analyst",
+        "analist"
+      ],
+      "bodyKeywords": [
+        "langgraph",
+        "langchain",
+        "multi-agent",
+        "agents",
+        "rag",
+        "tool use",
+        "function calling",
+        "prompt engineering",
+        "fine-tuning",
+        "distillation",
+        "ollama",
+        "quantization",
+        "inference",
+        "llm-as-judge",
+        "structured output",
+        "human-in-the-loop",
+        "fastapi",
+        "python"
+      ]
+    },
+    {
+      "key": "general-engineering",
+      "label": "General Software Engineering",
+      "titleKeywords": [
+        "developer",
+        "engineer",
+        "programmer",
+        "architect",
+        "swe",
+        "sde",
+        "backend",
+        "back-end",
+        "back end",
+        "frontend",
+        "front-end",
+        "front end",
+        "devops",
+        "sre",
+        "coder",
+        "dev ",
+        "entwickler",
+        "ingenieur",
+        "informatiker",
+        "ontwikkelaar",
+        "développeur",
+        "developpeur",
+        "ingénieur",
+        "ingenieur logiciel",
+        "desarrollador",
+        "programador",
+        "ingeniero",
+        "engenheiro",
+        "programista",
+        "inżynier",
+        "inzynier",
+        "sviluppatore",
+        "ingegnere",
+        "utvecklare",
+        "udvikler",
+        "utvikler",
+        "kehittäjä",
+        "tech lead",
+        "technical lead",
+        "member of technical staff",
+        "softwareentwicklung",
+        "webentwicklung",
+        "spieleentwicklung",
+        "it-spezialist",
+        "application development",
+        "software development",
+        "web development",
+        "anwendungsentwicklung",
+        "fachinformatiker",
+        "informática",
+        "informático",
+        "ai specialist",
+        "ai consultant",
+        "ml consultant",
+        "ai/ml",
+        "data consultant",
+        "software consultant",
+        "it consultant",
+        "it-consultant"
+      ],
+      "bodyKeywords": [
+        "langgraph",
+        "langchain",
+        "multi-agent",
+        "agents",
+        "rag",
+        "tool use",
+        "function calling",
+        "prompt engineering",
+        "fine-tuning",
+        "distillation",
+        "ollama",
+        "quantization",
+        "inference",
+        "llm-as-judge",
+        "structured output",
+        "human-in-the-loop",
+        "fastapi",
+        "python"
+      ]
+    },
+    {
+      "key": "general-product",
+      "label": "General Product Management",
+      "titleKeywords": [
+        "product manager",
+        "product owner",
+        "product lead",
+        "head of product",
+        "cpo",
+        "product director",
+        "program manager",
+        "project manager",
+        "delivery manager",
+        "scrum master",
+        "produktmanager",
+        "projektmanager",
+        "projektleiter",
+        "projektleitung",
+        "chef de projet",
+        "kierownik projektu"
+      ],
+      "bodyKeywords": [
+        "langgraph",
+        "langchain",
+        "multi-agent",
+        "agents",
+        "rag",
+        "tool use",
+        "function calling",
+        "prompt engineering",
+        "fine-tuning",
+        "distillation",
+        "ollama",
+        "quantization",
+        "inference",
+        "llm-as-judge",
+        "structured output",
+        "human-in-the-loop",
+        "fastapi",
+        "python"
+      ]
+    }
+  ],
+  "updatedAt": "2026-09-04T10:34:33.307Z"
+}

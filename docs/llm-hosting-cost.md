@@ -379,3 +379,28 @@ every judgement. That reorders the options independently of price:
 
 The cheapest option that clears both bars is no longer obviously the cheapest
 option overall, and that is the honest state of this analysis.
+
+## Owner's decision, 2026-09-04: the CV leaving the machine is acceptable
+
+The correction above raised data handling to a first-order constraint, on the
+grounds that every judge call carries the user's full CV. The user has since
+ruled that this does not matter to them. It is their CV and their call, so the
+privacy filter comes off the tables.
+
+What that changes, concretely:
+
+  * **StepFun is no longer disqualified.** It was ruled out for stating it may
+    train on inputs with no opt-out, while being the cheapest open-weight
+    option in the survey. It returns to the comparison on price and quality
+    alone — where it remains unverified against the 27B floor, which is a
+    different objection and still stands.
+  * **Free tiers that train on inputs are usable**, which matters because
+    their binding limit was always requests-per-day rather than price.
+  * **Alibaba's "we will never use your data for training" stops being worth
+    paying a premium for.** It is still a genuine differentiator, just not one
+    that buys anything here.
+
+What it does NOT change: self-hosting on a rented GPU still wins on cost at
+this duty cycle, and the "Preview / not for production" label on the
+exact-match models at Cerebras and Groq is an availability risk, not a privacy
+one. Those two arguments were never about the CV.

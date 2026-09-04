@@ -92,6 +92,17 @@ export function settingsStamp(): string {
 }
 
 export function loadSettings(): Settings {
+  // Hermetic tests must score against the BUILT-IN default profile, not
+  // whatever tracks this machine's profile page last saved. Without this the
+  // scoring suite is coupled to mutable user config: the same commit passed
+  // 598 tests before a track reorder and 593 after it, with no code changed.
+  // Same reasoning, and the same guard, as loadCv().
+  //
+  // Only the UNREDIRECTED path is refused. A suite that points
+  // JOBRADAR_SETTINGS_PATH at its own temp file is testing this loader and
+  // must get the real one -- the first version of this guard skipped that too
+  // and broke the settings suite it was meant to leave alone.
+  if (process.env.NODE_TEST_CONTEXT && !process.env.JOBRADAR_SETTINGS_PATH) return {};
   const path = settingsPath();
   const stamp = fileStamp(path);
   if (cache !== null && stamp === cachedStamp) return cache;

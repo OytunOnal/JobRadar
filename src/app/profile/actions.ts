@@ -92,11 +92,25 @@ export async function saveTrack(formData: FormData): Promise<void> {
   revalidatePath("/profile");
 }
 
-export async function moveTrack(formData: FormData): Promise<void> {
+// Arguments are BOUND, not read from the form, and that is load-bearing.
+//
+// The direction used to travel as `name="dir" value="up"` on the button. But a
+// submit button carrying formAction={serverAction} already has its name spoken
+// for: React puts the action id there ($ACTION_ID_...) so a native submit knows
+// which action to run. Ours overwrote it, the server rendered $ACTION_ID and
+// the client wanted "dir", and React reported the mismatch as one it "won't
+// patch up".
+//
+// The failure was silent and asymmetric. `dir` arrived null, String(null) is
+// never "up", so EVERY arrow meant down: the last row's up-arrow computed an
+// out-of-range index and returned without writing (the click that "did
+// nothing"), while a middle row's up-arrow moved the track DOWN — a reorder
+// the user never asked for, on a setting where order decides which track wins
+// a posting's label.
+export async function moveTrack(key: string, direction: "up" | "down"): Promise<void> {
   // Order is load-bearing: on an equal score the earlier track wins the job's
   // label, so "most specific first" is a real setting, not cosmetics.
-  const key = String(formData.get("key"));
-  const dir = String(formData.get("dir")) === "up" ? -1 : 1;
+  const dir = direction === "up" ? -1 : 1;
   const tracks = [...profile.tracks];
   const i = tracks.findIndex((t) => t.key === key);
   const j = i + dir;

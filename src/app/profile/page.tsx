@@ -140,9 +140,9 @@ export default async function ProfilePage() {
               </div>
               <div className="actions">
                 <button className="btn act" type="submit">save</button>
-                <button className="btn quiet" formAction={moveTrack} name="dir" value="up" disabled={i === 0}>▲</button>
-                <button className="btn quiet" formAction={moveTrack} name="dir" value="down" disabled={i === profile.tracks.length - 1}>▼</button>
-                <button className="btn quiet" formAction={removeTrack}>delete</button>
+                <button className="btn quiet" type="submit" formAction={moveTrack.bind(null, t.key, "up")} disabled={i === 0}>▲</button>
+                <button className="btn quiet" type="submit" formAction={moveTrack.bind(null, t.key, "down")} disabled={i === profile.tracks.length - 1}>▼</button>
+                <button className="btn quiet" type="submit" formAction={removeTrack}>delete</button>
               </div>
             </form>
           );

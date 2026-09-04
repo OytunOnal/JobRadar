@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mapHit } from "../src/lib/sources/sweden";
 import { buildSearchUrl as dkUrl, mapAd } from "../src/lib/sources/denmark";
-import { parseAd, cardToRawJob } from "../src/lib/sources/switzerland";
 
 // ── Sweden (JobTech) ─────────────────────────────────────────────────────────
 
@@ -60,26 +59,3 @@ test("denmark search URL: newest-first, 1-indexed pages", () => {
 
 // ── Switzerland (Job-Room) ───────────────────────────────────────────────────
 
-test("switzerland parseAd: strips <em> highlights, externalUrl wins", () => {
-  const card = parseAd({
-    jobAdvertisement: {
-      id: "3f39419d",
-      publication: { startDate: "2026-08-04" },
-      jobContent: {
-        jobDescriptions: [{ title: "Head of <em>Software</em> Development", description: "Wir suchen…" }],
-        company: { name: "Semax AG" },
-        location: { city: "Cham" },
-        externalUrl: "https://www.jobs.ch/de/x/",
-      },
-    },
-  })!;
-  assert.equal(card.title, "Head of Software Development");
-  assert.equal(card.location, "Cham, Switzerland");
-  const job = cardToRawJob(card, "full text");
-  assert.equal(job.url, "https://www.jobs.ch/de/x/");
-  assert.equal(job.description, "full text");
-  // No externalUrl → the Job-Room page:
-  const bare = parseAd({ jobAdvertisement: { id: "abc", jobContent: { jobDescriptions: [{ title: "T" }] } } })!;
-  assert.ok(cardToRawJob(bare).url.includes("job-room.ch/job-search/abc"));
-  assert.equal(parseAd({ jobAdvertisement: { jobContent: {} } }), null);
-});

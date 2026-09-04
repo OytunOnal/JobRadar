@@ -85,3 +85,28 @@ to say so.
 **No employer-level permit data exists.** SEM publishes aggregate statistics
 only, and opendata.swiss carries nothing below permit-type/canton/nationality
 level. Switzerland publishes no UK/NL/IE/PT-style sponsor register.
+
+## Job-Room retired, 2026-09-04
+
+The deep pass recorded that Job-Room is deliberately not ingested, and that
+was written while `src/lib/sources/switzerland.ts` had been ingesting it for
+weeks — through the very endpoint the note declined,
+`job-room.ch/jobadservice/api/jobAdvertisements/_search`. The scan checked
+whether the agent's find was NEW; it never checked whether we already had it.
+
+`job-room.ch/robots.txt` is 174 bytes and opens `# Do not crawl Job Adverts`,
+then disallows `/job-search/`. The API path is not named, but pulling the
+advert corpus through the SPA's own endpoint is what that sentence forbids,
+reached another way. We honour that rule elsewhere without argument —
+Tecnoempleo, JobFluent, cyprusjobs.com, TheLocal.se, Le Forem — and several of
+those bans are less explicit than this one.
+
+So the rule stands and the source goes: the adapter is deleted, its desc:fill
+branch and preview-source entry with it, and the 273 stored postings are
+removed (none had been applied to). Switzerland keeps jobs.ch and jobup.ch,
+which declare their sitemaps and ask only that we leave `/api/` alone.
+
+Worth stating plainly because it is the uncomfortable half: a policy that only
+gets applied to new candidates is not a policy. This one had been true on
+paper and false in the ingest list, and nothing would have surfaced that if a
+title-only row from `ch-jobroom` had not turned up in a queue diagnostic.

@@ -159,12 +159,18 @@ test("no connector scores a posting or keeps a copy of the store gate", () => {
   assert.deepEqual(offenders, [], "the store gate is derive.ts's: " + offenders.join(", "));
 });
 
-test("the four sources that deferred their bodies are in desc:fill's queue", () => {
+test("every source that defers its body is in desc:fill's queue", () => {
   // Removing the in-connector detail fetch is only half the change; if the
   // backfill does not claim those sources, the postings simply never get a
   // body. Both halves or neither.
+  //
+  // Was four sources; ch-jobroom left with the Job-Room adapter, retired
+  // because job-room.ch's robots.txt opens "# Do not crawl Job Adverts" and
+  // we had been reading it anyway. The list shrinks when a source goes — what
+  // must not happen is a source deferring bodies that desc:fill cannot fetch.
   const src = readFileSync(join("scripts", "backfill", "desc-fill.ts"), "utf8");
-  for (const s of ["arbeitsagentur", "ch-jobroom", "manfred", "linkedin"]) {
+  for (const s of ["arbeitsagentur", "manfred", "linkedin"]) {
     assert.ok(src.includes(`"${s}"`), `${s} must appear in desc-fill`);
   }
+  assert.ok(!src.includes("ch-jobroom"), "a retired source must not linger in the backfill");
 });

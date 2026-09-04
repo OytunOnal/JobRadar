@@ -14,7 +14,6 @@ import { arbeitsagentur } from "../sources/arbeitsagentur";
 import { eures } from "../sources/eures";
 import { sweden } from "../sources/sweden";
 import { denmark } from "../sources/denmark";
-import { switzerland } from "../sources/switzerland";
 import { hn } from "../sources/hn";
 import { landingjobs } from "../sources/landingjobs";
 import { swissdevjobs } from "../sources/swissdevjobs";
@@ -171,7 +170,6 @@ export const aggregators: Source[] = [
   eures,          // EU official portal: werk.nl/SEPE/IEFP/France Travail content
   sweden,         // Arbetsförmedlingen JobTech API, keyless
   denmark,        // Jobnet BFF API, keyless (Cloudflare-tolerant)
-  switzerland,    // SECO Job-Room API, keyless; de+fr titles
   hn,             // monthly "Ask HN: Who is hiring?" via Algolia; ATS links feed harvest
   landingjobs,    // Landing.Jobs (PT-centric, relocation flag), keyless
   swissdevjobs,   // SwissDevJobs: structured visa/workMode/salary, keyless

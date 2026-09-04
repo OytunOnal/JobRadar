@@ -23,7 +23,6 @@ import { andWhere, openWhere } from "../../src/lib/queue/pool";
 import { chunkFromArgs, chunkWhere } from "../../src/lib/queue/chunks";
 import { VISA_MARKED } from "../../src/lib/visa/visa";
 import { fetchDetail as baDetail } from "../../src/lib/sources/arbeitsagentur";
-import { fetchDetail as chDetail } from "../../src/lib/sources/switzerland";
 import { fetchDetailSections as manfredSections } from "../../src/lib/sources/manfred";
 import { fetchNoFluffDetail } from "../../src/lib/sources/poland";
 import { fetchVisaJobsIeDetail } from "../../src/lib/sources/visajobsie";
@@ -193,8 +192,6 @@ export async function fetchDescription(source: string, externalId: string, url: 
     // where a budget and a per-platform circuit breaker already exist.
     case "arbeitsagentur":
       return (await baDetail(externalId)).description ?? "";
-    case "ch-jobroom":
-      return (await chDetail(externalId)) ?? "";
     case "manfred":
       // Manfred names every block; assembled here, through the same helper
       // every other named source in this switch goes through.
@@ -212,7 +209,7 @@ export async function fetchDescription(source: string, externalId: string, url: 
 
 // Prefixes, because an ATS source is "<platform>:<token>". The last four are
 // whole source names: aggregators whose detail fetching moved here.
-const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "ch-jobroom", "manfred", "linkedin", "nofluffjobs", "huntukvisa", "visajobsie", "spainjobsio", "nav-no"];
+const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join:", "rippling:", "gem:", "oracle:", "sf:", "beesite:", "radancy:", "softgarden:", "avature:", "csod:", "phenom:", "personio:", "arbeitsagentur", "manfred", "linkedin", "nofluffjobs", "huntukvisa", "visajobsie", "spainjobsio", "nav-no"];
 
 // A body short enough that the source is still holding the real one.
 //
@@ -220,7 +217,7 @@ const PLATFORMS = ["sr:", "workday:", "workable:", "bamboohr:", "breezy:", "join
 // character preview and BA ships nothing at all, so a preview reads as a real
 // body by length while being a tenth of one. Nor does the flat test, because
 // ingest stamps the current TEXT_VERSION on every write.
-const PREVIEW_SOURCES = new Set(["arbeitsagentur", "ch-jobroom", "manfred", "linkedin"]);
+const PREVIEW_SOURCES = new Set(["arbeitsagentur", "manfred", "linkedin"]);
 const PREVIEW_MAX = 600;
 
 // The backfill runs only when this file is the entry point. Without the

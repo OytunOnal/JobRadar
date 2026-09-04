@@ -261,3 +261,45 @@ room to move the *queue's* real number are prefix caching (shrinking the prefill
 noted) and batching (raising aggregate tok/s across concurrent calls, unverified magnitude for this exact
 config) — everything else is a small, uncertain multiplier on top of a ceiling this setup is likely
 already close to.
+
+## Measured on the actual machine, 2026-09-04
+
+Both levers this file recommended were tested directly. **Neither works here**,
+and the measurement that matters most was one nobody proposed.
+
+**Prefix caching: does not reuse, and would not have mattered.** Three calls
+sharing an identical 1,742-token CV prefix each report `prompt_eval_count`
+1,712 — no token-level reuse, confirming this file's warning that the model's
+hybrid attention breaks it. But the more useful number arrived alongside:
+prefill runs at **3,852 tok/s**, finishing 1,722 tokens in 447ms, against
+**12.7 tok/s** for generation. Prefill is under 3% of a call. A working prefix
+cache would have bought us almost nothing, so the architecture caveat cost
+nothing either.
+
+**OLLAMA_NUM_PARALLEL: no effect at all.** Aggregate throughput is flat across
+concurrency, before and after setting it to 4:
+
+  1 concurrent → 11.8 tok/s   2 → 11.8   4 → 11.9   (default)
+  1 concurrent → 11.6 tok/s   2 → 11.9   4 → 11.7   (NUM_PARALLEL=4)
+
+Wall time scales exactly linearly with request count, which is serialisation.
+Ollama almost certainly declines to open parallel slots: with 2.5GB of an
+18.5GB model in VRAM and ~1GB of system memory free, there is nowhere to put a
+second sequence's KV cache. The variable was reverted rather than left set,
+since an env var that changes nothing is debt.
+
+**The machine's real number: ~11.8 tok/s, and 20.3 seconds per judgement**
+(1,722-token prompt, 250 generated). Note this file's earlier estimate of a
+1.3-4.6 tok/s bandwidth ceiling was pessimistic by roughly 3x — the ceiling is
+real, the arithmetic behind that figure was not tight.
+
+**The finding nobody was looking for.** The first attempt at these
+measurements ran with the background worker still going, and the same call
+that takes 470ms alone took 25-94 seconds. Ollama serialises, so every other
+LLM consumer queues behind the worker: **50-180x added latency**, which is the
+84% worker slowdown seen from the other side and far larger than it looked
+from there.
+
+So the honest capacity statement for this laptop: **~4,100 judgements a day if
+it ran flat out**, against a queue of 106,140 judge and facts items — 26 days
+of continuous compute, and no configuration change on this page moves it.

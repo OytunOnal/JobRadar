@@ -120,6 +120,25 @@ export function hostStats(): HostStat[] {
     .sort((a, b) => b.waitMs - a.waitMs);
 }
 
+/**
+ * How many workers a lane should run to USE the gate's allowance without
+ * exceeding it: distinct hosts times the per-host cap.
+ *
+ * This is the sizing rule the worker counts in this project never had. They
+ * were inherited defaults — validation ran ten because ten was what it had
+ * always run — and once the gate became the real limit those numbers stopped
+ * meaning anything on their own. Too many workers queue at the gate (visible
+ * now as host queueing in the report); too few leave the allowance unspent,
+ * which is what the name probe was doing when it walked names one at a time
+ * across nine platforms.
+ *
+ * Bounded, because a queue spanning a hundred hosts does not justify two
+ * hundred workers on one machine.
+ */
+export function workersForHosts(distinctHosts: number, max = 24): number {
+  return Math.max(1, Math.min(max, distinctHosts * MAX_IN_FLIGHT));
+}
+
 /** Tests only: forget every host's budget. */
 export function resetHostGate(): void {
   hosts.clear();

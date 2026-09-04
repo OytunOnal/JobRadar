@@ -1,5 +1,5 @@
 import { prisma } from "../db";
-import { withHost } from "../net/hostgate";
+import { withHost, workersForHosts } from "../net/hostgate";
 import { getPlatform } from "./platforms";
 
 // Validation runner: probes AtsBoard candidates against the registry's
@@ -81,18 +81,23 @@ const MAX_THROTTLE_MS = 6 * 60 * 60 * 1_000;
 //
 // Boards are discovered in bulk, so the table clusters by platform: the first
 // 120 rows of a real validation queue read teamtailor, breezy, teamtailor,
-// then 117 consecutive Workable boards — out of 907 waiting. At concurrency
-// 10 that is ten simultaneous requests to a single host, sustained for the
-// length of the run, which is exactly the shape that earns a 429. Workable
-// answered one with retry-after 52,362 seconds — fourteen hours — and every
-// Workable board then sat unvalidated behind our own breaker.
+// then 117 consecutive Workable boards — out of 907 waiting. Ten workers on
+// that queue meant ten simultaneous requests to a single host, which is the
+// shape that earns a 429; Workable answered one with retry-after 52,362
+// seconds and every Workable board then sat behind our own breaker.
 //
-// Honouring a 429 is right and stays. Provoking it was the bug. Two
-// corrections: the queue is interleaved so consecutive requests round-robin
-// across platforms, and no platform may have more than two probes in flight
-// however deep its share of the queue runs. Global concurrency is unchanged —
-// it now spreads across hosts instead of piling onto one.
-const PER_PLATFORM_INFLIGHT = 2;
+// PER-HOST LIMITS NOW LIVE IN ONE PLACE. This module used to keep its own
+// in-flight counter, which was right until the ingest ran lanes concurrently
+// — at which point board validation and the name probe each enforced a
+// private budget on the SAME hosts and a server saw the sum. net/hostgate.ts
+// holds the single budget; the count that used to be here would now be a
+// second opinion, and two places answering "how much may this host take" is
+// exactly the drift this project keeps having to undo.
+//
+// What stays here is the part the gate cannot do: ORDER. Interleaving spreads
+// the queue across platforms so workers find work on many hosts instead of
+// queueing behind one, which is what lets the gate's allowance actually get
+// used rather than merely respected.
 
 /** Round-robin the queue across platforms so bulk-discovered blocks do not
  *  arrive at one host as a burst. Order within a platform is preserved. */
@@ -255,39 +260,23 @@ export async function runValidation(
   const report: ValidationReport = { checked: 0, active: 0, dead: 0, revived: 0, errors: 0 };
   report.skipped = boards.length - probeable.length;
   const queue = interleaveByPlatform(probeable);
-  // In flight per platform, because the throttle we kept hitting was one we
-  // earned. See PER_PLATFORM_INFLIGHT.
-  const inFlight = new Map<string, number>();
 
+  // Sized from the gate rather than from habit: enough workers to use every
+  // host's allowance, never more than the queue has work for. The old default
+  // was ten — which under-served a queue spanning nine platforms (18 slots)
+  // and over-served the Workable-dominated one (2), in the same run.
+  const distinctHosts = new Set(queue.map((b) => b.platform)).size;
   const workers = Array.from(
-    { length: Math.min(opts.concurrency ?? 10, queue.length) },
+    { length: Math.min(opts.concurrency ?? workersForHosts(distinctHosts), queue.length) },
     async () => {
-      let idleWaits = 0;
       while (queue.length > 0) {
-        // Take the first board whose platform is under the per-host cap.
-        //
-        // WHEN THE TAIL IS ONE PLATFORM, THIS RUN DELIBERATELY NARROWS. A
-        // queue that ends in 907 Workable boards has two slots, so eight of
-        // ten workers find nothing and wait. That is the cap doing its job,
-        // not a stall: the whole point is that one host never sees more than
-        // PER_PLATFORM_INFLIGHT of us, and the price is that the tail runs at
-        // that width — 907 boards at two in flight is about seven minutes,
-        // against a fourteen-hour throttle if we take the other road.
-        //
-        // Waiting rather than exiting, because slots do free: the in-flight
-        // probes carry their own timeout, so a worker that waits will get one.
-        // The backoff grows to 250ms so eight idle workers polling through a
-        // long single-platform tail cost almost nothing.
-        const i = queue.findIndex((b) => (inFlight.get(b.platform) ?? 0) < PER_PLATFORM_INFLIGHT);
-        if (i === -1) {
-          idleWaits++;
-          await new Promise((r) => setTimeout(r, Math.min(50 * idleWaits, 250)));
-          continue;
-        }
-        idleWaits = 0;
-        const b = queue.splice(i, 1)[0]!;
-        inFlight.set(b.platform, (inFlight.get(b.platform) ?? 0) + 1);
-        try {
+        // Straight off the front: the queue is already interleaved across
+        // platforms, and net/hostgate.ts decides what any one host will take.
+        // A worker that lands on a saturated host waits INSIDE the gate, in
+        // arrival order, rather than spinning here — which is also why the
+        // wait shows up as host queueing in the report instead of vanishing
+        // into a stage's elapsed time.
+        const b = queue.shift()!;
         const outcome = await probeBoard(b.platform, b.token, b.region, opts.fetchImpl ?? fetch);
         report.checked++;
         if (outcome.result === "error") {
@@ -310,9 +299,6 @@ export async function runValidation(
             companyName: outcome.companyName ?? b.companyName ?? titleizeToken(b.token),
           },
         });
-        } finally {
-          inFlight.set(b.platform, (inFlight.get(b.platform) ?? 1) - 1);
-        }
       }
     },
   );

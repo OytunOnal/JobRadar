@@ -480,3 +480,17 @@ test("the gate reports queueing separately from work", async () => {
   assert.ok(solo.waitMs < 50, `uncontended host should not report queueing, got ${solo.waitMs}`);
   resetHostGate();
 });
+
+test("worker counts are derived from the host budget, not chosen", async () => {
+  const { workersForHosts } = await import("../src/lib/net/hostgate");
+  // Enough workers to spend every host's allowance: hosts x per-host cap.
+  // The inherited default of ten under-served a nine-host queue (18 slots)
+  // and over-served a one-host queue (2) — in the same run.
+  assert.equal(workersForHosts(9), 18);
+  assert.equal(workersForHosts(1), 2);
+  // A queue with no distinct hosts still gets a worker, or it never drains.
+  assert.equal(workersForHosts(0), 1);
+  // Bounded: a hundred hosts does not justify two hundred workers on one box.
+  assert.equal(workersForHosts(100), 24);
+  assert.equal(workersForHosts(100, 8), 8);
+});

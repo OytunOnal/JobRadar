@@ -428,3 +428,34 @@ test("a platform standing down is dropped from the queue, not probed and counted
   assert.equal(probeable.length, 2, "the blocked platform's boards are left for next run");
   assert.deepEqual(interleaveByPlatform(probeable).map((b) => b.platform), ["greenhouse", "ashby"]);
 });
+
+test("the host gate is one budget per host, whoever asks", async () => {
+  const { withHost, hostKey, resetHostGate } = await import("../src/lib/net/hostgate");
+  resetHostGate();
+  // Tenant subdomains and the platform's own API are one operator, so they
+  // share a budget: this is what stops name-probe and validation from each
+  // spending a full allowance on greenhouse at the same time.
+  assert.equal(hostKey("https://acme.recruitee.com/api/offers"), "recruitee.com");
+  assert.equal(hostKey("https://boards-api.greenhouse.io/v1/x"), "greenhouse.io");
+  // Two-part public suffixes keep three labels, or every .co.uk site would
+  // share one budget with every other.
+  assert.equal(hostKey("https://jobs.example.co.uk/x"), "example.co.uk");
+
+  let peak = 0, live = 0;
+  const task = () => withHost("https://one.example.com/x", async () => {
+    live++; peak = Math.max(peak, live);
+    await new Promise((r) => setTimeout(r, 30));
+    live--;
+  });
+  // Ten callers, one host: the gate holds concurrency at the cap regardless of
+  // how many lanes ask. The default is 2.
+  await Promise.all(Array.from({ length: 10 }, task));
+  assert.ok(peak <= 2, `host saw ${peak} at once`);
+  assert.equal(live, 0, "every slot is released, including on the error path");
+
+  // A throwing body must not leak its slot — otherwise one bad host silently
+  // shrinks its own budget to zero for the rest of the run.
+  await assert.rejects(withHost("https://two.example.com/x", async () => { throw new Error("boom"); }));
+  await withHost("https://two.example.com/x", async () => "fine");
+  resetHostGate();
+});

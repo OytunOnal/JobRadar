@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { withHost } from "../net/hostgate";
 import { liveWhere } from "../queue/pool";
 import { parseJoinState } from "../sources/ats/join";
 import { probeBoard } from "./validate";
@@ -101,10 +102,8 @@ const PROBE_PAUSE_MS = Number(process.env.PROBE_PAUSE_MS) || 400;
 // live-posting requirement needs one extra call for greenhouse hits only.
 async function manatalJobCount(token: string): Promise<number> {
   try {
-    const res = await fetch(
-      `https://www.careers-page.com/api/v1.0/c/${encodeURIComponent(token)}/jobs/?page=1&page_size=1`,
-      { signal: AbortSignal.timeout(10_000) },
-    );
+    const url = `https://www.careers-page.com/api/v1.0/c/${encodeURIComponent(token)}/jobs/?page=1&page_size=1`;
+    const res = await withHost(url, () => fetch(url, { signal: AbortSignal.timeout(10_000) }));
     if (!res.ok) return 0;
     const data = await res.json();
     return typeof data?.count === "number" ? data.count : 0;
@@ -115,9 +114,8 @@ async function manatalJobCount(token: string): Promise<number> {
 
 async function greenhouseJobCount(token: string): Promise<number> {
   try {
-    const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${token}/jobs`, {
-      signal: AbortSignal.timeout(10_000),
-    });
+    const url = `https://boards-api.greenhouse.io/v1/boards/${token}/jobs`;
+    const res = await withHost(url, () => fetch(url, { signal: AbortSignal.timeout(10_000) }));
     if (!res.ok) return 0;
     const data = await res.json();
     return Array.isArray(data?.jobs) ? data.jobs.length : 0;
@@ -146,12 +144,20 @@ export type HtmlProbeFn = (url: string) => Promise<{ status: number; text: strin
 
 const defaultHtmlProbe: HtmlProbeFn = async (url) => {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "JobRadar/0.1 (personal job search)" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10_000),
+    // Read the body INSIDE the gate: a response held open while its bytes
+    // arrive is still occupying the host, and releasing the slot at headers
+    // would let the next request start on top of it. (The archive lane learned
+    // this the hard way — politeText exists because a mid-body abort threw
+    // away thirteen domain-pages of work.)
+    const res = await withHost(url, async () => {
+      const r = await fetch(url, {
+        headers: { "User-Agent": "JobRadar/0.1 (personal job search)" },
+        redirect: "follow",
+        signal: AbortSignal.timeout(10_000),
+      });
+      return { status: r.status, text: r.status === 200 ? await r.text() : "" };
     });
-    return { status: res.status, text: res.status === 200 ? await res.text() : "" };
+    return res;
   } catch {
     return null;
   }

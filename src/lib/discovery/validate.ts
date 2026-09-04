@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { withHost } from "../net/hostgate";
 import { getPlatform } from "./platforms";
 
 // Validation runner: probes AtsBoard candidates against the registry's
@@ -158,7 +159,11 @@ export async function probeBoard(
 
   let res: Response;
   try {
-    res = await fetchImpl(url, makeInit());
+    // Through the shared host gate: board validation and the name probe hit
+    // the SAME platform hosts, so once they run as concurrent lanes their
+    // separate limits would sum on one server. One budget per host, whoever
+    // asks.
+    res = await withHost(url, () => fetchImpl(url, makeInit()));
   } catch {
     return { result: "error" };
   }

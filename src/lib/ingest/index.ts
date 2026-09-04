@@ -132,17 +132,15 @@ const VALIDATE_MAX = Number(process.env.VALIDATE_MAX) || 20_000;
 // How much of that budget is reserved for the sponsor registers (#13). The
 // pool backlog gets the rest — and inherits anything the registers cannot
 // use, so a drained register never wastes budget.
-// PARKED AT ZERO pending review, and the measurement is why. The lane's first
-// full run probed 8,649 register names in 5.2 hours and found 28 boards —
-// 0.32%, against 9.3% for the pool backlog, or about eleven minutes of ingest
-// per board. It was 88% of a six-hour run for the least productive stage.
+// REOPENED, once the lanes made it affordable. Closing it was the wrong fix:
+// the lane's 5.2 hours for 28 boards was a SCHEDULING cost, not a value
+// judgement — it was 88% of a serial run, so everything else waited behind it.
+// Now it shares a run with the GPU and archive lanes and holds up nothing, and
+// every hit is a company whose sponsorship is a matter of public record.
 //
-// The registers are not being demoted; they are already doing their real job.
-// 157,056 names drive isRegisteredSponsor, which is what puts sponsor? on a
-// posting — that is what they are for. #13's idea was to ALSO mine them for
-// ATS boards, and the number says that secondary use does not pay at this
-// price. Set REGISTER_PROBE_SLICE to reopen the lane.
-const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE ?? 0);
+// The budget is a slice of the name-probe allowance, and the allowance itself
+// is what a server's day can hold rather than what a laptop burst could.
+const REGISTER_PROBE_SLICE = Number(process.env.REGISTER_PROBE_SLICE ?? 8_000);
 // Name-probe misses deep-checked per ingest (tier 5: website -> careers scan).
 const DEEP_PROBE_MAX = Number(process.env.DEEP_PROBE_MAX) || 6;
 const DEDUP_MAX_COMPARES = 15;
@@ -682,159 +680,198 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
   // core and nothing else.
   if (!lean) {
     // Discovery harvest: mine ATS board candidates from the aggregator URLs.
-    report.harvest = await stage("harvest", report.errors, () =>
-      harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls }));
-
-    // Harvest tier 4: aggregator jobs carry no company URL, but the company
-    // NAME slugifies into probeable ATS tokens. Verified hits join the board
-    // pool as active — the whole company upgrades to first-party next ingest.
-    report.nameProbe = await stage("name-probe", report.errors, async () => {
-      // The whole pool's backlog, not just this run's arrivals: a run that
-      // stores 7,869 postings can create hundreds of new companies, and the
-      // old this-run-only selection meant every one the budget missed was
-      // never revisited. backlogNames orders by best posting score, so a
-      // bounded budget spends itself on the boards worth finding first.
-      // Two backlogs feed this lane, and they are not interchangeable. The
-      // POOL backlog is companies whose postings we already hold — the
-      // highest-yield names we have (measured 9.3%), because every one is
-      // demonstrably hiring. The REGISTER backlog is government sponsor
-      // lists, where a hit is worth more per board (the company's
-      // sponsorship is a matter of public record) but the rate is lower
-      // (~3.8%). Seeding the registers used to be a hand-run script, so it
-      // advanced only when somebody remembered; a standing slice makes it a
-      // lane instead of a chore. Pool first, because rate beats provenance
-      // when the budget is the scarce thing.
-      const registerSlice = Math.min(REGISTER_PROBE_SLICE, NAME_PROBE_MAX);
-      const pool = await backlogNames(NAME_PROBE_MAX - registerSlice);
-      // The registers inherit whatever the pool could not use — but only when
-      // the slice is open at all. A zero slice means zero, otherwise turning
-      // the lane off would have handed it the ENTIRE budget the moment the
-      // pool backlog ran dry, which is exactly the state it is in tonight.
-      const registers =
-        registerSlice > 0
-          ? await registerNames(registerSlice + (NAME_PROBE_MAX - registerSlice - pool.length))
-          : [];
-      const names = [...pool, ...registers];
-      return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
-    });
-
-    // Harvest tier 5: rescue lane for name-probe misses — LLM resolves the
-    // company website, the careers page reveals the ATS, probe verifies.
-    if (llmEnabled()) {
-      report.deepProbe = await stage("deep-probe", report.errors, () => runDeepProbes(DEEP_PROBE_MAX));
-    }
-
-    // Board validation: discovery finds CANDIDATES, and only ACTIVE boards are
-    // ever fetched (boardSources filters on status). Until now nothing in the
-    // ingest closed that gap — runValidation existed only as a hand-run
-    // script, so 12,160 discovered boards sat as candidates indefinitely,
-    // including 1,783 enterprise Oracle/Cornerstone/Eightfold tenants the
-    // archive lane had already found and nobody had ever probed (#6 assumed
-    // crawl had not reached them; crawl had, validation had not).
+    // ── THREE LANES, ONE SCHEDULE ───────────────────────────────────────────
     //
-    // Workday's own history sets the expectation: 7,329 validated, 3,940
-    // active — 54% of candidates turn out alive. The lane is cheap (one HTTP
-    // probe per board, ten at a time) and monotonic: a validated board leaves
-    // the queue for RECHECK_DAYS, so a bounded budget drains the backlog
-    // rather than re-walking its head. The one exception is a board whose
-    // probe ERRORS, which is deliberately left untouched to be retried — if
-    // a block of those ever accumulates it will show as a rising `errors`
-    // count in this stage's report rather than as silent starvation.
-    report.validation = await stage("validate", report.errors, () =>
-      runValidation({ limit: VALIDATE_MAX }));
+    // Everything below used to be a straight line of awaits, and the first
+    // timing report showed the cost: 352 minutes total, 309 of them name-probe.
+    // For five of those hours the local model sat idle behind a stage doing
+    // nothing but waiting on HTTP, and board validation — seven seconds of
+    // actual work — waited behind it too.
+    //
+    // These stages do not compete for the same thing. Sorted by what they
+    // actually consume:
+    //
+    //   platform hosts : harvest, name-probe, validate  (greenhouse, workable…)
+    //   other hosts    : liveness, recrawl              (aggregators, archives)
+    //   the local GPU  : deep-probe, locations, dedup, fit
+    //
+    // So they run as three concurrent lanes, serial WITHIN a lane because that
+    // is where the contention actually is: one GPU cannot run two prompts at
+    // once, and name-probe and validate share platform hosts. Politeness is no
+    // longer each lane's private business either — net/hostgate.ts holds one
+    // budget per host, so two lanes reaching greenhouse get one allowance
+    // between them instead of one each.
+    //
+    // A run now costs the LONGEST lane rather than the sum, which is what makes
+    // the register probe backlog affordable again: it can spend hours without
+    // holding up a fit pass that needs 26 minutes of GPU.
+    const probeLane = async () => {
+      report.harvest = await stage("harvest", report.errors, () =>
+        harvest(aggregatorUrls, { resolveUrls: newlyStoredUrls }));
 
-    // Liveness probing: aggregator jobs have no diffable feed, so aging ones
-    // get their URLs probed for closure banners.
-    report.liveness = await stage("liveness", report.errors, () => runLivenessSweep());
+      // Harvest tier 4: aggregator jobs carry no company URL, but the company
+      // NAME slugifies into probeable ATS tokens. Verified hits join the board
+      // pool as active — the whole company upgrades to first-party next ingest.
+      report.nameProbe = await stage("name-probe", report.errors, async () => {
+        // The whole pool's backlog, not just this run's arrivals: a run that
+        // stores 7,869 postings can create hundreds of new companies, and the
+        // old this-run-only selection meant every one the budget missed was
+        // never revisited. backlogNames orders by best posting score, so a
+        // bounded budget spends itself on the boards worth finding first.
+        // Two backlogs feed this lane, and they are not interchangeable. The
+        // POOL backlog is companies whose postings we already hold — the
+        // highest-yield names we have (measured 9.3%), because every one is
+        // demonstrably hiring. The REGISTER backlog is government sponsor
+        // lists, where a hit is worth more per board (the company's
+        // sponsorship is a matter of public record) but the rate is lower
+        // (~3.8%). Seeding the registers used to be a hand-run script, so it
+        // advanced only when somebody remembered; a standing slice makes it a
+        // lane instead of a chore. Pool first, because rate beats provenance
+        // when the budget is the scarce thing.
+        const registerSlice = Math.min(REGISTER_PROBE_SLICE, NAME_PROBE_MAX);
+        const pool = await backlogNames(NAME_PROBE_MAX - registerSlice);
+        // The registers inherit whatever the pool could not use — but only when
+        // the slice is open at all. A zero slice means zero, otherwise turning
+        // the lane off would have handed it the ENTIRE budget the moment the
+        // pool backlog ran dry, which is exactly the state it is in tonight.
+        const registers =
+          registerSlice > 0
+            ? await registerNames(registerSlice + (NAME_PROBE_MAX - registerSlice - pool.length))
+            : [];
+        const names = [...pool, ...registers];
+        return names.length > 0 ? runNameProbes(names, NAME_PROBE_MAX) : undefined;
+      });
 
-    // The recurring archive scan (#15): about once a month this finds a
-    // Common Crawl index nobody has scanned and spends 10-20 minutes on it
-    // (plus an incremental Wayback cut); every other day it costs one row
-    // read and usually no network at all. Self-scheduling on purpose — the
-    // product's rhythm has exactly one timer, the daily ingest, and a missed
-    // month heals because the question is asked of the archives, not of a
-    // calendar.
-    report.recrawl = await stage("recrawl", report.errors, () =>
-      recrawlIfDue(new Date(), (m) => console.log("  " + m)).then((r) => r ?? undefined));
+      // Board validation: discovery finds CANDIDATES, and only ACTIVE boards are
+      // ever fetched (boardSources filters on status). Until now nothing in the
+      // ingest closed that gap — runValidation existed only as a hand-run
+      // script, so 12,160 discovered boards sat as candidates indefinitely,
+      // including 1,783 enterprise Oracle/Cornerstone/Eightfold tenants the
+      // archive lane had already found and nobody had ever probed (#6 assumed
+      // crawl had not reached them; crawl had, validation had not).
+      //
+      // Workday's own history sets the expectation: 7,329 validated, 3,940
+      // active — 54% of candidates turn out alive. The lane is cheap (one HTTP
+      // probe per board, ten at a time) and monotonic: a validated board leaves
+      // the queue for RECHECK_DAYS, so a bounded budget drains the backlog
+      // rather than re-walking its head. The one exception is a board whose
+      // probe ERRORS, which is deliberately left untouched to be retried — if
+      // a block of those ever accumulates it will show as a rising `errors`
+      // count in this stage's report rather than as silent starvation.
+      report.validation = await stage("validate", report.errors, () =>
+        runValidation({ limit: VALIDATE_MAX }));
 
-    // Batched LLM location resolution for strings the gazetteer+cache missed.
-    if (llmEnabled() && unknownLocations.size > 0) {
-      report.locations = await stage("locations", report.errors, () =>
-        resolveUnknownLocations(unknownLocations));
-    }
+    };
 
-    // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we
-    // already track from the same company (repost / reworded / per-city)?
-    // Cheap funnel: no same-company rows → no LLM call at all; a titles-only
-    // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
-    if (llmEnabled() && newlyCreated.length > 0) {
-      await stage("dedup", report.errors, async (p) => {
-        let compareBudget = DEDUP_MAX_COMPARES;
-        for (const nj of newlyCreated.slice(0, DEDUP_MAX_CHECKS)) {
-          if (compareBudget <= 0) break;
-          try {
-            const candidates = await prisma.job.findMany({
-              where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
-              orderBy: { lastSeenAt: "desc" },
-              take: 12,
-              select: { id: true, title: true, content: { select: { description: true } } },
-            });
-            if (candidates.length === 0) continue;
-            const outcome = await findDuplicate(
-              nj,
-              candidates.map((c) => ({ id: c.id, title: c.title, description: c.content?.description ?? c.title })),
-            );
-            compareBudget -= outcome.compareCalls;
-            if (outcome.duplicateOfId) {
-              await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
-              // A repost proves the original role is still open.
-              await prisma.job.update({ where: { id: outcome.duplicateOfId }, data: { lastSeenAt: new Date() } });
-              report.semanticDupes++;
+    const netLane = async () => {
+      // Liveness probing: aggregator jobs have no diffable feed, so aging ones
+      // get their URLs probed for closure banners.
+      report.liveness = await stage("liveness", report.errors, () => runLivenessSweep());
+
+      // The recurring archive scan (#15): about once a month this finds a
+      // Common Crawl index nobody has scanned and spends 10-20 minutes on it
+      // (plus an incremental Wayback cut); every other day it costs one row
+      // read and usually no network at all. Self-scheduling on purpose — the
+      // product's rhythm has exactly one timer, the daily ingest, and a missed
+      // month heals because the question is asked of the archives, not of a
+      // calendar.
+      report.recrawl = await stage("recrawl", report.errors, () =>
+        recrawlIfDue(new Date(), (m) => console.log("  " + m)).then((r) => r ?? undefined));
+
+    };
+
+    const llmLane = async () => {
+      // Harvest tier 5: rescue lane for name-probe misses — LLM resolves the
+      // company website, the careers page reveals the ATS, probe verifies.
+      if (llmEnabled()) {
+        report.deepProbe = await stage("deep-probe", report.errors, () => runDeepProbes(DEEP_PROBE_MAX));
+      }
+
+      // Batched LLM location resolution for strings the gazetteer+cache missed.
+      if (llmEnabled() && unknownLocations.size > 0) {
+        report.locations = await stage("locations", report.errors, () =>
+          resolveUnknownLocations(unknownLocations));
+      }
+
+      // Semantic dedup: is a newly stored job the same OPPORTUNITY as one we
+      // already track from the same company (repost / reworded / per-city)?
+      // Cheap funnel: no same-company rows → no LLM call at all; a titles-only
+      // fast-tier pass gates the expensive full comparison. Budgeted per ingest.
+      if (llmEnabled() && newlyCreated.length > 0) {
+        await stage("dedup", report.errors, async (p) => {
+          let compareBudget = DEDUP_MAX_COMPARES;
+          for (const nj of newlyCreated.slice(0, DEDUP_MAX_CHECKS)) {
+            if (compareBudget <= 0) break;
+            try {
+              const candidates = await prisma.job.findMany({
+                where: { company: nj.company, id: { not: nj.id }, duplicateOfId: null },
+                orderBy: { lastSeenAt: "desc" },
+                take: 12,
+                select: { id: true, title: true, content: { select: { description: true } } },
+              });
+              if (candidates.length === 0) continue;
+              const outcome = await findDuplicate(
+                nj,
+                candidates.map((c) => ({ id: c.id, title: c.title, description: c.content?.description ?? c.title })),
+              );
+              compareBudget -= outcome.compareCalls;
+              if (outcome.duplicateOfId) {
+                await prisma.job.update({ where: { id: nj.id }, data: { duplicateOfId: outcome.duplicateOfId } });
+                // A repost proves the original role is still open.
+                await prisma.job.update({ where: { id: outcome.duplicateOfId }, data: { lastSeenAt: new Date() } });
+                report.semanticDupes++;
+              }
+            } catch (e) {
+              // A token budget that ran out is not a bad row: it ends the stage,
+              // and everything found so far stays in the report.
+              p.failed(e, nj.id);
             }
-          } catch (e) {
-            // A token budget that ran out is not a bad row: it ends the stage,
-            // and everything found so far stays in the report.
-            p.failed(e, nj.id);
           }
-        }
-      });
-    }
-
-    // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so
-    // the dashboard can rank by real fit, not just keyword score.
-    if (llmEnabled()) {
-      await stage("fit", report.errors, async (p) => {
-        const toAnalyze = await prisma.job.findMany({
-          // openWhere, not a hand-written near-copy. The copy omitted delistedAt,
-          // so the one queue that ran right after a fetch was also the one queue
-          // that would spend a minute of LLM time on a posting already closed.
-          where: andWhere(openWhere(), { fitScore: null }),
-          orderBy: { score: "desc" },
-          take: AUTO_FIT_TOP_N,
-          include: { content: { select: { description: true } } },
         });
-        for (const j of toAnalyze) {
-          try {
-            const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
-            if (!fit) continue;
-            await prisma.job.update({
-              where: { id: j.id },
-              // The model read the posting: an explicit refusal beats "unknown",
-              // and verdictFields is what makes that a proper llm-strength write
-              // with the tier recomputed and the history row appended.
-              data: verdictFields(fit, "auto-fit", j),
-            });
-            report.fitAnalyzed++;
-            // Throttle to stay under the provider's per-minute token limit.
-            await new Promise((r) => setTimeout(r, 1500));
-          } catch (e) {
-            // Out of daily tokens — the stage ends, everything else is kept.
-            // The remaining jobs stay fitScore:null for the next ingest.
-            p.failed(e, j.id);
+      }
+
+      // Auto-analyze the top-keyword jobs with the LLM (CV vs job description) so
+      // the dashboard can rank by real fit, not just keyword score.
+      if (llmEnabled()) {
+        await stage("fit", report.errors, async (p) => {
+          const toAnalyze = await prisma.job.findMany({
+            // openWhere, not a hand-written near-copy. The copy omitted delistedAt,
+            // so the one queue that ran right after a fetch was also the one queue
+            // that would spend a minute of LLM time on a posting already closed.
+            where: andWhere(openWhere(), { fitScore: null }),
+            orderBy: { score: "desc" },
+            take: AUTO_FIT_TOP_N,
+            include: { content: { select: { description: true } } },
+          });
+          for (const j of toAnalyze) {
+            try {
+              const fit = await analyzeFit({ ...j, description: j.content?.description ?? j.title });
+              if (!fit) continue;
+              await prisma.job.update({
+                where: { id: j.id },
+                // The model read the posting: an explicit refusal beats "unknown",
+                // and verdictFields is what makes that a proper llm-strength write
+                // with the tier recomputed and the history row appended.
+                data: verdictFields(fit, "auto-fit", j),
+              });
+              report.fitAnalyzed++;
+              // Throttle to stay under the provider's per-minute token limit.
+              await new Promise((r) => setTimeout(r, 1500));
+            } catch (e) {
+              // Out of daily tokens — the stage ends, everything else is kept.
+              // The remaining jobs stay fitScore:null for the next ingest.
+              p.failed(e, j.id);
+            }
           }
-        }
-      });
-    }
+        });
+      }
+    };
+
+    // allSettled, not all: a lane that throws would otherwise take the others
+    // down with it, and every stage inside already records its own failure.
+    // One lane failing costs its own work and nothing else — the same rule
+    // stage() applies one level down.
+    await Promise.allSettled([probeLane(), netLane(), llmLane()]);
   }
 
   // The stat strip reads this one row instead of group-by'ing half a million,

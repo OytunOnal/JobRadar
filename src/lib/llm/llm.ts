@@ -35,7 +35,7 @@ interface Provider {
 // them on your own machine costs nothing, cannot be rate-limited, and does
 // not send your CV to a third party. Cloud providers follow for machines
 // that cannot host a 27B, and the user can reorder any of it.
-const DEFAULT_ORDER = ["ollama", "anthropic", "cerebras", "groq", "gemini", "deepseek"];
+const DEFAULT_ORDER = ["ollama", "endpoint", "anthropic", "cerebras", "groq", "gemini", "deepseek"];
 
 // What the profile page shows: every provider we know how to talk to, whether
 // it is usable on this machine, and why not when it is not.
@@ -43,6 +43,7 @@ export function providerStatus(): Array<{ name: string; ready: boolean; model: s
   const ready = new Map(providers().map((p) => [p.name, p.strongModel]));
   const known: Array<[string, string]> = [
     ["ollama", "yerel model (OLLAMA_MODEL veya ayarlardan)"],
+    ["endpoint", "LLM_ENDPOINT_URL (+ LLM_ENDPOINT_MODEL, isteğe bağlı LLM_ENDPOINT_KEY)"],
     ["anthropic", "ANTHROPIC_API_KEY"],
     ["cerebras", "CEREBRAS_API_KEY"],
     ["groq", "GROQ_API_KEY"],
@@ -126,6 +127,33 @@ function providers(): Provider[] {
       key: "ollama", // the endpoint ignores auth; the header just needs a value
       fastModel: env.OLLAMA_FAST_MODEL || localModel,
       strongModel: localModel,
+    });
+  }
+  // ANY OpenAI-COMPATIBLE ENDPOINT, named by environment rather than by us.
+  //
+  // Added for a rented-GPU trial, and deliberately not written as a RunPod
+  // adapter: the protocol is the same one Cerebras, Groq, Gemini, DeepSeek,
+  // Together, Deepinfra, Fireworks, StepFun, Alibaba and a self-hosted vLLM
+  // all speak, so one entry configured by two variables reaches every option
+  // in docs/llm-hosting-cost.md and docs/llm-china-options.md without another
+  // branch here. A provider-shaped hole is worth more than a provider.
+  //
+  // It sits second in the default order, behind the local model: a machine
+  // with an endpoint configured is one deliberately pointed somewhere, and it
+  // should be preferred over the paid clouds below — but not over a local
+  // model that costs nothing.
+  //
+  // LLM_ENDPOINT_URL    the /v1 base (RunPod: .../openai/v1)
+  // LLM_ENDPOINT_MODEL  the model name that endpoint expects
+  // LLM_ENDPOINT_KEY    bearer token; optional, since a private vLLM may want none
+  if (env.LLM_ENDPOINT_URL && env.LLM_ENDPOINT_MODEL) {
+    list.push({
+      name: "endpoint",
+      kind: "openai",
+      baseURL: env.LLM_ENDPOINT_URL,
+      key: env.LLM_ENDPOINT_KEY || "none",
+      fastModel: env.LLM_ENDPOINT_FAST_MODEL || env.LLM_ENDPOINT_MODEL,
+      strongModel: env.LLM_ENDPOINT_MODEL,
     });
   }
   if (env.DEEPSEEK_API_KEY) {

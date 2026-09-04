@@ -28,6 +28,10 @@ interface HostState {
   lastStart: number;
   /** Resolvers waiting for a slot, in arrival order. */
   waiting: (() => void)[];
+  /** Observability: how often we asked, and how long we queued for it. */
+  requests: number;
+  waitMs: number;
+  busyMs: number;
 }
 
 const hosts = new Map<string, HostState>();
@@ -52,7 +56,9 @@ export function hostKey(url: string): string {
 }
 
 const state = (key: string): HostState =>
-  hosts.get(key) ?? (hosts.set(key, { inFlight: 0, lastStart: 0, waiting: [] }), hosts.get(key)!);
+  hosts.get(key) ??
+  (hosts.set(key, { inFlight: 0, lastStart: 0, waiting: [], requests: 0, waitMs: 0, busyMs: 0 }),
+  hosts.get(key)!);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -67,6 +73,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function withHost<T>(url: string, fn: () => Promise<T>): Promise<T> {
   const key = hostKey(url);
   const s = state(key);
+  // Queue time is measured separately from work time, because once lanes run
+  // concurrently a stage's elapsed clock stops meaning what it used to: it
+  // now includes however long the stage sat behind ANOTHER lane at this gate.
+  // Without the split, a slow stage and a starved one look identical.
+  const queuedAt = Date.now();
 
   while (s.inFlight >= MAX_IN_FLIGHT) {
     await new Promise<void>((resolve) => s.waiting.push(resolve));
@@ -81,20 +92,32 @@ export async function withHost<T>(url: string, fn: () => Promise<T>): Promise<T>
   const gap = MIN_GAP_MS - (Date.now() - s.lastStart);
   if (gap > 0) await sleep(gap);
   s.lastStart = Date.now();
+  s.requests++;
+  s.waitMs += s.lastStart - queuedAt;
+  const startedAt = s.lastStart;
   try {
     return await fn();
   } finally {
+    s.busyMs += Date.now() - startedAt;
     s.inFlight--;
     s.waiting.shift()?.();
   }
 }
 
-/** What each host is currently carrying, for the ingest report. */
-export function hostLoad(): [string, number][] {
+export interface HostStat {
+  host: string;
+  requests: number;
+  waitMs: number;
+  busyMs: number;
+}
+
+/** Per-host contention, worst queue time first — the report's answer to
+ *  "was that stage slow, or was it waiting its turn?". */
+export function hostStats(): HostStat[] {
   return [...hosts]
-    .filter(([, s]) => s.inFlight > 0 || s.waiting.length > 0)
-    .map(([k, s]) => [k, s.inFlight + s.waiting.length] as [string, number])
-    .sort((a, b) => b[1] - a[1]);
+    .map(([host, s]) => ({ host, requests: s.requests, waitMs: s.waitMs, busyMs: s.busyMs }))
+    .filter((h) => h.requests > 0)
+    .sort((a, b) => b.waitMs - a.waitMs);
 }
 
 /** Tests only: forget every host's budget. */

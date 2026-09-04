@@ -459,3 +459,24 @@ test("the host gate is one budget per host, whoever asks", async () => {
   await withHost("https://two.example.com/x", async () => "fine");
   resetHostGate();
 });
+
+test("the gate reports queueing separately from work", async () => {
+  const { withHost, hostStats, resetHostGate } = await import("../src/lib/net/hostgate");
+  resetHostGate();
+  // Six callers, one host, cap of two: four have to queue. Once lanes run
+  // concurrently a stage's elapsed clock includes time spent waiting behind
+  // ANOTHER lane, so "slow" and "starved" look identical without this split.
+  await Promise.all(Array.from({ length: 6 }, () =>
+    withHost("https://x.example.com/a", () => new Promise((r) => setTimeout(r, 60)))));
+  const [stat] = hostStats();
+  assert.equal(stat!.host, "example.com");
+  assert.equal(stat!.requests, 6);
+  assert.ok(stat!.waitMs > stat!.busyMs / 2,
+    `queueing should dominate here: wait ${stat!.waitMs} vs busy ${stat!.busyMs}`);
+  // An uncontended host records requests and effectively no queue time.
+  await withHost("https://solo.example.org/a", async () => "ok");
+  const solo = hostStats().find((h) => h.host === "example.org")!;
+  assert.equal(solo.requests, 1);
+  assert.ok(solo.waitMs < 50, `uncontended host should not report queueing, got ${solo.waitMs}`);
+  resetHostGate();
+});

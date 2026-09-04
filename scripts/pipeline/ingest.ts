@@ -1,4 +1,5 @@
-import { stageTimings } from "../../src/lib/ingest/stage";
+import { laneTimings_, stageTimings } from "../../src/lib/ingest/stage";
+import { hostStats } from "../../src/lib/net/hostgate";
 import { runIngest } from "../../src/lib/ingest";
 import { formatQueueGauges } from "../../src/lib/queue/capacity";
 import { generatedProfileStale } from "../../src/lib/user/profile";
@@ -29,7 +30,9 @@ const boardLimit = boardsIdx !== -1 && Number(argv[boardsIdx + 1]) > 0
 
 if (only) console.log(`(yalnızca ${only.length} kaynak: ${only.join(", ")}${boardLimit ? `, en fazla ${boardLimit} board` : ""})`);
 
+const runStartedAt = Date.now();
 const report = await runIngest({ ...(only ? { only } : {}), ...(boardLimit ? { boardLimit } : {}) });
+const runMs = Date.now() - runStartedAt;
 
 console.log("\n=== JobRadar ingest ===");
 // Discovered-board sources can number in the hundreds — summarize them.
@@ -56,16 +59,42 @@ console.log(`Semantic dupes: ${report.semanticDupes}`);
 console.log(`Swept (closed): ${report.delisted}`);
 if (report.nameProbe) console.log(`Name probes:    ${report.nameProbe.found}/${report.nameProbe.checked} companies mapped to their ATS`);
 if (report.deepProbe) console.log(`Deep probes:    ${report.deepProbe.found}/${report.deepProbe.checked} misses rescued via careers-page scan (${report.deepProbe.sitesResolved} sites resolved)`);
+const fmt = (ms: number) => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${(ms / 1000).toFixed(0)}s`);
+
+// WALL CLOCK FIRST, because once the stages run as concurrent lanes the sum of
+// their timings stops being the run's duration — it double-counts every
+// overlap. The number that decides whether a budget fits the day is the
+// longest LANE, and the number that says whether a stage was slow or merely
+// waiting is the split between its own time and its time queued at a host.
+const lanes = laneTimings_();
+if (lanes.length) {
+  const longest = lanes[0]!;
+  console.log(
+    `Lanes:          ${fmt(runMs)} wall — longest ${longest[0]} ${fmt(longest[1])}; ` +
+      lanes.map(([n, ms]) => `${n} ${fmt(ms)}`).join(", "),
+  );
+}
+
 const timings = stageTimings();
 if (timings.length) {
-  const total = timings.reduce((n, [, ms]) => n + ms, 0);
-  const fmt = (ms: number) => (ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${(ms / 1000).toFixed(0)}s`);
-  // Slowest first, and only the stages worth a second of anyone's attention.
+  const summed = timings.reduce((n, [, ms]) => n + ms, 0);
   console.log(
-    `Stage time:     ${fmt(total)} total — ` +
+    `Stage time:     ${fmt(summed)} summed across lanes — ` +
       timings.filter(([, ms]) => ms >= 1000).map(([n, ms]) => `${n} ${fmt(ms)}`).join(", "),
   );
 }
+
+// Per-host contention. A host with more QUEUE time than WORK time is one the
+// lanes are fighting over, and the honest answer there is fewer workers on it
+// rather than a bigger budget.
+const hosts = hostStats().filter((h) => h.waitMs >= 1000).slice(0, 5);
+if (hosts.length) {
+  console.log(
+    "Host queueing:  " +
+      hosts.map((h) => `${h.host} ${h.requests}x wait ${fmt(h.waitMs)}/busy ${fmt(h.busyMs)}`).join(", "),
+  );
+}
+
 if (report.validation)
   console.log(
     `Validation:     ${report.validation.active} active, ${report.validation.dead} dead, ` +

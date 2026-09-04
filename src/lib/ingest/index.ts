@@ -69,7 +69,7 @@ import { recrawlIfDue, type RecrawlReport } from "../discovery/recrawl";
 import { normalizeLocation, resolveCountry } from "../location/geo";
 import { loadLocationCache, resolveUnknownLocations, resolveWithCache, type LocResolveReport } from "../location/locresolve";
 import { pump, selects, selectSources, wantsAnything, PER_HOST } from "./fetch";
-import { pass, resetStageTimings, stage, stageTimings } from "./stage";
+import { lane, pass, resetStageTimings, stage, stageTimings } from "./stage";
 import { intake, isAggregatorJob, readable } from "./intake";
 import { scoreJob } from "../scoring/score";
 import { rejectedBy } from "../scoring/derive";
@@ -871,7 +871,11 @@ export async function runIngest(opts: IngestOptions = {}): Promise<IngestReport>
     // down with it, and every stage inside already records its own failure.
     // One lane failing costs its own work and nothing else — the same rule
     // stage() applies one level down.
-    await Promise.allSettled([probeLane(), netLane(), llmLane()]);
+    await Promise.allSettled([
+      lane("probe", probeLane),
+      lane("net", netLane),
+      lane("llm", llmLane),
+    ]);
   }
 
   // The stat strip reads this one row instead of group-by'ing half a million,

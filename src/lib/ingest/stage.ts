@@ -42,7 +42,27 @@ const SHOWN_FAILURES = 5;
 // start of a run and prints it at the end.
 const timings = new Map<string, number>();
 
+const laneTimings = new Map<string, number>();
+
+/** Time one concurrent lane end to end. With lanes overlapping, the sum of
+ *  stage times stops being the run's duration — the LONGEST LANE is, and that
+ *  is the number that decides whether a budget fits the window. */
+export async function lane<T>(name: string, body: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  try {
+    return await body();
+  } finally {
+    laneTimings.set(name, (laneTimings.get(name) ?? 0) + (Date.now() - started));
+  }
+}
+
+/** Lane name → milliseconds, longest first. */
+export function laneTimings_(): [string, number][] {
+  return [...laneTimings].sort((a, b) => b[1] - a[1]);
+}
+
 export function resetStageTimings(): void {
+  laneTimings.clear();
   timings.clear();
 }
 

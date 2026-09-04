@@ -71,6 +71,16 @@ function providers(): Provider[] {
     ...(env.LLM_DISABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     ...(settings.disabled ?? []),
   ]);
+  // LLM_ONLY="endpoint" is LLM_DISABLE's inverse: keep ONLY these providers.
+  //
+  // It exists for measurement, where reordering is not enough and enumerating
+  // the others is a trap. The fallback chain is built to hide a failure by
+  // answering from the next provider, which is right in production and ruinous
+  // in a benchmark: point the run at a rented endpoint, let it quietly fall
+  // through to ollama, and the report describes the local model while claiming
+  // to describe the rented one. With LLM_ONLY the chain has nowhere to fall,
+  // so a broken endpoint fails loudly instead of returning a plausible number.
+  const only = new Set((env.LLM_ONLY ?? "").split(",").map((s) => s.trim()).filter(Boolean));
 
   // Anthropic first: best judgment quality. Haiku for everything (cheap, fast).
   if (env.ANTHROPIC_API_KEY) {
@@ -171,6 +181,7 @@ function providers(): Provider[] {
   const order = llmOrder();
   return list
     .filter((p) => !disabled.has(p.name))
+    .filter((p) => only.size === 0 || only.has(p.name))
     .sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
 }
 

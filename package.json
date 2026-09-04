@@ -28,6 +28,7 @@
     "fit:rereview": "tsx --env-file=.env scripts/backfill/fit-rereview.ts",
     "desc:fill": "tsx --env-file=.env scripts/backfill/desc-fill.ts",
     "embed:fill": "tsx --env-file=.env scripts/backfill/embed-fill.ts",
+    "judge:compare": "tsx --env-file=.env scripts/measure/judge-compare.ts",
     "facts:fill": "tsx --env-file=.env scripts/backfill/facts-fill.ts",
     "visa:retier": "tsx --env-file=.env scripts/backfill/visa-retier.ts",
     "repair:descriptions": "tsx --env-file=.env scripts/backfill/repair-descriptions.ts",

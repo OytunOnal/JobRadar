@@ -70,7 +70,8 @@ if (report.validation)
   console.log(
     `Validation:     ${report.validation.active} active, ${report.validation.dead} dead, ` +
       `${report.validation.revived} revived of ${report.validation.checked} candidate boards probed` +
-      (report.validation.errors ? ` (${report.validation.errors} errored, retried next run)` : ""),
+      (report.validation.errors ? ` (${report.validation.errors} errored, retried next run)` : "") +
+      (report.validation.skipped ? ` — ${report.validation.skipped} skipped, platform standing down` : ""),
   );
 if (Object.keys(report.eliminated ?? {}).length > 0) console.log("Eliminated:     ", report.eliminated);
 if (report.liveness) console.log(`Liveness:       ${report.liveness.boardsRefreshed} stale boards re-diffed + ${report.liveness.checked} aggregator URLs probed — ${report.liveness.expired} expired, ${report.liveness.refreshed} confirmed listed`);

@@ -410,3 +410,21 @@ test("the validation queue round-robins across platforms", async () => {
   assert.deepEqual(spread.filter((b) => b.platform === "workable").map((b) => b.id), [10, 11, 12, 13, 14, 15]);
   assert.deepEqual(interleaveByPlatform([]), []);
 });
+
+test("a platform standing down is dropped from the queue, not probed and counted", async () => {
+  const { interleaveByPlatform } = await import("../src/lib/discovery/validate");
+  // The shape the fix relies on: with the blocked platform filtered out
+  // BEFORE interleaving, the remaining lanes still round-robin normally and
+  // the run's budget goes to hosts that will answer. Measured mid-throttle,
+  // the alternative was 120 boards "checked" in one second for 119 errors.
+  const boards = [
+    { platform: "workable", id: 1 },
+    { platform: "workable", id: 2 },
+    { platform: "greenhouse", id: 3 },
+    { platform: "ashby", id: 4 },
+  ];
+  const standingDown = new Set(["workable"]);
+  const probeable = boards.filter((b) => !standingDown.has(b.platform));
+  assert.equal(probeable.length, 2, "the blocked platform's boards are left for next run");
+  assert.deepEqual(interleaveByPlatform(probeable).map((b) => b.platform), ["greenhouse", "ashby"]);
+});

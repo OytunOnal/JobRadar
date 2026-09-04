@@ -203,6 +203,8 @@ export interface ValidationReport {
   dead: number;
   revived: number; // dead boards that came back
   errors: number;
+  /** Boards left in the queue because their platform is standing down. */
+  skipped?: number;
 }
 
 export async function runValidation(
@@ -228,8 +230,26 @@ export async function runValidation(
     LIMIT ${limit}
   `;
 
+  // A PLATFORM STANDING DOWN IS NOT WORK, IT IS A CLOSED DOOR. Interleaving
+  // stops us EARNING a throttle; it does nothing about one we are already
+  // serving. Measured mid-throttle: 120 Workable boards "checked" in one
+  // second, 119 errors — a fifth of a run's budget spent on probes we knew
+  // would fail before we sent them, while other platforms waited.
+  //
+  // So throttled platforms are dropped from the queue rather than probed and
+  // counted. Their boards keep status and validatedAt untouched and come back
+  // next run, which is what the breaker already promised; the difference is
+  // that the budget now goes to hosts that will answer. This is also what
+  // makes the per-platform cap tolerable: when the tail is one platform and
+  // that platform is blocked, there is no tail to wait on.
+  const standingDown = new Set(throttledPlatforms());
+  const probeable = standingDown.size > 0
+    ? boards.filter((b) => !standingDown.has(b.platform))
+    : boards;
+
   const report: ValidationReport = { checked: 0, active: 0, dead: 0, revived: 0, errors: 0 };
-  const queue = interleaveByPlatform(boards);
+  report.skipped = boards.length - probeable.length;
+  const queue = interleaveByPlatform(probeable);
   // In flight per platform, because the throttle we kept hitting was one we
   // earned. See PER_PLATFORM_INFLIGHT.
   const inFlight = new Map<string, number>();
@@ -237,15 +257,29 @@ export async function runValidation(
   const workers = Array.from(
     { length: Math.min(opts.concurrency ?? 10, queue.length) },
     async () => {
+      let idleWaits = 0;
       while (queue.length > 0) {
-        // Take the first board whose platform is under the per-host cap. If
-        // every waiting board belongs to a saturated platform, yield rather
-        // than spin — the queue is one host deep and the others are done.
+        // Take the first board whose platform is under the per-host cap.
+        //
+        // WHEN THE TAIL IS ONE PLATFORM, THIS RUN DELIBERATELY NARROWS. A
+        // queue that ends in 907 Workable boards has two slots, so eight of
+        // ten workers find nothing and wait. That is the cap doing its job,
+        // not a stall: the whole point is that one host never sees more than
+        // PER_PLATFORM_INFLIGHT of us, and the price is that the tail runs at
+        // that width — 907 boards at two in flight is about seven minutes,
+        // against a fourteen-hour throttle if we take the other road.
+        //
+        // Waiting rather than exiting, because slots do free: the in-flight
+        // probes carry their own timeout, so a worker that waits will get one.
+        // The backoff grows to 250ms so eight idle workers polling through a
+        // long single-platform tail cost almost nothing.
         const i = queue.findIndex((b) => (inFlight.get(b.platform) ?? 0) < PER_PLATFORM_INFLIGHT);
         if (i === -1) {
-          await new Promise((r) => setTimeout(r, 50));
+          idleWaits++;
+          await new Promise((r) => setTimeout(r, Math.min(50 * idleWaits, 250)));
           continue;
         }
+        idleWaits = 0;
         const b = queue.splice(i, 1)[0]!;
         inFlight.set(b.platform, (inFlight.get(b.platform) ?? 0) + 1);
         try {

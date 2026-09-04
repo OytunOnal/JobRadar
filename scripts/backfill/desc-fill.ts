@@ -271,6 +271,22 @@ const queue = rows.filter((r) => {
   if (PREVIEW_SOURCES.has(r.source.split(":")[0]) && d.length < PREVIEW_MAX) return true;
   return !d.includes("\n") && r.content?.textVersion !== TEXT_VERSION;
 });
+// TITLE-ONLY ROWS GO FIRST, and this ordering is load-bearing rather than
+// tidy. The worker summons this script when a judge lane defers rows for want
+// of a body, and it passes a budget of twice the deferred count — enough only
+// if the budget lands on THOSE rows. Both stages are scoped to the same score
+// range, but they order differently: fit-fill walks a blended order, this one
+// walks sponsorReg then score. So a 150-row budget was being spent wherever
+// that ordering happened to point, and the lane stayed starved: observed
+// live, 150 processed and the same 19 rows still deferred afterwards.
+//
+// Only the title-only rows block judging. The flat-text rows have bodies
+// already — they read badly, not not-at-all — so they can wait. Sorting the
+// blockers to the front makes the summon's budget hit what it was sized for.
+queue.sort((a, b) => {
+  const bodyless = (r: typeof a) => ((r.content?.description ?? "").length < r.title.length + 60 ? 0 : 1);
+  return bodyless(a) - bodyless(b);
+});
 const titleOnly = queue.filter((r) => (r.content?.description ?? "").length < r.title.length + 60).length;
 run.log(`=== desc:fill — ${queue.length} ilan (${titleOnly} gövdesiz, ${queue.length - titleOnly} yapısız) / ${rows.length} aday ===`);
 

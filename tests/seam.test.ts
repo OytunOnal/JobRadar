@@ -174,3 +174,19 @@ test("every source that defers its body is in desc:fill's queue", () => {
   }
   assert.ok(!src.includes("ch-jobroom"), "a retired source must not linger in the backfill");
 });
+
+test("desc:fill puts the rows that BLOCK judging ahead of the ones that only read badly", () => {
+  // The worker summons desc:fill with a budget of twice the deferred count,
+  // which only works if the budget lands on the deferred rows. Both stages
+  // scope to the same score range but order differently — fit-fill blended,
+  // desc-fill by sponsorReg then score — so the budget was being spent
+  // wherever that pointed: observed live, 150 processed and the same 19 rows
+  // still deferred. Title-only rows block judging; flat-text rows have bodies
+  // and merely read badly, so they wait.
+  const src = readFileSync(join("scripts", "backfill", "desc-fill.ts"), "utf8");
+  const sortAt = src.indexOf("queue.sort(");
+  const loopAt = src.search(/for \(const .*of queue/);
+  assert.ok(sortAt > 0, "the queue must be ordered before it is walked");
+  assert.ok(loopAt === -1 || sortAt < loopAt, "the sort must come before the walk");
+  assert.match(src.slice(sortAt, sortAt + 400), /bodyless/, "and it must be the bodyless-first ordering");
+});

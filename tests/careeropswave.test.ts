@@ -430,7 +430,7 @@ test("a platform standing down is dropped from the queue, not probed and counted
 });
 
 test("the host gate is one budget per host, whoever asks", async () => {
-  const { withHost, hostKey, resetHostGate } = await import("../src/lib/net/hostgate");
+  const { withHost, hostKey, resetHostGate, hostInFlightCap } = await import("../src/lib/net/hostgate");
   resetHostGate();
   // Tenant subdomains and the platform's own API are one operator, so they
   // share a budget: this is what stops name-probe and validation from each
@@ -447,10 +447,14 @@ test("the host gate is one budget per host, whoever asks", async () => {
     await new Promise((r) => setTimeout(r, 30));
     live--;
   });
-  // Ten callers, one host: the gate holds concurrency at the cap regardless of
-  // how many lanes ask. The default is 2.
-  await Promise.all(Array.from({ length: 10 }, task));
-  assert.ok(peak <= 2, `host saw ${peak} at once`);
+  // Many callers, one host: the gate holds concurrency at the cap regardless
+  // of how many lanes ask. Asserted against the cap itself — an earlier
+  // version hardcoded 2 and failed the day the cap was tuned, which pinned
+  // the number instead of the behaviour.
+  const cap = hostInFlightCap();
+  await Promise.all(Array.from({ length: cap * 5 }, task));
+  assert.ok(peak <= cap, `host saw ${peak} at once, cap is ${cap}`);
+  assert.ok(peak > 1, "and it does use the allowance, not just respect it");
   assert.equal(live, 0, "every slot is released, including on the error path");
 
   // A throwing body must not leak its slot — otherwise one bad host silently
@@ -482,12 +486,14 @@ test("the gate reports queueing separately from work", async () => {
 });
 
 test("worker counts are derived from the host budget, not chosen", async () => {
-  const { workersForHosts } = await import("../src/lib/net/hostgate");
+  const { workersForHosts, hostInFlightCap } = await import("../src/lib/net/hostgate");
   // Enough workers to spend every host's allowance: hosts x per-host cap.
-  // The inherited default of ten under-served a nine-host queue (18 slots)
-  // and over-served a one-host queue (2) — in the same run.
-  assert.equal(workersForHosts(9), 18);
-  assert.equal(workersForHosts(1), 2);
+  // The inherited default of ten under-served a nine-host queue and
+  // over-served a one-host queue, in the same run. Expressed against the cap
+  // so tuning it does not break the rule this test exists to state.
+  const cap = hostInFlightCap();
+  assert.equal(workersForHosts(1), cap);
+  assert.equal(workersForHosts(3), 3 * cap);
   // A queue with no distinct hosts still gets a worker, or it never drains.
   assert.equal(workersForHosts(0), 1);
   // Bounded: a hundred hosts does not justify two hundred workers on one box.

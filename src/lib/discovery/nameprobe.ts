@@ -93,6 +93,14 @@ export interface NameProbeHit {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Has this promise already settled? Answers without waiting on it. */
+function settled(p: Promise<unknown>): Promise<boolean> {
+  return Promise.race([
+    p.then(() => true, () => true),
+    Promise.resolve().then(() => false),
+  ]);
+}
+
 // Between candidate tokens, not between platforms. One request per host per
 // token, then a breath — so a single host sees roughly one request a second
 // during a long run, which is gentler than any board fetch we already do.
@@ -106,12 +114,22 @@ const PROBE_PAUSE_MS = Number(process.env.PROBE_PAUSE_MS) || 400;
 // of what politeness permits: measured 1.94s per name, 20,000 names, eleven
 // hours, the longest lane in the ingest by a wide margin.
 //
-// Two names at a time doubles throughput and still leaves every host at its
-// cap rather than above it — the gate, not this number, is what protects the
-// hosts. Kept deliberately small: the gate would queue a third name's
-// requests behind the first two anyway, so raising this buys latency, not
-// politeness headroom.
-const NAME_CONCURRENCY = Number(process.env.NAME_CONCURRENCY) || 2;
+// Raised 2 -> 4 alongside the gate's per-host cap, on what a full run
+// measured. The lane took 113.6 minutes for 4,488 names and was the ingest's
+// long pole; teamtailor accounted for 89.4 of those minutes at ~0.66s per
+// request, which is structural — every tenant is its own subdomain, so each
+// probe pays a fresh DNS lookup and TLS handshake and no connection can be
+// reused. (Checked: a cheap DNS pre-filter cannot help either, since
+// teamtailor, recruitee and pinpoint all answer wildcard DNS, so a name that
+// belongs to nobody still resolves.)
+//
+// But slow-per-request only bounds a lane that asks serially. The hosts were
+// seeing about 1.2 requests a second and queueing for a tenth of their busy
+// time — idle, in other words, while we waited. So the answer was not to drop
+// the expensive platform and lose its coverage; it was to stop under-asking.
+// The gate still owns politeness: this number decides how many names are in
+// flight, and the gate decides what any one host will take of them.
+const NAME_CONCURRENCY = Number(process.env.NAME_CONCURRENCY) || 4;
 
 // Greenhouse's validation probe hits the board ROOT (no job list), so the
 // live-posting requirement needs one extra call for greenhouse hits only.
@@ -239,7 +257,20 @@ export async function probeCompany(
       Promise.all(VERIFIABLE_PLATFORMS.map((p) => probeFn(p, token, "").catch(() => null))),
       Promise.all(HTML_VERIFIABLE.map((p) => htmlVerify(p, token, htmlProbe).catch(() => null))),
     ]);
-    await sleep(PROBE_PAUSE_MS);
+    // NO SLEEP HERE ANY MORE. This line paced candidate tokens back when this
+    // function was the only thing probing platform hosts, and its own comment
+    // above states the principle it was serving: politeness is a per-host
+    // property. net/hostgate.ts now enforces exactly that — four in flight per
+    // host, 250ms between starts, shared with board validation — so the pause
+    // had become a second opinion on a question already answered.
+    //
+    // It was not free. At ~1.75 candidate tokens per name it spent ~700ms of
+    // every ~2.4s name asleep: measured, teamtailor averaged 1.72 concurrent
+    // requests against a cap of four, and raising the cap bought 7% instead of
+    // the expected doubling because the window was mostly idle. Same shape as
+    // the duplicate in-flight counter removed from validate.ts, and the same
+    // lesson: when a shared limiter arrives, the private ones stop being
+    // caution and start being cost.
 
     // Verdicts are READ in the original order, so concurrency changed the
     // schedule and not the answer: the cheap deterministic API tier still

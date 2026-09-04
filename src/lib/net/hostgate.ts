@@ -17,8 +17,17 @@
 // So the gate is module state on purpose. A host's budget is a property of
 // the host, not of whichever lane happened to reach it first.
 
-/** In-flight cap per host. Two lanes asking at once still see one budget. */
-const MAX_IN_FLIGHT = Number(process.env.HOST_MAX_IN_FLIGHT) || 2;
+/** In-flight cap per host. Two lanes asking at once still see one budget.
+ *
+ * Raised from 2 to 4 on measurement, not on appetite. A full ingest reported
+ * every platform host at roughly 1.2 requests a second, with queue time at 10%
+ * of busy time — the hosts were idle and we were the slow party. The gate's
+ * own rule cuts both ways: too many workers queue at it, too few leave its
+ * allowance unspent, and the report said plainly which side we were on.
+ *
+ * Four keeps the politest host at about 2.4 requests a second, which is still
+ * gentler than any single board fetch this project already does. */
+const MAX_IN_FLIGHT = Number(process.env.HOST_MAX_IN_FLIGHT) || 4;
 
 /** Minimum gap between two request STARTS to the same host. */
 const MIN_GAP_MS = Number(process.env.HOST_MIN_GAP_MS) || 250;
@@ -137,6 +146,14 @@ export function hostStats(): HostStat[] {
  */
 export function workersForHosts(distinctHosts: number, max = 24): number {
   return Math.max(1, Math.min(max, distinctHosts * MAX_IN_FLIGHT));
+}
+
+/** The per-host in-flight cap. Exported so callers and tests can reason in
+ *  terms of the budget rather than restating its current number — a test that
+ *  hardcodes 2 fails when the cap is tuned to 4, which pins the wrong thing:
+ *  the property worth defending is that the gate HOLDS the cap. */
+export function hostInFlightCap(): number {
+  return MAX_IN_FLIGHT;
 }
 
 /** Tests only: forget every host's budget. */

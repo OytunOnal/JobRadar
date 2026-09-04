@@ -228,3 +228,28 @@ test("ldboards: the employer is taken from whichever field is not a URL", async 
     title: "Engineer", hiringOrganization: { "@id": "https://example.com/#/org/9" },
   }), null);
 });
+
+test("trythestack: the board's per-posting flag is source-tier visa evidence", async () => {
+  const { mapStackRow } = await import("../src/lib/sources/trythestack");
+  const row = {
+    id: 42, title: "Backend Engineer", organization: "N26",
+    job_url: "https://n26.com/en-eu/careers/positions/8123",
+    country: "Spain", location: "Barcelona", visa_sponsorship: "true",
+    job_description: "<p>Build things.</p>", date_posted: "2026-09-02", remote: false,
+  };
+  const j = mapStackRow(row)!;
+  // The board exists to list sponsored roles and sets the flag itself, so it
+  // is a source claim like SwissDevJobs' structured field — not an inference
+  // from a register, which is why huntukvisa's rating travels as text instead.
+  assert.equal(j.visa, "yes");
+  assert.equal(j.location, "Barcelona, Spain");
+  assert.equal(j.url, "https://n26.com/en-eu/careers/positions/8123", "the employer's own page, not the SPA that renders nothing");
+  assert.ok(!j.description.includes("<"), "HTML stripped");
+
+  // Absent or false leaves visa UNSET rather than asserting "no": the board
+  // not flagging a role is not the role saying it will not sponsor.
+  assert.equal(mapStackRow({ ...row, visa_sponsorship: "false" })!.visa, undefined);
+  assert.equal(mapStackRow({ ...row, visa_sponsorship: null })!.visa, undefined);
+  // A row with no employer is not a row: company is half the dedupe key.
+  assert.equal(mapStackRow({ ...row, organization: "" }), null);
+});

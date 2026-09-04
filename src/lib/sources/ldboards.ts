@@ -83,7 +83,14 @@ export function mapLdPosting(board: LdBoard, url: string, ld: any): RawJob | nul
     "";
   if (!company || /^https?:/i.test(company)) return null;
   const site = Array.isArray(ld?.jobLocation) ? ld.jobLocation[0] : ld?.jobLocation;
-  const city = String(site?.address?.addressLocality ?? "").trim();
+  // City, else region, else country. Reading only addressLocality left rows
+  // with an EMPTY location on boards that publish just a country — and
+  // location is what the judge's country gate reads, so a blank one silently
+  // removes a posting from consideration rather than placing it badly.
+  const addr = site?.address ?? {};
+  const city = [addr.addressLocality, addr.addressRegion, addr.addressCountry]
+    .map((v: unknown) => String(v ?? "").trim())
+    .find(Boolean) ?? "";
   return {
     source: board.name,
     externalId: url.replace(/\/$/, "").split("/").pop() || url,
@@ -160,6 +167,38 @@ export const devbg = ldBoard({
   // slug cannot be split back into a name reliably, so we take it from the
   // detail page's company link instead, resolved in the mapper's fallback.
   companyFromUrl: (url) => url.match(/\/jobads\/([a-z0-9]+)-/i)?.[1],
+});
+
+// Jaabz — a visa-sponsorship board, which is the rarest source shape for this
+// radar: the whole population sits on the axis the user filters by. robots
+// names no AI crawler, the sitemap index carries 5,393 job URLs across two
+// children refreshed daily, and detail pages carry complete JobPosting JSON-LD
+// with the employer named.
+//
+// Sized honestly, because the first live fetch corrected the assumption in its
+// own title: it is GLOBAL, not European. A five-row sample returned Germany
+// and Denmark alongside the United States, Türkiye and the UAE, so most of
+// what it carries falls outside JUDGE_TARGETS today and lands in the pool
+// awaiting that decision rather than reaching the judge. Its data is also
+// rough — company names arrive inconsistently cased ("ocient", "quik hire
+// staffing"), country strings shouted and occasionally truncated ("United
+// State"), and LD descriptions run 230-360 characters, which is a teaser
+// rather than a posting. Worth taking anyway: a visa-focused population is
+// hard to come by, and the scorer and location resolver already handle worse.
+//
+// Its sibling in the same search, jobs.trythestack.co, is deliberately NOT
+// here despite being the more welcoming site — robots explicitly Allows
+// ClaudeBot and it publishes an llms.txt courting AI agents. Its job pages are
+// client-rendered: 3KB, no JSON-LD, a generic title. An invitation with
+// nothing behind it for a non-JS reader. Worth revisiting if they ever add
+// structured data, and worth remembering as the reason a permissive robots.txt
+// is not by itself a door.
+export const jaabz = ldBoard({
+  name: "jaabz",
+  sitemap: "https://jaabz.com/sitemap.xml",
+  jobPath: /jaabz\.com\/jobs\//,
+  country: "",
+  max: Number(process.env.JAABZ_MAX) || 30,
 });
 
 export const optius = ldBoard({

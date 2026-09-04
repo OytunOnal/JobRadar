@@ -456,13 +456,19 @@ export async function runNameProbes(
       report.found++;
       await recordHit(hit, discoveredVia);
     }
+    })());
     // A probe run is minutes-to-hours of silence otherwise; the seeds' logs
     // are watched by monitors that can only relay what gets printed. A line
     // per hundred makes progress observable without making the log a firehose.
+    //
+    // Printed from the LOOP, not from inside the concurrent body. When names
+    // began running two at a time, this line moved inside with them and the
+    // modulo was evaluated at await-resume: both in-flight tasks could wake
+    // with the counter on the same multiple of a hundred and both print it.
+    // Every progress line in the first concurrent run appeared twice.
     if (report.checked % 100 === 0) {
       console.log(`  ...${report.checked} probed, ${report.found} found`);
     }
-    })());
     if (inFlight.length >= NAME_CONCURRENCY) {
       await Promise.all(inFlight.splice(0, inFlight.length));
     }

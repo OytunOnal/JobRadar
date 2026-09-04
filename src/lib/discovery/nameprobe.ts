@@ -98,6 +98,21 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // during a long run, which is gentler than any board fetch we already do.
 const PROBE_PAUSE_MS = Number(process.env.PROBE_PAUSE_MS) || 400;
 
+// HOW MANY NAMES ARE IN FLIGHT AT ONCE.
+//
+// One name fans out to nine platforms in parallel, so a single name already
+// touches nine hosts — but only ONE slot on each, and net/hostgate.ts allows
+// two. Processing names strictly one at a time therefore used about a ninth
+// of what politeness permits: measured 1.94s per name, 20,000 names, eleven
+// hours, the longest lane in the ingest by a wide margin.
+//
+// Two names at a time doubles throughput and still leaves every host at its
+// cap rather than above it — the gate, not this number, is what protects the
+// hosts. Kept deliberately small: the gate would queue a third name's
+// requests behind the first two anyway, so raising this buys latency, not
+// politeness headroom.
+const NAME_CONCURRENCY = Number(process.env.NAME_CONCURRENCY) || 2;
+
 // Greenhouse's validation probe hits the board ROOT (no job list), so the
 // live-posting requirement needs one extra call for greenhouse hits only.
 async function manatalJobCount(token: string): Promise<number> {
@@ -404,6 +419,7 @@ export async function runNameProbes(
   };
 
   const seen = new Set<string>();
+  const inFlight: Promise<void>[] = [];
   for (const raw of companyNames) {
     if (report.checked >= budget) break;
     const norm = normalizeCompanyName(raw);
@@ -430,6 +446,8 @@ export async function runNameProbes(
     if (cached) continue;
 
     report.checked++;
+    // Held so several names can be in flight at once — see NAME_CONCURRENCY.
+    inFlight.push((async () => {
     const hit = await probeCompany(raw, probeFn, htmlProbe);
     await prisma.companyProbe.create({
       data: { name: norm, displayName: raw, found: hit !== null, probeVersion: PROBE_SIGNATURE },
@@ -444,7 +462,12 @@ export async function runNameProbes(
     if (report.checked % 100 === 0) {
       console.log(`  ...${report.checked} probed, ${report.found} found`);
     }
+    })());
+    if (inFlight.length >= NAME_CONCURRENCY) {
+      await Promise.all(inFlight.splice(0, inFlight.length));
+    }
   }
+  await Promise.all(inFlight);
 
   // Leftover budget goes to stale misses: verdicts recorded under a smaller
   // platform set than today's. Fresh names always come first — a re-probe is

@@ -209,7 +209,18 @@ function readOutcome(out: ChildOutcome, label: string): { progressed: boolean; r
       // The runner only writes this when a queue could not consume itself.
       // Never pass over it quietly: it means a predicate and a write disagree.
       log(`  ${label}: KUYRUK İLERLEMEDİ (${tally}) — bir yüklem ile yazım ayrışmış olabilir`);
-      return { progressed: false, retryLater: true, deferred };
+      // retryLater ONLY when there is nothing to act on. A stall WITH
+      // deferrals is the case the desc:fill summon below was written for —
+      // every row waiting on a body — and returning retryLater:true here made
+      // that summon unreachable, because it excludes retryLater outcomes on
+      // purpose (GPU busy, model down: doing more work would not help).
+      //
+      // Measured cost of the disagreement: the judge lane sat for three and a
+      // half hours logging "0 processed, 75 deferred" every thirty minutes
+      // while the remedy stood one branch away. Two correct-looking pieces
+      // reading one word differently — the same shape as the name-probe
+      // treadmill and the duplicate host limiter.
+      return { progressed: false, retryLater: deferred === 0, deferred };
     case "failstreak":
       log(`  ${label}: üst üste hata (${tally}) — model cevap vermiyor olabilir`);
       return { progressed: false, retryLater: true, deferred };
